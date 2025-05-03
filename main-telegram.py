@@ -114,6 +114,8 @@ async def pixi_resp(bot: telegram.Bot, msg: Chat.RoleMessage, message: telegram.
         except Exception as e:
             logging.exception(f"Failed fallback response for {convo_id}")
             await bot.send_message(message.chat.id, "Internal error: could not respond.")
+    else:
+        convo.save()
     logging.info(f"Finished handling message in {convo_id}")
 
 async def pixi_resp_retry(bot: telegram.Bot, _msg: Chat.RoleMessage, message: telegram.Message):

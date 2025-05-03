@@ -12,11 +12,8 @@ from api import ChatClient
 
 # constatnt
 
-SYSTEM_PROMPT = open("preprompt3-short.md", "r", encoding="UTF-8").read()
-REALTIME_PROMPT = "Here are the real-time data that you might need to answer questions, " + \
-                "you don't have to mention them if they are not needed:\n" + \
-                "```json\n{data}\n```"
-EXAMPLES = open("examples3-short.md", "r", encoding="UTF-8").read()
+SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
+EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
 
 ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLet's begin! :) [SEND]"
 
@@ -54,13 +51,18 @@ class LLMConversation:
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
 
-    def get_system_prompt(self, allow_ignore: bool = True):
-        return SYSTEM_PROMPT.format(persona = self.persona, allow_ignore = allow_ignore) + f"\n{EXAMPLES}\n" + self.get_realtime_data()
-
     def get_realtime_data(self):
         data = {"time and date": time.strftime("%a %d %b %Y, %I:%M%p")}
         data.update(self.realtime_data)
-        return REALTIME_PROMPT.format(data = json.dumps(data, ensure_ascii=False))
+        return json.dumps(data, ensure_ascii=False)
+    
+    def get_system_prompt(self, allow_ignore: bool = True):
+        return SYSTEM_PROMPT.format(
+            persona = self.persona,
+            allow_ignore = allow_ignore,
+            examples = EXAMPLES,
+            realtime = self.get_realtime_data()
+        )
 
     def stream_ask(self, message: Chat.RoleMessage | str, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore = allow_ignore))
