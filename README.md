@@ -15,3 +15,7 @@ A highly customzable and powerful AI chatbot that blends in perfectly with the u
 - set `DEEPINFRA_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
 - install `python-telegram-bot` using `pip install "python-telegram-bot[job-queue]"`
 - run `python main-telegram.py`
+
+**using dotenv**
+
+create a `.env` file and set DEEPINFRA_API_KEY, DISCORD_BOT_TOKEN and TELEGRAM_BOT_TOKEN environment variables inside the file then run the main python files.
