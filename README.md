@@ -14,7 +14,8 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 **For Telegram**:
 
-- install `python-telegram-bot` using `pip install "python-telegram-bot[job-queue]"`
+- install `python-telegram-bot` using `pip install "python-telegram-bot"`
+- install `job-queue` module of `python-telegram-bot` using `pip install "python-telegram-bot[job-queue]"`
 - set `DEEPINFRA_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
 - run `python main-telegram.py`
 
