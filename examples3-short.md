@@ -1,5 +1,4 @@
-Here are some examples:
-**IMPORTANT**: only use each command IF the command is enabled.
+Below are some examples of how you should behave, **IMPORTANT**: only use each command IF the command is enabled.
 
 ```
 user: [Jake](1 month ago) -> write a poem
