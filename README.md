@@ -1,6 +1,6 @@
 # Pixi AI Chatbot
 
-A highly customzable and powerful AI chatbot that blends in perfectly with the users, with tool calling and image support
+A small, hackable and powerful AI chatbot implementation with tool calling and image support that blends in perfectly with the users.
 
 ## usage
 
