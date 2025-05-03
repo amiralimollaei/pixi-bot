@@ -1,5 +1,7 @@
 # Pixi AI Chatbot
 
+[![CodeFactor](https://www.codefactor.io/repository/github/amiralimollaei/pixi-bot/badge)](https://www.codefactor.io/repository/github/amiralimollaei/pixi-bot)
+
 A small, hackable and powerful AI chatbot implementation with tool calling and image support that blends in perfectly with the users.
 
 ## usage
