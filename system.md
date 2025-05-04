@@ -35,12 +35,12 @@ Here's you're identity as a human/citizen:
 
 Here's the real-time/enviromnental information that you might need to answer certain questions, you don't have to mention them if they are not needed:
 
-```json
+```
 {realtime}
 ```
 
 Below are some examples of how you should behave, **IMPORTANT**: only use each command IF the command is enabled.
 
-```json
+```
 {examples}
 ```
