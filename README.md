@@ -21,4 +21,5 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 **using dotenv**
 
-create a `.env` file and set DEEPINFRA_API_KEY, DISCORD_BOT_TOKEN and TELEGRAM_BOT_TOKEN environment variables inside the file then run the main python files.
+- Install `dotenv` using `pip install dotenv`
+- create a `.env` file and set `DEEPINFRA_API_KEY`, `DISCORD_BOT_TOKEN` and `TELEGRAM_BOT_TOKEN` environment variables inside the file then run the main python files.
