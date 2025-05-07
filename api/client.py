@@ -1,10 +1,11 @@
+import logging
 import re
 import os
 import json
 
 from openai import OpenAI
 
-from . import chatting as Chat
+from .chatting import FunctionCall, Role, RoleMessage
 
 from .utils import exists
 
@@ -19,10 +20,10 @@ THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\
 # models: google/gemini-2.5-pro, deepseek-ai/DeepSeek-R1, deepseek-ai/DeepSeek-V3, meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8, meta-llama/Meta-Llama-3.1-405B-Instruct
 
 class ChatClient:
-    def __init__(self, messages: list[Chat.RoleMessage] = None, model: str = "google/gemini-2.5-pro"):
+    def __init__(self, messages: list[RoleMessage] = None, model: str = "google/gemini-2.5-pro"):
         if messages is not None:
             assert isinstance(messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
-            assert all([isinstance(m, Chat.RoleMessage) for m in messages]), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
+            assert all([isinstance(m, RoleMessage) for m in messages]), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
 
         self.model = model
         self.messages = messages or []
@@ -53,22 +54,22 @@ class ChatClient:
         assert prompt is not None and prompt != ""
         self.system_prompt = prompt
     
-    def add_message(self, message: Chat.RoleMessage | str):
+    def add_message(self, message: RoleMessage | str):
         assert message is not None
-        if isinstance(message, Chat.RoleMessage):
+        if isinstance(message, RoleMessage):
             self.messages.append(message)
         elif isinstance(message, str):
             role = None
             match self.messages[-1].role:
-                case Chat.Role.SYSTEM:
-                    role = Chat.Role.ASSISTANT
-                case Chat.Role.ASSISTANT:
-                    role = Chat.Role.USER
-                case Chat.Role.USER:
-                    role = Chat.Role.ASSISTANT
+                case Role.SYSTEM:
+                    role = Role.ASSISTANT
+                case Role.ASSISTANT:
+                    role = Role.USER
+                case Role.USER:
+                    role = Role.ASSISTANT
                 case _:
-                    role = Chat.Role.ASSISTANT
-            self.messages.append(Chat.RoleMessage(role, message))
+                    role = Role.ASSISTANT
+            self.messages.append(RoleMessage(role, message))
         else:
             raise ValueError(f"expected message to be a RoleMessage or a string, but got {message}.")
     
@@ -92,22 +93,22 @@ class ChatClient:
         Execute tool calls and return results
         """
         
-        function_calls: list[Chat.FunctionCall] = []
+        function_calls: list[FunctionCall] = []
         for tool_call in tool_calls:
             function = tool_call.function
             function_name = function.name
             function_arguments = json.loads(function.arguments)
             index = tool_call.index
             id = tool_call.id
-            function_calls.append(Chat.FunctionCall(
+            function_calls.append(FunctionCall(
                 name=function_name,
                 arguments=function_arguments,
                 index=index,
                 id=id
             ))
         
-        results = [Chat.RoleMessage(
-            Chat.Role.ASSISTANT,
+        results = [RoleMessage(
+            Role.ASSISTANT,
             content = None,
             tool_calls = function_calls
         )]
@@ -120,8 +121,8 @@ class ChatClient:
                     result = f"Tool error: {e}"
             else:
                 result = f"Tool '{fn.name}' not found."
-            results.append(Chat.RoleMessage(
-                Chat.Role.TOOL,
+            results.append(RoleMessage(
+                Role.TOOL,
                 content = str(result),
                 tool_call_id = fn.id,
             ))
@@ -137,8 +138,8 @@ class ChatClient:
             if exists(_tool_calls := choice.delta.tool_calls):
                 # append the assistant's response
                 if response:
-                    self.messages.append(Chat.RoleMessage(
-                        Chat.Role.ASSISTANT,
+                    self.messages.append(RoleMessage(
+                        Role.ASSISTANT,
                         content=response,
                     ))
                 self.messages += self.get_tool_results(_tool_calls)
@@ -149,7 +150,10 @@ class ChatClient:
                 finish_reason = choice.finish_reason
             if content := choice.delta.content:
                 response += content
-                yield content
+                # now yields the response character by character for easier parsing
+                for char in content:
+                    yield char
+        logging.debug(f"finish reason: {finish_reason}")
         
     def request(self) -> str:
         choice = self.create_chat_completion(stream=False).choices[0]
@@ -179,18 +183,18 @@ class ChatClient:
         openai_messages = [msg.to_openai_dict() for msg in messages]
         # add system as the last message to ensure it is in the model's context
         if exists(self.system_prompt):
-            openai_messages.append(Chat.RoleMessage(Chat.Role.SYSTEM, self.system_prompt).to_openai_dict())
+            openai_messages.append(RoleMessage(Role.SYSTEM, self.system_prompt).to_openai_dict())
         return openai_messages
 
-    def stream_ask(self, message: str | Chat.RoleMessage, temporal: bool = False):
+    def stream_ask(self, message: str | RoleMessage, temporal: bool = False):
         if temporal:
             orig_messages = self.messages.copy()
         
         if isinstance(message, str):
-            message = Chat.RoleMessage(Chat.Role.USER, message)
+            message = RoleMessage(Role.USER, message)
         else:
-            assert isinstance(message, Chat.RoleMessage), "Message must be a string or a RoleMessage."
-        assert message.role == Chat.Role.USER, "Message must be from the user."
+            assert isinstance(message, RoleMessage), "Message must be a string or a RoleMessage."
+        assert message.role == Role.USER, "Message must be from the user."
         self.messages.append(message)
         
         start_think_match = re.compile(r"[\[\<]t?h?i?n?k?[\>\]]?")
@@ -216,15 +220,15 @@ class ChatClient:
         if temporal:
             self.messages = orig_messages
         
-    def ask(self, message: str | Chat.RoleMessage, temporal: bool = False):
+    def ask(self, message: str | RoleMessage, temporal: bool = False):
         if temporal:
             orig_messages = self.messages.copy()
             
         if isinstance(message, str):
-            message = Chat.RoleMessage(Chat.Role.USER, message)
+            message = RoleMessage(Role.USER, message)
         else:
-            assert isinstance(message, Chat.RoleMessage), "Message must be a string or a RoleMessage."
-        assert message.role == Chat.Role.USER, "Message must be from the user."
+            assert isinstance(message, RoleMessage), "Message must be a string or a RoleMessage."
+        assert message.role == Role.USER, "Message must be from the user."
         self.messages.append(message)
 
         response = THINK_PATTERN.sub("", self.request())
@@ -242,7 +246,7 @@ class ChatClient:
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
-            messages = [Chat.RoleMessage.from_dict(msg) for msg in data.get("messages") or []],
+            messages = [RoleMessage.from_dict(msg) for msg in data.get("messages") or []],
             system_prompt = data.get("system_prompt"),
         )
 
