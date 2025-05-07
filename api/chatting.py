@@ -138,12 +138,14 @@ class RoleMessage:
             tool_call_id = data.get("tool_call_id")
         )
 
-    def to_openai_dict(self) -> dict:
+    def to_openai_dict(self, timestamps: bool = True) -> dict:
         openai_dict = dict(role = self.role)
         match self.role:
             case Role.USER:
-                timefmt = format_time_ago(time.time()-self.time)
-                content = [f"User: {self.content} ({timefmt})"]
+                content = [f"User: {self.content}"]
+                if timestamps:
+                    timefmt = format_time_ago(time.time()-self.time)
+                    content.append(f"Time: {timefmt}")
                 if self.metadata is not None:
                     content += [
                     "Metadata:",

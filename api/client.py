@@ -2,6 +2,7 @@ import logging
 import re
 import os
 import json
+import time
 
 from openai import OpenAI
 
@@ -73,9 +74,9 @@ class ChatClient:
         else:
             raise ValueError(f"expected message to be a RoleMessage or a string, but got {message}.")
     
-    def create_chat_completion(self, stream: bool = False):
+    def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         # If tools are registered, add them to the request
-        openai_messages = self.get_openai_messages_dict()
+        openai_messages = self.get_openai_messages_dict(enable_timestamps = enable_timestamps)
         kwargs = dict(
             model = self.model,
             messages = openai_messages,
@@ -155,17 +156,20 @@ class ChatClient:
                     yield char
         logging.debug(f"finish reason: {finish_reason}")
         
-    def request(self) -> str:
-        choice = self.create_chat_completion(stream=False).choices[0]
+    def request(self, enable_timestamps: bool = True) -> str:
+        choice = self.create_chat_completion(
+            stream = False,
+            enable_timestamps = enable_timestamps
+        ).choices[0]
         if choice.message.content:
             return choice.message.content
 
         # if tools are called, reslove them and repeat the request recursively
         if tool_calls:= choice.message.tool_calls:
             self.messages += self.get_tool_results(tool_calls)
-            return self.request()
+            return self.request(enable_timestamps = enable_timestamps)
 
-    def get_openai_messages_dict(self) -> list[dict]:
+    def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
         messages = self.messages.copy()
         
         final_len = 0
@@ -180,10 +184,10 @@ class ChatClient:
             print("WARN: unable to fit all messages in one request.")
             messages = messages[-idx:]
 
-        openai_messages = [msg.to_openai_dict() for msg in messages]
+        openai_messages = [msg.to_openai_dict(timestamps = enable_timestamps) for msg in messages]
         # add system as the last message to ensure it is in the model's context
         if exists(self.system_prompt):
-            openai_messages.append(RoleMessage(Role.SYSTEM, self.system_prompt).to_openai_dict())
+            openai_messages.append(RoleMessage(Role.SYSTEM, self.system_prompt).to_openai_dict(timestamps = enable_timestamps))
         return openai_messages
 
     def stream_ask(self, message: str | RoleMessage, temporal: bool = False):
@@ -197,30 +201,27 @@ class ChatClient:
         assert message.role == Role.USER, "Message must be from the user."
         self.messages.append(message)
         
-        start_think_match = re.compile(r"[\[\<]t?h?i?n?k?[\>\]]?")
-        whitespace_match = re.compile(r"\s*")
+        start_think = "<think>"
+        end_think = "</think>"
 
         response: str = ""
         is_thinking = False
         for chunk in self.stream_request():
             response += chunk
 
-            if start_think_match.match(response):
+            if response.endswith(start_think):
                 is_thinking = True
-            else:
-                if not whitespace_match.match(response):
-                    is_thinking = False
-
-            if is_thinking and THINK_PATTERN.match(response):
+            elif response.endswith(end_think):
+                is_thinking = False
                 response = THINK_PATTERN.sub("", response)
-            
-            if not is_thinking:
+
+            if not is_thinking and response.strip() != "":
                 yield chunk
 
         if temporal:
             self.messages = orig_messages
         
-    def ask(self, message: str | RoleMessage, temporal: bool = False):
+    def ask(self, message: str | RoleMessage, temporal: bool = False, enable_timestamps: bool = True):
         if temporal:
             orig_messages = self.messages.copy()
             
@@ -231,7 +232,7 @@ class ChatClient:
         assert message.role == Role.USER, "Message must be from the user."
         self.messages.append(message)
 
-        response = THINK_PATTERN.sub("", self.request())
+        response = THINK_PATTERN.sub("", self.request(enable_timestamps = enable_timestamps))
         
         if temporal:
             self.messages = orig_messages
