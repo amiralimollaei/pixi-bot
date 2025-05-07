@@ -3,8 +3,6 @@ import json
 import math
 import logging
 
-from dotenv import load_dotenv
-
 import telegram
 from telegram.constants import ChatType, ParseMode, ChatAction
 from telegram import Update
@@ -273,8 +271,13 @@ async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE
 if __name__ == '__main__':
     import os
 
-    print("loading...")
-    load_dotenv()
+    logging.info("loading...")
+    # load environment variables
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        logging.warning("dotenv not found, install using `pip install dotenv`")
 
     application = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
 

@@ -2,9 +2,6 @@ import json
 import math
 import logging
 import asyncio
-import os
-
-from dotenv import load_dotenv
 
 import discord
 from discord import app_commands
@@ -295,6 +292,14 @@ async def notes_command(interaction: discord.Interaction):
     await interaction.response.send_message(notes_message)
 
 if __name__ == '__main__':
-    print("starting...")
-    load_dotenv()  # take environment variables
+    import os
+    
+    logging.info("loading...")
+    # load environment variables
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        logging.warning("dotenv not found, install using `pip install dotenv`")
+    
     CLIENT.run(os.environ["DISCORD_BOT_TOKEN"])
