@@ -1,5 +1,6 @@
 from base64 import b64encode
 import io
+import logging
 import os
 import hashlib
 from typing import Optional
@@ -22,6 +23,15 @@ def exists(value, allow_empty_string = False):
         return len(value) != 0
 
     return True
+
+def load_dotenv():
+    # load environment variables
+    try:
+        import dotenv
+    except ImportError:
+        logging.warning("dotenv not found, install using `pip install dotenv`")
+    else:
+        dotenv.load_dotenv()
 
 # https://stackoverflow.com/a/76636817
 def format_time_ago(delta: float) -> str:

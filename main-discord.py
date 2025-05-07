@@ -9,7 +9,7 @@ from discord import app_commands
 from api.conversation import ConversationStorage, LLMConversation
 import api.chatting as Chat
 
-from api.utils import ImageCache
+from api.utils import ImageCache, load_dotenv
 
 logging.basicConfig(
     format='[%(asctime)s] [%(levelname)s / %(name)s] %(message)s',
@@ -295,11 +295,6 @@ if __name__ == '__main__':
     import os
     
     logging.info("loading...")
-    # load environment variables
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        logging.warning("dotenv not found, install using `pip install dotenv`")
+    load_dotenv()
     
     CLIENT.run(os.environ["DISCORD_BOT_TOKEN"])

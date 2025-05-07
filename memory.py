@@ -3,7 +3,7 @@ import time
 import hashlib
 
 from api.client import ChatClient
-from api.utils import exists
+from api.utils import exists, load_dotenv
 
 class MemoryItem:
     def __init__(self, content: str, timestamp: float = None):
@@ -30,7 +30,7 @@ class MemoryItem:
         return hashlib.sha256(f"{self.content}|{self.time}".encode("utf-8")).hexdigest()
 
 class MemoryAgent:
-    def __init__(self, model: str = "Qwen/Qwen3-14B", memories: list[MemoryItem] = None):
+    def __init__(self, model: str = "google/gemma-3-27b-it", memories: list[MemoryItem] = None):
         self.memories: list[MemoryItem] = memories or []
         self.model = model
         self.client = ChatClient(model=model)
@@ -80,18 +80,12 @@ class MemoryAgent:
             "Memories:",
             "\n".join([f"- {m.content}" for m in self.memories]),
         ])
-        response = self.client.ask(prompt, temporal=True)
+        response = self.client.ask(prompt, temporal=True, enable_timestamps=False)
         return response.strip()
 
 if __name__ == "__main__":
-    logging.info("loading...")
-    # load environment variables
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        logging.warning("dotenv not found, install using `pip install dotenv`")
-    
+    load_dotenv()
+
     # Example usage
     memory = MemoryAgent()
     memory.add_memory("Happy ghast is added to minecraft in 2025.")
