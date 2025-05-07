@@ -4,6 +4,11 @@
 
 A small, hackable and powerful AI chatbot implementation with tool calling and image support that blends in perfectly with the users.
 
+## Requirements
+
+- Python >= 3.10
+- Pillow (`pip install pillow`)
+
 ## Usage
 
 **For Discord**:

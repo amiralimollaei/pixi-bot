@@ -5,10 +5,10 @@ import json
 import time
 import hashlib
 
-from api.utils import exists
+from .utils import exists
 
-import api.chatting as Chat
-from api import ChatClient
+from .chatting import AssistantPersona, Role, RoleMessage
+from .client import ChatClient
 
 # constatnt
 
@@ -25,9 +25,9 @@ SAVE_PATH = "./convo-v2/userdata"
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
 class LLMConversation:
-    def __init__(self, uuid: int | str, persona: Chat.AssistantPersona, hash_prefix: str, messages: list[Chat.RoleMessage] = None):
+    def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[RoleMessage] = None):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
-        assert exists(persona) and isinstance(persona, Chat.AssistantPersona), f"Invalid persona \"{persona}\"."
+        assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
 
         self.uuid = uuid
@@ -39,9 +39,9 @@ class LLMConversation:
         
         self.client = ChatClient(messages)
         if messages is not None:
-            self.client.add_message(Chat.RoleMessage(Chat.Role.ASSISTANT, ASSISTANT_PRE))
+            self.client.add_message(RoleMessage(Role.ASSISTANT, ASSISTANT_PRE))
     
-    def set_messages(self, messages: list[Chat.RoleMessage]):
+    def set_messages(self, messages: list[RoleMessage]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
         self.client.messages = messages
     
@@ -64,25 +64,25 @@ class LLMConversation:
             realtime = self.get_realtime_data()
         )
 
-    def stream_ask(self, message: Chat.RoleMessage | str, allow_ignore: bool = True):
+    def stream_ask(self, message: RoleMessage | str, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore = allow_ignore))
 
         response: str = ""
         for chunk in self.client.stream_ask(message):
             response += chunk
 
-            clean_responce = response.replace("\\[", "[").replace("\\]", "]").strip()
+            response = response.replace("\\[", "[").replace("\\]", "]")
 
-            if "[SEND]" in clean_responce:
-                splits = clean_responce.split("[SEND]")
-                response = splits[1] if len(splits) > 1 else ""
-                yield self.proccess_response(splits[0])
+            if response.strip().endswith("[SEND]"):
+                yield self.proccess_response(response[:-6])
+                response = ""
             
-            if response.endswith("[NONE]"):
+            if response.strip().endswith("[NONE]"):
                 if not allow_ignore:
-                    response = response.replace("[NONE]", "")
-                else:
                     response = ""
+                else:
+                    response = response[:-6]
+
         if response != "":
             yield self.proccess_response(response)
 
@@ -127,9 +127,9 @@ class LLMConversation:
         if os.path.exists(fname):
             try:
                 data = json.load(open(fname, "r", encoding="utf-8"))
-                self.persona = Chat.AssistantPersona.from_dict(data.get("persona"))
+                self.persona = AssistantPersona.from_dict(data.get("persona"))
                 self.hash_prefix = data.get("prefix")
-                self.client.messages = [Chat.RoleMessage.from_dict(d) for d in data.get("messages") or []]
+                self.client.messages = [RoleMessage.from_dict(d) for d in data.get("messages") or []]
             except json.decoder.JSONDecodeError:
                 logging.warning(f"Unable to load the save file: {fname}, using defaults.")
         else:
@@ -139,34 +139,25 @@ class LLMConversation:
     def from_dict(cls, data: dict) -> 'LLMConversation':
         return cls(
             uuid = data.get("uuid"),
-            persona = Chat.AssistantPersona.from_dict(data.get("persona")),
+            persona = AssistantPersona.from_dict(data.get("persona")),
             hash_prefix = data.get("prefix"),
-            messages = [Chat.RoleMessage.from_dict(d) for d in data.get("messages") or []]
+            messages = [RoleMessage.from_dict(d) for d in data.get("messages") or []]
         )
 
-    def live_chat(self, message: str | Chat.RoleMessage, with_memory: bool = True, allow_ignore: bool = True):
+    def live_chat(self, message: str | RoleMessage, with_memory: bool = True, allow_ignore: bool = True):
         stream = self.stream_ask(message, allow_ignore = allow_ignore)
         if with_memory:
             responses = []
             for resp in stream:
                 responses.append(resp)
                 yield resp
-            self.client.add_message(Chat.RoleMessage(
-                Chat.Role.ASSISTANT,
+            self.client.add_message(RoleMessage(
+                Role.ASSISTANT,
                 "\n".join([r + " [SEND]" for r in responses])
             ))
         else:
             for resp in stream:
                 yield resp
-
-if __name__ == "__main__":
-    persona = Chat.AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    chat = LLMConversation(0, persona, "test")
-    while True:
-        query = input("You: ")
-        for resp in chat.live_chat(query):
-            print("LLM: " + resp)
-
 
 class ConversationStorage:
     def __init__(self, **kwargs):
@@ -198,3 +189,12 @@ class ConversationStorage:
                 conversation.save()
             except Exception as e:
                 logging.warning(f"Failed to save conversation {identifier}: {e}")
+
+
+if __name__ == "__main__":
+    persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
+    conversation = LLMConversation(0, persona, "test")
+    while True:
+        query = input("You: ")
+        for resp in conversation.live_chat(query):
+            print("LLM: " + resp)
