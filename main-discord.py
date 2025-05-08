@@ -2,6 +2,7 @@ import json
 import math
 import logging
 import asyncio
+import time
 
 import discord
 from discord import app_commands
@@ -77,7 +78,7 @@ async def get_unique_chat_identifier(message: discord.Message | discord.Integrat
     # If the message is in a DM or group chat, use the channel ID
     return f"channel#{channel.id}"
 
-async def get_convo_from_message(message: discord.Message) -> LLMConversation:
+async def fetch_conversation(message: discord.Message) -> LLMConversation:
     return STORAGE.get(await get_unique_chat_identifier(message))
 
 async def pixi_resp_retry(role_message: Chat.RoleMessage, message: discord.Message):
@@ -128,7 +129,7 @@ async def send_reply(message: discord.Message, text: str, delay: int = None) -> 
             return True
     return False
         
-def get_real_time_data(message: discord.Message):
+def fetch_realtime_data(message: discord.Message):
     rt_data = {"Platform": "Discord"}
     match message.channel.type:
         case discord.ChannelType.private:
@@ -143,7 +144,54 @@ def get_real_time_data(message: discord.Message):
             rt_data.update({"channel": {"Channel": {"name": channle_name}}})
 
     if message.guild is not None:
-        rt_data.update({"guild": message.guild.name})
+        rt_data.update({
+            "guild": {
+                "name": message.guild.name,
+                "members_count": message.guild.member_count,
+                "categories": [
+                    {
+                        "name": cat.name,
+                        "is_nsfw": cat.nsfw,
+                        "stage_channels": [
+                            {
+                                "name": c.name,
+                                "is_nsfw": c.nsfw,
+                                "user_limit": c.user_limit,
+                                "connected_listeners": {
+                                    "count": len(c.listeners),
+                                    "members": [m.display_name for m in c.listeners]
+                                },
+                                "channel_url": c.jump_url
+                            } for c in cat.stage_channels
+                        ],
+                        "voice_channels": [
+                            {
+                                "name": c.name,
+                                "is_nsfw": c.nsfw,
+                                "user_limit": c.user_limit,
+                                "connected_members": {
+                                    "count": len(c.members),
+                                    "members": [m.display_name for m in c.members]
+                                },
+                                "channel_url": c.jump_url
+                            } for c in cat.voice_channels
+                        ],
+                        "text_channels": [
+                            {
+                                "name": c.name,
+                                "is_nsfw": c.nsfw,
+                                "channel_url": c.jump_url
+                            } for c in cat.text_channels
+                        ],
+                    } for cat in message.guild.categories
+                ]
+            }
+        })
+        rt_data.update({
+            "members": [
+                
+            ]
+        })
     if message.thread is not None:
         rt_data.update({"thread": message.thread.name})
     
@@ -152,34 +200,39 @@ def get_real_time_data(message: discord.Message):
 # actually respond the message
 # this function is called by the retry function
 
-async def pixi_resp(role_message: Chat.RoleMessage, message: discord.Message):
-    convo = await get_convo_from_message(message)
-    messages_checkpoint = convo.get_messages().copy()
+async def pixi_resp(role_message: Chat.RoleMessage, message: discord.Message, allow_ignore: bool = False):
+    message_recieved_time = time.time()
+    conversation = await fetch_conversation(message)
+    messages_checkpoint = conversation.get_messages().copy()
     async with message.channel.typing():
-        convo.update_realtime(get_real_time_data(message))
+        conversation.update_realtime(fetch_realtime_data(message))
+        
         responded = False
         try:
-            for resp in convo.live_chat(role_message, allow_ignore = False):
+            for resp in conversation.live_chat(role_message, allow_ignore = allow_ignore):
                 # the model may return "NO_RESPONSE" if it doesn't want to respond
-                if resp.strip() != "" or resp == "NO_RESPONSE":
-                    delay = (0.5 + (1.8 ** math.log2(1+len(resp))) / 20)
+                if resp.strip() != "" and resp != "NO_RESPONSE":
+                    response_time = time.time() - message_recieved_time
+                    delay = max(0, (0.5 + (1.8 ** math.log2(1+len(resp))) / 20) - response_time)
                     await send_reply(message, resp, delay)
+                    responded = True
         except discord.Forbidden:
-            logging.exception(f"Cannot send message in {message.channel.name} ({message.channel.id})")
-        except discord.NotFound:
-            logging.exception(f"Message not found: {message.id}")
-        except Exception as e:
-            logging.exception("Unknown error")
-        else:
-            responded = True
+            logging.exception(f"Cannot send message in channel {message.channel.id}")
+        except Exception:
+            logging.exception(f"Unknown error while responding to a message in channel {message.channel.id}")
+            await send_reply(message, Messages.SOMETHING_WENT_WRONG)
+
 
         if responded:
-            convo.save()
+            conversation.save()
             logging.info("responded to a message!")
         else:
-            logging.warning("there was no response to the message.")
-            convo.set_messages(messages_checkpoint)
-            await send_reply(message, Messages.SOMETHING_WENT_WRONG)
+            conversation.set_messages(messages_checkpoint)
+            if not allow_ignore:
+                raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
+            else:
+                logging.warning("there was no response to the message while ignoring a message is allowed.")
+                
 
 # events
 
@@ -287,7 +340,7 @@ async def notes_command(interaction: discord.Interaction):
         await interaction.response.send_message("You must be a guild admin or use this in DMs.", ephemeral=True)
         return
     identifier = await get_unique_chat_identifier(interaction)
-    is_notes_visible = (await get_convo_from_message(identifier)).toggle_notes()
+    is_notes_visible = (await fetch_conversation(identifier)).toggle_notes()
     notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
     await interaction.response.send_message(notes_message)
 
