@@ -98,7 +98,7 @@ class ReflectionAPI:
                     "roles": [
                         {
                             "name": r.name,
-                            "color": r.color,
+                            "color": '#{:06X}'.format(r.color.value),
                             "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
                         } for r in m.roles
                     ],
