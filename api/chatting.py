@@ -1,5 +1,6 @@
 import json
 import time
+from enum import StrEnum
 
 from .utils import ImageCache, exists, format_time_ago
 
@@ -42,7 +43,7 @@ class FunctionCall:
             id = data.get("id")
         )
 
-class Role:
+class Role(StrEnum):
     SYSTEM: str = "system"
     ASSISTANT: str = "assistant"
     USER: str = "user"
@@ -51,7 +52,7 @@ class Role:
 class RoleMessage:
     def __init__(
         self,
-        role: str,
+        role: Role,
         content: str,
         metadata: dict = None, 
         message_time: float = -1, 
@@ -59,7 +60,7 @@ class RoleMessage:
         tool_calls: list[FunctionCall] = None,
         tool_call_id: str = None
     ):
-        assert role is not None, f"expected `role` to be or type str and not be None, but got `{role}`"
+        assert role is not None, f"expected `role` to be of type `Role` and not be None, but got `{role}`"
         if images is not None:
             assert isinstance(images, (ImageCache, list)), f"Images must be of type ImageCache or list[ImageCache], but got {images}."
             if isinstance(images, ImageCache):
@@ -204,9 +205,9 @@ class AssistantPersona:
             nationality = self.nationality,
         )
     
-    @staticmethod
-    def from_dict(data: dict) -> 'RoleMessage':
-        return AssistantPersona(
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AssistantPersona':
+        return cls(
             name = data.get("name"),
             age = data.get("age"),
             occupation = data.get("occupation"),
@@ -214,7 +215,13 @@ class AssistantPersona:
             appearance = data.get("appearance"),
             nationality = data.get("nationality"),
         )
-    
+
+    @classmethod
+    def from_json(cls, file: str) -> 'AssistantPersona':
+        with open(file, "rb") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
+
     def __str__(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
