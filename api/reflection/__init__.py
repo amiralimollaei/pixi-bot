@@ -41,9 +41,6 @@ class ReflectionAPI:
     async def send_reply(self, message, text: str, delay: int = None) -> bool:
         return await self._ref.send_reply(message, text, delay)
     
-    async def trace_message(self, message):
-        return await self._ref.trace_message(message)
-    
     def get_sender_id(self, message) -> int:
         return self._ref.get_sender_id(message)
     

@@ -1,20 +1,11 @@
 import logging
 import asyncio
 
-from enums import Platform
-
 import discord
 
+from enums import Platform
 from ..utils import ImageCache
 
-# helper functions:
-
-def strip_message(message: str):
-    remove_starts = ["!pixi", "!pix", "!p", "@pixiaibot", "@pixiai", "@pixi", "@pixibot"]
-    for rs in remove_starts:
-        if message.lower().startswith(rs):
-            message = message[len(rs):]
-    return message
 
 class ReflectionAPI:
     def __init__(self):
@@ -145,24 +136,6 @@ class ReflectionAPI:
             else:
                 return
         raise RuntimeError(f"There was an unexpected error while send a message in channel {message.channel.id}")
-    
-    async def trace_message(self, message: discord.Message) -> tuple[str, discord.Message]:
-        msg_text = strip_message(message.content)
-
-        bot_user = message._state.user
-        # Remove bot mention if present
-        if bot_user:
-            mention_str = bot_user.mention
-            if mention_str in msg_text:
-                msg_text = msg_text.replace(mention_str, "").strip()
-        # If message is empty and is a reply, trace the reply
-        reply_message = None
-        if msg_text == "" and message.reference is not None and message.reference.message_id is not None:
-            reply_message = await message.channel.fetch_message(message.reference.message_id)
-            return await self.trace_message(reply_message)
-        if reply_message is not None and reply_message.author.id == bot_user.id:
-            reply_message = message
-        return msg_text, message
     
     
     def get_sender_id(self, message: discord.Message):

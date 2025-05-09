@@ -1,19 +1,11 @@
 import logging
 import asyncio
-from ..utils import ImageCache
-from enums import Platform
 
 import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
 
-# helper functions:
-
-def strip_message(message: str):
-    remove_starts = ["!pixi", "!pix", "!p", "@pixiaibot", "@pixiai", "@pixi", "@pixibot"]
-    for rs in remove_starts:
-        if message.lower().startswith(rs):
-            message = message[len(rs):]
-    return message
+from enums import Platform
+from ..utils import ImageCache
 
 class ReflectionAPI:
     def __init__(self):
@@ -70,17 +62,6 @@ class ReflectionAPI:
                 return
         raise RuntimeError(f"There was an unexpected error while send a message in chat {chat_id}")
     
-    async def trace_message(self, message: telegram.Message) -> tuple[str, telegram.Message]:
-        replmessage = message.reply_to_message
-        msg_text = message.text_markdown_v2
-
-        # if message is empty and there's a reply message, trace the reply message
-        msg_text = strip_message(msg_text)
-        if msg_text == "" and replmessage:
-            msg_text, message = self.trace_message(replmessage)
-    
-        return msg_text, message
-    
     def get_sender_id(self, message: telegram.Message):
         return message.from_user.id
     
@@ -90,7 +71,6 @@ class ReflectionAPI:
     
     def is_message_from_the_bot(self, message: telegram.Message) -> bool:
         return message.get_bot().id == message.from_user.id
-
     
     async def fetch_attachment_images(self, message: telegram.Message) -> list[ImageCache]:
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
