@@ -40,19 +40,19 @@ class PixiClient:
         self.persona = Chat.AssistantPersona.from_json(persona_file)
         self.storage = ConversationStorage(persona = self.persona, hash_prefix = platform)
         self.reflection_api = ReflectionAPI(platform = platform)
-        
+
         match platform:
             case Platform.DISCORD:
                 self.init_discord()
             case Platform.TELEGRAM:
                 self.init_telegram()
-    
+
     def init_discord(self):
         import discord
         from discord import app_commands
-        
+
         self.token = os.environ["DISCORD_BOT_TOKEN"]
-        
+
         class DiscordClient(discord.Client):
             def __init__(self, *args, **kwargs):
                 intents = discord.Intents.default()
@@ -63,14 +63,14 @@ class PixiClient:
 
             async def setup_hook(self):
                 await self.tree.sync()
-        
+
         client = DiscordClient()
         self.client = client
-        
+
         @client.event
         async def on_message(*args, **kwargs):
             return await self.on_message(*args, **kwargs)
-        
+
         # Slash command: /reset
         @client.tree.command(name="reset", description="Reset the conversation with Pixi.")
         async def reset_command(interaction: discord.Interaction):
@@ -92,7 +92,7 @@ class PixiClient:
             is_notes_visible = self.get_conversation(identifier).toggle_notes()
             notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
             await interaction.response.send_message(notes_message)
-                            
+
     def init_telegram(self):
         import telegram
         from telegram.constants import ChatAction
@@ -103,7 +103,7 @@ class PixiClient:
         async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             return await self.on_message(message)
-        
+
         async def reset(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             convo_id = self.reflection_api.get_identifier_from_message(message)
@@ -129,7 +129,7 @@ class PixiClient:
             except Exception as e:
                 logging.exception(f"Failed to toggle notes")
                 await self.reflection_api.send_reply(message, "Failed to toggle notes.")       
-                
+
         application = Application.builder().token(self.token).build()
         self.application = application
 
@@ -138,16 +138,16 @@ class PixiClient:
         application.add_handler(CommandHandler('notes', notes))
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
-    
+
     def get_conversation(self, identifier: str) -> LLMConversation:
         return self.storage.get(identifier)
-    
+
     async def pixi_resp(self, role_message: Chat.RoleMessage, message, allow_ignore: bool = True):
         start_typing_time = time.time()
         conversation = self.get_conversation(self.reflection_api.get_identifier_from_message(message))
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
         messages_checkpoint = conversation.get_messages().copy()
-        
+
         responded = False
         try:
             await self.reflection_api.send_status_typing(message)
@@ -175,7 +175,7 @@ class PixiClient:
                 raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
-    
+
     async def pixi_resp_retry(self, role_message: Chat.RoleMessage, message, num_retry: int = 3):
         # catch the error 3 times and retry, if the error continues
         # retry once more without catching the error to see the error
@@ -216,13 +216,10 @@ class PixiClient:
         if reply_message is not None:
             reply_message_text = self.reflection_api.get_message_text(reply_message)
             reply_message_text = remove_prefixes(reply_message_text)
-            metadata.update({"reply to message": {}})
-            
-            reply_optimization = -1
-            
-            convo_messages = convo.get_messages()
-            
+            metadata.update({"in_reply_to": {}})
             # if the reply is to the last message that is sent by the bot, we don't need to do anything.
+            reply_optimization = -1
+            convo_messages = convo.get_messages()
             matching_messages = [msg.content for msg in convo_messages if reply_message_text in msg.content]
             if matching_messages:
                 if convo_messages[-1].content in matching_messages:
@@ -231,44 +228,44 @@ class PixiClient:
                     reply_optimization = 1
             if reply_optimization == 2:
                 # completely ignore reply context
-                pass
+                logging.debug(f"completely ignore reply context for {convo_id=}")
             elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
-                    metadata["reply to message"].update({
+                    metadata["in_reply_to"].update({
                         "from": "[YOU]",
-                        "partial content": reply_message_text[:64]
+                        "partial_content": reply_message_text[:64]
                     })
                 else:
-                    metadata["reply to message"].update({
+                    metadata["in_reply_to"].update({
                         "from": "[YOU]",
-                        "content": reply_message_text
+                        "message": reply_message_text
                     })
             else:
                 if reply_optimization == 1:
-                    metadata["reply to message"].update({
+                    metadata["in_reply_to"].update({
                         "from": reply_message.author.display_name,
-                        "partial content": reply_message_text[:64]
+                        "partial_message": reply_message_text[:64]
                     })
                 else:
-                    metadata["reply to message"].update({
+                    metadata["in_reply_to"].update({
                         "from": reply_message.author.display_name,
-                        "content": reply_message_text
+                        "message": reply_message_text
                     })
         # convert everything into `RoleMessage``
         role_message = Chat.RoleMessage(role=Chat.Role.USER, content=message_text, metadata=metadata, images=attached_images)
         await self.pixi_resp_retry(role_message, message)
-    
+
     def run(self):
         match self.platform:
             case Platform.DISCORD:
                 self.client.run(self.token, log_handler=None)
             case Platform.TELEGRAM:
                 self.application.run_polling()
-            
+
 
 if __name__ == '__main__':
     import argparse
-    
+
     # load environment variables
     load_dotenv()
 
