@@ -1,4 +1,5 @@
-import logging
+import json
+import os
 import time
 import hashlib
 
@@ -59,6 +60,21 @@ class MemoryAgent:
         memories = [MemoryItem.from_dict(m) for m in data.get("memories", [])]
         return cls(memories = memories)
     
+    def save_as(self, file: str):
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, ensure_ascii=False) 
+    
+    @classmethod
+    def from_file(cls, file: str) -> 'MemoryAgent':
+        if os.path.isfile(file):
+            with open(file, "rb") as f:
+                data = json.load(f)
+            return cls.from_dict(data)
+        else:
+            inst = cls()
+            inst.save_as(file)
+            return inst
+
     def add_memory(self, memory: str):
         print(f"Adding memory: {memory}")
         self.memories.append(MemoryItem(memory))

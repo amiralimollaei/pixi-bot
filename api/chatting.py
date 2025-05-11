@@ -80,14 +80,14 @@ class RoleMessage:
                 assert not exists(images), f"Images can only be attached to user messages, but got {images} for role SYSTEM"
                 
             case Role.ASSISTANT:
-                assert exists(content, True) and isinstance(content, str), f"expected ASSISTANT to have a `content` of type `str` but got `{content}`"
+                assert content is None or isinstance(content, str), f"expected ASSISTANT to have a `content` of type `str` but got `{content}`"
                 assert not exists(metadata), f"expected ASSISTANT to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
                 assert not exists(tool_call_id), f"expected ASSISTANT to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
                 assert not exists(images), f"Images can only be attached to user messages, but got {images} for role ASSISTANT"
 
                 if exists(tool_calls):
                     assert not exists(content, True), f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{content}`"
-                    assert isinstance(list), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but got `{tool_calls}`"
+                    assert isinstance(tool_calls, list), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but got `{tool_calls}`"
                     assert all([isinstance(tc, FunctionCall) for tc in tool_calls]), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{tool_calls}`"
 
             case Role.USER:

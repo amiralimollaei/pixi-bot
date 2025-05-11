@@ -36,11 +36,20 @@ class ReflectionAPI:
     async def send_status_typing(self, message: telegram.Message):
         await message.chat.send_chat_action(ChatAction.TYPING)
     
-    async def send_reply(self, message: telegram.Message, text: str, delay: int = None):
+    def can_read_history(self, channel) -> bool:
+        return True
+    
+    async def send_response(self, origin: telegram.Message, text: str, ephemeral: bool = False, *args, **kwargs):
+        try:
+            await origin.reply_markdown_v2(text, *args, **kwargs)
+        except telegram.error.BadRequest:
+            await origin.reply_text(text, *args, **kwargs)
+    
+    async def send_reply(self, message: telegram.Message, text: str, delay: int = None, ephemeral: bool = False):
         chat_id = message.chat_id
 
         # delay adds realism
-        sleep_time = delay
+        sleep_time = delay or 0.0
         while sleep_time > 0:
             await message.chat.send_chat_action(ChatAction.TYPING)
             await asyncio.sleep(min(2, sleep_time))
@@ -49,18 +58,15 @@ class ReflectionAPI:
         num_retries = 5
         for i in range(num_retries):
             try:
-                try:
-                    await message.reply_markdown_v2(text)
-                except telegram.error.BadRequest:
-                    await message.reply_text(text)
+                await self.send_response(message, text)
+                break
             except telegram.error.TimedOut as e:
-                logging.warning(f"HTTPException while sending message: {e}, retrying ({i}/{num_retries})")
+                logging.warning(f"Timed out while sending message: {e}, retrying ({i}/{num_retries})")
             except telegram.error.Forbidden:
-                logging.exception(f"Cannot send message in chat {chat_id}")
+                logging.exception(f"Forbidden")
                 raise RuntimeError(f"Cannot send message in chat {chat_id}")
-            else:
-                return
-        raise RuntimeError(f"There was an unexpected error while send a message in chat {chat_id}")
+        else:
+            raise RuntimeError(f"There was an unexpected error while send a message in chat {chat_id}")
     
     def get_sender_id(self, message: telegram.Message):
         return message.from_user.id
@@ -68,6 +74,14 @@ class ReflectionAPI:
     def get_sender_name(self, message: telegram.Message):
         return message.from_user.full_name
 
+    def get_sender_information(self, message: telegram.Message):
+        user = message.from_user
+        return dict(
+            id = user.id,
+            username = user.username,
+            full_name = user.full_name,
+            mention_string = "@" + user.username,
+        )
     
     def is_message_from_the_bot(self, message: telegram.Message) -> bool:
         return message.get_bot().id == message.from_user.id

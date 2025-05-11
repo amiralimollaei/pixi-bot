@@ -4,6 +4,7 @@ import os
 import json
 import time
 import hashlib
+from typing import Callable
 
 from .utils import exists
 
@@ -24,7 +25,7 @@ SAVE_PATH = "./convo-v2/userdata"
 
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
-class LLMConversation:
+class ChatbotInstance:
     def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[RoleMessage] = None):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
@@ -40,6 +41,22 @@ class LLMConversation:
         self.client = ChatClient(messages)
         if messages is not None:
             self.client.add_message(RoleMessage(Role.ASSISTANT, ASSISTANT_PRE))
+    
+    def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
+        """
+        Register a tool (function) for tool calling.
+        name: tool name (string)
+        func: callable
+        parameters: OpenAI tool/function parameters schema (dict)
+        description: description of the tool (string)
+        """
+        
+        self.client.register_tool(
+            name = name,
+            func = func,
+            parameters = parameters,
+            description = description
+        )
     
     def set_messages(self, messages: list[RoleMessage]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
@@ -64,11 +81,11 @@ class LLMConversation:
             realtime = self.get_realtime_data()
         )
 
-    def stream_ask(self, message: RoleMessage | str, allow_ignore: bool = True):
+    def stream_ask(self, message: RoleMessage | str, allow_ignore: bool = True, temporal: bool = False):
         self.client.set_system(self.get_system_prompt(allow_ignore = allow_ignore))
 
         response: str = ""
-        for chunk in self.client.stream_ask(message):
+        for chunk in self.client.stream_ask(message, temporal = temporal):
             response += chunk
 
             response = response.replace("\\[", "[").replace("\\]", "]")
@@ -136,7 +153,7 @@ class LLMConversation:
             logging.warning("Unable to find the save file, using defaults.")
         
     @classmethod
-    def from_dict(cls, data: dict) -> 'LLMConversation':
+    def from_dict(cls, data: dict) -> 'ChatbotInstance':
         return cls(
             uuid = data.get("uuid"),
             persona = AssistantPersona.from_dict(data.get("persona")),
@@ -145,41 +162,49 @@ class LLMConversation:
         )
 
     def live_chat(self, message: str | RoleMessage, with_memory: bool = True, allow_ignore: bool = True):
-        stream = self.stream_ask(message, allow_ignore = allow_ignore)
-        if with_memory:
-            responses = []
-            for resp in stream:
-                responses.append(resp)
-                yield resp
-            self.client.add_message(RoleMessage(
-                Role.ASSISTANT,
-                "\n".join([r + " [SEND]" for r in responses])
-            ))
-        else:
-            for resp in stream:
-                yield resp
+        yield from self.stream_ask(message, allow_ignore = allow_ignore, temporal = not with_memory)
 
-class ConversationStorage:
+class CachedChatbotFactory:
     def __init__(self, **kwargs):
-        self.conversations: dict[str, LLMConversation] = {}
+        self.conversations: dict[str, ChatbotInstance] = {}
         self.kwargs = kwargs
+        self.tools = []
+    
+    def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
+        """
+        Register a tool (function) for tool calling.
+        name: tool name (string)
+        func: callable
+        parameters: OpenAI tool/function parameters schema (dict)
+        description: description of the tool (string)
+        """
+        
+        self.tools.append(dict(
+            name = name,
+            func = func,
+            parameters = parameters,
+            description = description
+        ))
 
-    def get(self, identifier: str) -> LLMConversation:
-        convo = self.conversations.get(identifier, LLMConversation(identifier, **self.kwargs))
+    def get(self, identifier: str) -> ChatbotInstance:
+        convo = self.conversations.get(identifier, ChatbotInstance(identifier, **self.kwargs))
         if identifier not in self.conversations:
             convo.load()
             self.update(identifier, convo)
             logging.info(f"initiated a conversation with {identifier}.")
+
+        for tool_kwargs in self.tools:
+            convo.register_tool(**tool_kwargs)
         return convo
 
-    def update(self, identifier: str, conversation: LLMConversation):
+    def update(self, identifier: str, conversation: ChatbotInstance):
         self.conversations.update({identifier: conversation})
 
     def remove(self, identifier: str):
         if identifier in self.conversations.keys():
             del self.conversations[identifier]
 
-        fname = LLMConversation(identifier, **self.kwargs).get_file()
+        fname = ChatbotInstance(identifier, **self.kwargs).get_file()
         if os.path.exists(fname):
             os.remove(fname)
 
@@ -193,7 +218,7 @@ class ConversationStorage:
 
 if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    conversation = LLMConversation(0, persona, "test")
+    conversation = ChatbotInstance(0, persona, "test")
     while True:
         query = input("You: ")
         for resp in conversation.live_chat(query):

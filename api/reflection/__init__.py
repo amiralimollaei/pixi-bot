@@ -38,14 +38,23 @@ class ReflectionAPI:
     async def send_status_typing(self, message):
         return await self._ref.send_status_typing(message)
     
-    async def send_reply(self, message, text: str, delay: int = None) -> bool:
-        return await self._ref.send_reply(message, text, delay)
+    def can_read_history(self, channel) -> bool:
+        return self._ref.can_read_history(channel)
+    
+    async def send_response(self, origin, text: str, ephemeral: bool = False, *args, **kwargs):
+        return await self._ref.send_response(origin, text, ephemeral, *args, **kwargs)
+    
+    async def send_reply(self, message, text: str, delay: int = None, ephemeral: bool = False) -> bool:
+        return await self._ref.send_reply(message, text, delay, ephemeral)
     
     def get_sender_id(self, message) -> int:
         return self._ref.get_sender_id(message)
     
     def get_sender_name(self, message) -> str:
         return self._ref.get_sender_name(message)
+    
+    def get_sender_information(self, message) -> str:
+        return self._ref.get_sender_information(message)
         
     def is_message_from_the_bot(self, message) -> bool:
         return self._ref.is_message_from_the_bot(message)
@@ -69,7 +78,7 @@ class ReflectionAPI:
         return self._ref.is_inside_dm(message)
     
     async def is_dm_or_admin(self, interaction) -> bool:
-        return self._ref.is_dm_or_admin(interaction)
+        return await self._ref.is_dm_or_admin(interaction)
 
 if __name__ == "__main__":
     ReflectionAPI(Platform.DISCORD)

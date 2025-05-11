@@ -1,9 +1,11 @@
+import asyncio
+import json
 import math
 import logging
 import time
 import os
 
-from api.conversation import ConversationStorage, LLMConversation
+from api.conversation import CachedChatbotFactory, ChatbotInstance
 import api.chatting as Chat
 
 from api.utils import Ansi, load_dotenv
@@ -11,6 +13,7 @@ from enums import Platform
 from enums.messages import Messages
 
 from api.reflection import ReflectionAPI
+from memory import MemoryAgent
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
@@ -35,18 +38,118 @@ def remove_prefixes(text: str):
     return text
 
 class PixiClient:
-    def __init__(self, platform: Platform, persona_file: str = "persona.json"):
+    def __init__(self, platform: Platform, persona_file: str = "persona.json", enable_tool_calls: bool = False):
         self.platform = platform
         self.persona = Chat.AssistantPersona.from_json(persona_file)
-        self.storage = ConversationStorage(persona = self.persona, hash_prefix = platform)
+        self.chatbot_factory = CachedChatbotFactory(persona = self.persona, hash_prefix = platform)
         self.reflection_api = ReflectionAPI(platform = platform)
-
+        
+        #self.init_memory_module() adds global memory to the bot, disabled for privacy
+        
         match platform:
             case Platform.DISCORD:
                 self.init_discord()
+                if enable_tool_calls:
+                    self.init_discord_tools()
             case Platform.TELEGRAM:
                 self.init_telegram()
 
+    def add_or_retrieve_memory(self, query: str = None, memory: str = None):
+        result = None
+        if query is not None:
+            result = self.memory.retrieve_memories(query)
+        if memory is not None:
+            self.memory.add_memory(memory)
+            self.memory.save_as("memories.json")
+        
+        return result
+    
+    def init_memory_module(self):
+        self.memory = MemoryAgent.from_file("memories.json")
+
+        self.chatbot_factory.register_tool(
+            name = "add_or_retrieve_memory",
+            func = self.add_or_retrieve_memory,
+            parameters = dict(
+                type = "object",
+                properties = {
+                    "query": {
+                        "type": "string",
+                        "description": "The query, which is used to identify the memory. (Optional)",
+                    },
+                    "memory": {
+                        "type": "string",
+                        "description": "The memory to be added. (Optional)",
+                    }
+                },
+                required = [],
+                additionalProperties = False
+            ),
+            description = "Adds a memory to the your memories, so that you can query it later, or retrieves a memory from the your memories, \
+            you must also state the name of the user in the query and the memory."
+        )
+    
+    async def fetch_channel_history_discord(self, channel_id: str, n: str):
+        print(f"called fetch_channel_history({channel_id=}, {n=})")
+        
+        channel_id = int(channel_id)
+        channel = await self.client.fetch_channel(channel_id)
+        n = int(n)
+        
+        messages = []
+        async for message in channel.history(limit=n):
+            messages.append(dict(
+                from_user = self.reflection_api.get_sender_information(message),
+                message_text = self.reflection_api.get_message_text(message)
+            ))
+
+        return "\n".join(["data: " + json.dumps(m, ensure_ascii=False) for m in messages[::-1]])
+    
+    def init_discord_tools(self):
+        self.chatbot_factory.register_tool(
+            name = "fetch_channel_history",
+            func = self.fetch_channel_history_discord,
+            parameters = dict(
+                type = "object",
+                properties = {
+                    "channel_id": {
+                        "type": "string",
+                        "description": "The numerical channel id, which is used to identify the channel.",
+                    },
+                    "n": {
+                        "type": "string",
+                        "description": "the number of messages to fetch from the channel",
+                    },
+                },
+                required = ["channel_id", "n"],
+                additionalProperties = False
+            ),
+            description = "Fetches the last `n` message from a text channel"
+        )
+    
+    async def notes_command(self, interaction):
+        if not await self.reflection_api.is_dm_or_admin(interaction):
+            await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+            return
+        try:
+            identifier = self.reflection_api.get_identifier_from_message(interaction)
+            conversation = self.get_conversation(identifier)
+            is_notes_visible = conversation.toggle_notes()
+            notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
+            await self.reflection_api.send_reply(interaction, notes_message)
+        except Exception:
+            logging.exception(f"Failed to toggle notes")
+            await self.reflection_api.send_reply(interaction, "Failed to toggle notes.")
+    
+    async def reset_command(self, interaction):
+        if not await self.reflection_api.is_dm_or_admin(interaction):
+            await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+            return
+        identifier = self.reflection_api.get_identifier_from_message(interaction)
+        logging.info(f"the conversation in {identifier} has been reset.")
+        self.chatbot_factory.remove(identifier)
+        await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
+    
     def init_discord(self):
         import discord
         from discord import app_commands
@@ -72,30 +175,17 @@ class PixiClient:
             return await self.on_message(*args, **kwargs)
 
         # Slash command: /reset
-        @client.tree.command(name="reset", description="Reset the conversation with Pixi.")
+        @client.tree.command(name="reset", description="Reset the conversation.")
         async def reset_command(interaction: discord.Interaction):
-            if not self.reflection_api.is_dm_or_admin(interaction):
-                await interaction.response.send_message("You must be a guild admin or use this in DMs.", ephemeral=True)
-                return
-            identifier = self.reflection_api.get_identifier_from_message(interaction)
-            logging.info(f"the conversation in {identifier} has been reset.")
-            self.storage.remove(identifier)
-            await interaction.response.send_message("Wha- Where am I?!")
+            await self.reset_command(interaction)
 
         # Slash command: /notes
-        @client.tree.command(name="notes", description="Toggle notes visibility for Pixi.")
+        @client.tree.command(name="notes", description="Toggle notes visibility.")
         async def notes_command(interaction: discord.Interaction):
-            if not self.reflection_api.is_dm_or_admin(interaction):
-                await interaction.response.send_message("You must be a guild admin or use this in DMs.", ephemeral=True)
-                return
-            identifier = self.reflection_api.get_identifier_from_message(interaction)
-            is_notes_visible = self.get_conversation(identifier).toggle_notes()
-            notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
-            await interaction.response.send_message(notes_message)
+            await self.notes_command(interaction)
 
     def init_telegram(self):
         import telegram
-        from telegram.constants import ChatAction
         from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
         
         self.token = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -106,29 +196,15 @@ class PixiClient:
 
         async def reset(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
-            convo_id = self.reflection_api.get_identifier_from_message(message)
-            try:
-                self.storage.remove(convo_id)
-                logging.info(f"The conversation in {convo_id} has been reset.")
-                await context.bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-                await context.bot.send_message(chat_id=update.effective_chat.id, reply_to_message_id=message.message_id, text="Wha- Where am I?!")
-            except Exception as e:
-                logging.exception(f"Failed to reset conversation for {convo_id}")
-                await context.bot.send_message(chat_id=update.effective_chat.id, text="Failed to reset conversation.")
+            await self.reset_command(message)
 
         async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="Hiiiii, how's it going?")
+            message = update.message
+            await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
 
         async def notes(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
-            try:
-                convo_id = self.reflection_api.get_identifier_from_message(message)
-                convo = self.get_conversation(convo_id)
-                is_notes_visible = convo.toggle_notes()
-                await self.reflection_api.send_reply(message, f"notes set to {is_notes_visible}")
-            except Exception as e:
-                logging.exception(f"Failed to toggle notes")
-                await self.reflection_api.send_reply(message, "Failed to toggle notes.")       
+            await self.notes_command(message)   
 
         application = Application.builder().token(self.token).build()
         self.application = application
@@ -139,8 +215,8 @@ class PixiClient:
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
 
-    def get_conversation(self, identifier: str) -> LLMConversation:
-        return self.storage.get(identifier)
+    def get_conversation(self, identifier: str) -> ChatbotInstance:
+        return self.chatbot_factory.get(identifier)
 
     async def pixi_resp(self, role_message: Chat.RoleMessage, message, allow_ignore: bool = True):
         start_typing_time = time.time()
@@ -205,11 +281,13 @@ class PixiClient:
             return
 
         convo_id = self.reflection_api.get_identifier_from_message(message)
-        convo = self.storage.get(convo_id)
+        convo = self.chatbot_factory.get(convo_id)
 
         attached_images = await self.reflection_api.fetch_attachment_images(message)
 
-        metadata = dict(from_user = self.reflection_api.get_sender_name(message))
+        metadata = dict(
+            from_user = self.reflection_api.get_sender_information(message)
+        )
 
         # check if the message is a reply to a bot message
         reply_message = await self.reflection_api.fetch_message_reply(message)
@@ -220,7 +298,7 @@ class PixiClient:
             # if the reply is to the last message that is sent by the bot, we don't need to do anything.
             reply_optimization = -1
             convo_messages = convo.get_messages()
-            matching_messages = [msg.content for msg in convo_messages if reply_message_text in msg.content]
+            matching_messages = [msg.content for msg in convo_messages if msg.content is not None and                                                                                                                                                                                                                                                                               reply_message_text in msg.content]
             if matching_messages:
                 if convo_messages[-1].content in matching_messages:
                     reply_optimization = 2
@@ -274,7 +352,8 @@ if __name__ == '__main__':
         "--platform",
         type=str,
         choices=[p.name.lower() for p in Platform],
-        required=True,
+        #required=True,
+        default="discord",
         help="Platform to run the bot on (telegram or discord)."
     )
     parser.add_argument(
@@ -293,5 +372,5 @@ if __name__ == '__main__':
     platform = Platform[args.platform.upper()]
 
     # run
-    pixi_client = PixiClient(platform=platform)
+    pixi_client = PixiClient(platform=platform, enable_tool_calls = True)
     pixi_client.run()

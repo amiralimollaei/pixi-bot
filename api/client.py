@@ -2,7 +2,7 @@ import logging
 import re
 import os
 import json
-import time
+import asyncio
 
 from openai import OpenAI
 
@@ -19,6 +19,18 @@ API_ENDPOINT = "https://api.deepinfra.com/v1/openai"
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
 # models: google/gemini-2.5-pro, deepseek-ai/DeepSeek-R1, deepseek-ai/DeepSeek-V3, meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8, meta-llama/Meta-Llama-3.1-405B-Instruct
+
+def _run_async(coro):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running event loop
+        return asyncio.run(coro)
+    else:
+        # Running inside an event loop (e.g., Jupyter, Discord)
+        import nest_asyncio
+        nest_asyncio.apply()
+        return loop.run_until_complete(coro)
 
 class ChatClient:
     def __init__(self, messages: list[RoleMessage] = None, model: str = "google/gemini-2.5-pro"):
@@ -89,7 +101,7 @@ class ChatClient:
             kwargs["tools"] = self.tool_schema
         return self.session.chat.completions.create(**kwargs)
     
-    def get_tool_results(self, tool_calls: list):
+    async def get_tool_results(self, tool_calls: list):
         """
         Execute tool calls and return results
         """
@@ -117,7 +129,7 @@ class ChatClient:
             func = self.tools.get(fn.name)
             if func:
                 try:
-                    result = func(**fn.arguments)
+                    result = await func(**fn.arguments)
                 except Exception as e:
                     result = f"Tool error: {e}"
             else:
@@ -136,26 +148,30 @@ class ChatClient:
             if event.choices is None or len(event.choices) == 0:
                 continue
             choice = event.choices[0]
+
             if exists(_tool_calls := choice.delta.tool_calls):
-                # append the assistant's response
-                if response:
-                    self.messages.append(RoleMessage(
-                        Role.ASSISTANT,
-                        content=response,
-                    ))
-                self.messages += self.get_tool_results(_tool_calls)
-                # Recursively call stream_request and yield its results, then return immediately
-                yield from self.stream_request()
-                return
+                self.messages += _run_async(self.get_tool_results(_tool_calls))
+
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
+
             if content := choice.delta.content:
                 response += content
                 # now yields the response character by character for easier parsing
                 for char in content:
                     yield char
-        logging.debug(f"finish reason: {finish_reason}")
         
+        if response:
+            self.messages.append(RoleMessage(
+                role = Role.ASSISTANT,
+                content = response
+            ))
+        
+        if finish_reason == "tool_calls":
+            # Recursively call stream_request and yield its results
+            yield from self.stream_request()
+            return
+
     def request(self, enable_timestamps: bool = True) -> str:
         choice = self.create_chat_completion(
             stream = False,
@@ -166,7 +182,7 @@ class ChatClient:
 
         # if tools are called, reslove them and repeat the request recursively
         if tool_calls:= choice.message.tool_calls:
-            self.messages += self.get_tool_results(tool_calls)
+            self.messages += _run_async(self.get_tool_results(tool_calls))
             return self.request(enable_timestamps = enable_timestamps)
 
     def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
@@ -287,4 +303,3 @@ if __name__ == "__main__":
             response += resp
             print(resp, end="", flush=True)
         print()
-        #chat.add_message(response)

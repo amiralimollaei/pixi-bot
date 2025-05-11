@@ -12,7 +12,7 @@ class ReflectionAPI:
         self.platform = Platform.DISCORD
         logging.debug("ReflectionAPI has been initilized for DISCORD.")
 
-    def get_identifier_from_message(self, message: discord.Message | discord.Integration) -> str:
+    def get_identifier_from_message(self, message: discord.Message | discord.Interaction) -> str:
         channel = message.channel
         
         # Check if the message is in a guild (server)
@@ -28,15 +28,16 @@ class ReflectionAPI:
 
         match message.channel.type:
             case discord.ChannelType.private:
-                rt_data.update({"channel": "DM / Private Chat"})
+                rt_data.update({"text_channel": {"type": "DM / Private Chat"}})
             case discord.ChannelType.group:
-                rt_data.update({"channel": "Group Chat"})
+                rt_data.update({"text_channel": {"type": "Group Chat"}})
             case discord.ChannelType.text:
                 channle_name = message.channel.name
-                rt_data.update({"channel": {"Text Channel": {"name": channle_name}}})
+                rt_data.update({"text_channel": {"type": "Unknown", "name": channle_name}})
             case _:
                 channle_name = getattr(message.channel, 'name', "Unknown")
-                rt_data.update({"channel": {"Channel": {"name": channle_name}}})
+                rt_data.update({"text_channel": {"type": "Unknown", "name": channle_name}})
+        rt_data["text_channel"].update({"id": message.channel.id})
 
         if message.guild is not None:
             rt_data.update({
@@ -50,6 +51,7 @@ class ReflectionAPI:
                             "stage_channels": [
                                 {
                                     "name": c.name,
+                                    "id": c.id,
                                     "is_nsfw": c.nsfw,
                                     "user_limit": c.user_limit,
                                     "connected_listeners": {
@@ -62,6 +64,7 @@ class ReflectionAPI:
                             "voice_channels": [
                                 {
                                     "name": c.name,
+                                    "id": c.id,
                                     "is_nsfw": c.nsfw,
                                     "user_limit": c.user_limit,
                                     "connected_members": {
@@ -74,6 +77,7 @@ class ReflectionAPI:
                             "text_channels": [
                                 {
                                     "name": c.name,
+                                    "id": c.id,
                                     "is_nsfw": c.nsfw,
                                     "channel_url": c.jump_url
                                 } for c in cat.text_channels
@@ -104,45 +108,64 @@ class ReflectionAPI:
     async def send_status_typing(self, message: discord.Message):
         await message.channel.typing()
     
-    async def send_reply(self, message: discord.Message, text: str, delay: int = None) -> bool:
-        def can_read_history(channel) -> bool:
-            # Check if the bot can read message history in the channel
-            if hasattr(channel, 'permissions_for'):
-                perms = channel.permissions_for(channel.guild.me) if channel.guild else None
-                if perms and not perms.read_message_history:
-                    return False
-            return True
-        
-        # delay adds realism
-        if delay is not None and delay > 0:
-            async with message.channel.typing():
-                await asyncio.sleep(delay)
+    def can_read_history(self, channel) -> bool:
+        # Check if the bot can read message history in the channel
+        if hasattr(channel, 'permissions_for'):
+            perms = channel.permissions_for(channel.guild.me) if channel.guild else None
+            if perms and not perms.read_message_history:
+                return False
+        return True
+    
+    async def send_response(self, origin: discord.Message | discord.Interaction, text: str, ephemeral: bool = False, *args, **kwargs):
+        if isinstance(origin, discord.Message):
+            await origin.channel.send(text, *args, **kwargs)
+        elif isinstance(origin, discord.Interaction):
+            await origin.response.send_message(text, *args, ephemeral = ephemeral, **kwargs)
+        else:
+            raise TypeError(f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")   
+    
+    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int = None, ephemeral: bool = False):
+        if isinstance(message, discord.Message):
+            # delay adds realism
+            if delay is not None and delay > 0:
+                async with message.channel.typing():
+                    await asyncio.sleep(delay)
         
         num_retries = 5
         for i in range(num_retries):
             try:
-                if message.channel.type == discord.ChannelType.private:
-                    await message.channel.send(text)
+                if isinstance(message, discord.Interaction):
+                    await self.send_response(message, text, ephemeral = ephemeral)
                 else:
-                    if can_read_history(message.channel):
-                        await message.channel.send(text, reference=message)
+                    if message.channel.type == discord.ChannelType.private:
+                        await self.send_response(message, text)
                     else:
-                        await message.channel.send(f"{message.author.mention} {text}")
+                        if self.can_read_history(message.channel):
+                            await self.send_response(message, text, reference=message)
+                        else:
+                            await self.send_response(f"{message.author.mention} {text}")
+                break
             except discord.Forbidden as e:
-                logging.exception(f"Cannot send message in channel {message.channel.id}")
+                logging.exception(f"Forbidden")
                 raise RuntimeError(f"Cannot send message in channel {message.channel.id}")
             except discord.HTTPException as e:
                 logging.warning(f"HTTPException while sending message: {e}, retrying ({i}/{num_retries})")
-            else:
-                return
-        raise RuntimeError(f"There was an unexpected error while send a message in channel {message.channel.id}")
-    
+        else:
+            raise RuntimeError(f"There was an unexpected error while send a message in channel {message.channel.id}")
     
     def get_sender_id(self, message: discord.Message):
         return message.author.id
     
     def get_sender_name(self, message: discord.Message):
         return message.author.display_name
+    
+    def get_sender_information(self, message: discord.Message):
+        user = message.author
+        return dict(
+            id = user.id,
+            display_name = user.display_name,
+            mention_string = user.mention,
+        )
         
     def is_message_from_the_bot(self, message: discord.Message) -> bool:
         bot_user = message._state.user

@@ -17,7 +17,7 @@ user: [Amirali](1 month ago) -> reset
 you: (NOTE: ignoring Amirali, responding in english) What the hell!? [SEND]
 
 user: [Jordan](1 min ago) -> hi
-you: (NOTE: friendly and curious, responding in english) Hey Jordan! [SEND] do you know what was wrong with Amirali last month? [SEND]
+you: (NOTE: friendly and curious, responding in english) Hey Jordan! [SEND]
 
 user: [Jake](40 seconds ago) -> hello jordan!
 you: (NOTE: not talking to me, responding in english) [NONE]
