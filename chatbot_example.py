@@ -9,11 +9,14 @@ if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
     instance = ChatbotInstance(0, persona, "test")
     
-    def psudo_send_command(text):
+    async def psudo_send_command(text):
         print("LLM: " + text)
 
-    def psudo_note_command(text):
+    async def psudo_note_command(text):
         print("Thoughts: " + text)
+
+    async def psudo_yeet_command(text):
+        print("Yeet: " + text)
     
     instance.add_command(
         name="send",
@@ -26,6 +29,12 @@ if __name__ == "__main__":
         field_name="thoughts",
         function=psudo_note_command,
         descriptioon="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
+    )
+    instance.add_command(
+        name="yeet",
+        field_name="object",
+        function=psudo_yeet_command,
+        descriptioon="yeets the object"
     )
     
     print(instance.command_manager.get_prompt())
