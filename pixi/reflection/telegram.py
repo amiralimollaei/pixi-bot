@@ -4,8 +4,9 @@ import asyncio
 import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
 
-from enums import Platform
+from ..enums import Platform
 from ..utils import ImageCache
+
 
 class ReflectionAPI:
     def __init__(self):

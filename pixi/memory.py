@@ -3,8 +3,8 @@ import os
 import time
 import hashlib
 
-from api.client import ChatClient
-from api.utils import exists, load_dotenv
+from .client import ChatClient
+from .utils import exists, load_dotenv
 
 class MemoryItem:
     def __init__(self, content: str, timestamp: float = None):

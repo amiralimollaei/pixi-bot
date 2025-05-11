@@ -7,7 +7,7 @@ class Platform(StrEnum):
     DISCORD = "discord"
     TELEGRAM = "telegram"
 
-class Role(StrEnum):
+class ChatRole(StrEnum):
     SYSTEM: str = "system"
     ASSISTANT: str = "assistant"
     USER: str = "user"

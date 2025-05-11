@@ -1,19 +1,17 @@
-import asyncio
 import json
 import math
 import logging
 import time
 import os
 
-from api.conversation import CachedChatbotFactory, ChatbotInstance
-import api.chatting as Chat
+from pixi.chatting import ChatMessage
+from pixi.chatbot import AssistantPersona, CachedChatbotFactory, ChatbotInstance
 
-from api.utils import Ansi, load_dotenv
-from enums import Platform
-from enums.messages import Messages
+from pixi.utils import Ansi, load_dotenv
+from pixi.enums import ChatRole, Platform, Messages
 
-from api.reflection import ReflectionAPI
-from memory import MemoryAgent
+from pixi.reflection import ReflectionAPI
+from pixi.memory import MemoryAgent
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
@@ -40,7 +38,7 @@ def remove_prefixes(text: str):
 class PixiClient:
     def __init__(self, platform: Platform, persona_file: str = "persona.json", enable_tool_calls: bool = False):
         self.platform = platform
-        self.persona = Chat.AssistantPersona.from_json(persona_file)
+        self.persona = AssistantPersona.from_json(persona_file)
         self.chatbot_factory = CachedChatbotFactory(persona = self.persona, hash_prefix = platform)
         self.reflection_api = ReflectionAPI(platform = platform)
         
@@ -218,7 +216,7 @@ class PixiClient:
     def get_conversation(self, identifier: str) -> ChatbotInstance:
         return self.chatbot_factory.get(identifier)
 
-    async def pixi_resp(self, role_message: Chat.RoleMessage, message, allow_ignore: bool = True):
+    async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):
         start_typing_time = time.time()
         conversation = self.get_conversation(self.reflection_api.get_identifier_from_message(message))
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
@@ -228,7 +226,7 @@ class PixiClient:
         try:
             await self.reflection_api.send_status_typing(message)
 
-            for resp in conversation.live_chat(role_message, allow_ignore = allow_ignore):
+            for resp in conversation.live_chat(chat_message, allow_ignore = allow_ignore):
                 # the model may return "NO_RESPONSE" if it doesn't want to respond
                 if resp.strip() != "" and resp != "NO_RESPONSE":
                     response_time = time.time() - start_typing_time
@@ -252,17 +250,17 @@ class PixiClient:
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
 
-    async def pixi_resp_retry(self, role_message: Chat.RoleMessage, message, num_retry: int = 3):
+    async def pixi_resp_retry(self, chat_message: ChatMessage, message, num_retry: int = 3):
         # catch the error 3 times and retry, if the error continues
         # retry once more without catching the error to see the error
         for i in range(num_retry):
             try:
-                return await self.pixi_resp(role_message, message)
+                return await self.pixi_resp(chat_message, message)
             except Exception as e:
                 logging.exception("There was an error in `pixi_resp`")
                 logging.warning(f"Retrying ({i}/{num_retry})")
                 continue
-        return await self.pixi_resp(role_message, message)
+        return await self.pixi_resp(chat_message, message)
 
     async def on_message(self, message):
         
@@ -330,7 +328,7 @@ class PixiClient:
                         "message": reply_message_text
                     })
         # convert everything into `RoleMessage``
-        role_message = Chat.RoleMessage(role=Chat.Role.USER, content=message_text, metadata=metadata, images=attached_images)
+        role_message = ChatMessage(role=ChatRole.USER, content=message_text, metadata=metadata, images=attached_images)
         await self.pixi_resp_retry(role_message, message)
 
     def run(self):
@@ -340,6 +338,10 @@ class PixiClient:
             case Platform.TELEGRAM:
                 self.application.run_polling()
 
+
+def run(platform: Platform):
+    pixi_client = PixiClient(platform=platform, enable_tool_calls = True)
+    pixi_client.run()
 
 if __name__ == '__main__':
     import argparse
@@ -351,9 +353,8 @@ if __name__ == '__main__':
     parser.add_argument(
         "--platform",
         type=str,
-        choices=[p.name.lower() for p in Platform],
-        #required=True,
-        default="discord",
+        choices=[p.name.lower() for p in Platform] + ["all"],
+        required=True,
         help="Platform to run the bot on (telegram or discord)."
     )
     parser.add_argument(
@@ -369,8 +370,13 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(args.log_level.upper())
 
     # Set platform
-    platform = Platform[args.platform.upper()]
+    platform = args.platform.upper()
+    if platform == "ALL":
+        import multiprocessing
 
-    # run
-    pixi_client = PixiClient(platform=platform, enable_tool_calls = True)
-    pixi_client.run()
+        for plat in Platform:
+            poc = multiprocessing.Process(target = run, kwargs = dict(platform = plat))
+            poc.start()
+            
+    else:
+        run(platform=Platform[platform])

@@ -1,7 +1,7 @@
 import json
 import time
-from enum import StrEnum
 
+from .enums import ChatRole
 from .utils import ImageCache, exists, format_time_ago
 
 class FunctionCall:
@@ -43,16 +43,10 @@ class FunctionCall:
             id = data.get("id")
         )
 
-class Role(StrEnum):
-    SYSTEM: str = "system"
-    ASSISTANT: str = "assistant"
-    USER: str = "user"
-    TOOL: str = "tool"
-
-class RoleMessage:
+class ChatMessage:
     def __init__(
         self,
-        role: Role,
+        role: ChatRole,
         content: str,
         metadata: dict = None, 
         message_time: float = -1, 
@@ -72,14 +66,14 @@ class RoleMessage:
         
         # validating each role's requirements
         match role:
-            case Role.SYSTEM:
+            case ChatRole.SYSTEM:
                 assert exists(content, True) and isinstance(content, str), f"expected SYSTEM to have a `content` of type `str` but got `{content}`"
                 assert not exists(metadata), f"expected SYSTEM to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
                 assert not exists(tool_calls), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{tool_calls}`"
                 assert not exists(tool_call_id), f"expected SYSTEM to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
                 assert not exists(images), f"Images can only be attached to user messages, but got {images} for role SYSTEM"
                 
-            case Role.ASSISTANT:
+            case ChatRole.ASSISTANT:
                 assert content is None or isinstance(content, str), f"expected ASSISTANT to have a `content` of type `str` but got `{content}`"
                 assert not exists(metadata), f"expected ASSISTANT to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
                 assert not exists(tool_call_id), f"expected ASSISTANT to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
@@ -90,13 +84,13 @@ class RoleMessage:
                     assert isinstance(tool_calls, list), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but got `{tool_calls}`"
                     assert all([isinstance(tc, FunctionCall) for tc in tool_calls]), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{tool_calls}`"
 
-            case Role.USER:
+            case ChatRole.USER:
                 assert exists(content, True) and isinstance(content, str), f"expected USER to have a `content` of type `str` but got `{content}`"
                 assert not exists(metadata) or isinstance(metadata, dict), f"expected `metadata` to be None or `metadata` to be of type `dict` but got `{metadata}`"
                 assert not exists(tool_calls) or (isinstance(tool_calls, list) and tool_calls == []), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{tool_calls}`"
                 assert not exists(tool_call_id), f"expected USER to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
             
-            case Role.TOOL:
+            case ChatRole.TOOL:
                 assert exists(content, True) and isinstance(content, str), f"expected TOOL to have a `content` of type `str` but got `{content}`"
                 assert not exists(metadata), f"expected TOOL to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
                 assert exists(tool_call_id) and isinstance(tool_call_id, str), f"expected TOOL to have a `tool_call_id` of type `str` but got `{tool_call_id}`"
@@ -128,7 +122,7 @@ class RoleMessage:
         )
     
     @classmethod
-    def from_dict(cls, data: dict) -> 'RoleMessage':
+    def from_dict(cls, data: dict) -> 'ChatMessage':
         return cls(
             role = data["role"],
             content = data.get("content"),
@@ -142,7 +136,7 @@ class RoleMessage:
     def to_openai_dict(self, timestamps: bool = True) -> dict:
         openai_dict = dict(role = self.role)
         match self.role:
-            case Role.USER:
+            case ChatRole.USER:
                 content = [f"User: {self.content}"]
                 if timestamps:
                     timefmt = format_time_ago(time.time()-self.time)
@@ -162,14 +156,14 @@ class RoleMessage:
                         image_url = dict(url = img.to_data_image_url())
                     ))
                 openai_dict.update(dict(content = content_dict))
-            case Role.ASSISTANT:
+            case ChatRole.ASSISTANT:
                 if exists(self.content, True):
                     openai_dict.update(dict(content = self.content))
                 else:
                     openai_dict.update(dict(
                         tool_calls = [i.to_openai_dict() for i in self.tool_calls]
                     ))
-            case Role.TOOL:
+            case ChatRole.TOOL:
                 openai_dict.update(dict(
                     content = self.content,
                     tool_call_id = self.tool_call_id
@@ -177,54 +171,3 @@ class RoleMessage:
             case _:
                 openai_dict.update(dict(content = self.content))
         return openai_dict
-
-class AssistantPersona:
-    def __init__(self, name: str, age: int, occupation: str, memories: list[str], appearance: str, nationality: str):
-        assert name is not None and isinstance(name, str), f"expected `name` to not be None and be of type `str` but got `{name}`"
-        assert age is not None and isinstance(age, int), f"expected `age` to not be None and be of type `str` but got `{age}`"
-        assert occupation is None or isinstance(occupation, str), f"expected `occupation` to be None or be of type `str` but got `{occupation}`"
-        assert memories is None or isinstance(memories, list), f"expected `memories` to be None or be of type `list[str]` but got `{memories}`"
-        assert memories is not None and all([isinstance(m, str) for m in memories]), f"expected `memories` to be None or be of type `list[str]` but at least one element in the list is not of type `str`, got `{memories}`"
-        assert appearance is None or isinstance(appearance, str), f"expected `appearance` to be None or be of type `str` but got `{appearance}`"
-        assert nationality is None or isinstance(nationality, str), f"expected `nationality` to be None or be of type `str` but got `{nationality}`"
-        
-        self.name = name
-        self.age = age
-        self.occupation = occupation
-        self.memories = memories
-        self.appearance = appearance
-        self.nationality = nationality
-    
-    def to_dict(self) -> dict:
-        return dict(
-            name = self.name,
-            age = self.age,
-            occupation = self.occupation,
-            memories = self.memories,
-            appearance = self.appearance,
-            nationality = self.nationality,
-        )
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> 'AssistantPersona':
-        return cls(
-            name = data.get("name"),
-            age = data.get("age"),
-            occupation = data.get("occupation"),
-            memories = data.get("memories", []),
-            appearance = data.get("appearance"),
-            nationality = data.get("nationality"),
-        )
-
-    @classmethod
-    def from_json(cls, file: str) -> 'AssistantPersona':
-        with open(file, "rb") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
-
-    def __str__(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False)
-
-if __name__ == "__main__":
-    persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    print(persona)

@@ -3,7 +3,7 @@ import asyncio
 
 import discord
 
-from enums import Platform
+from ..enums import Platform
 from ..utils import ImageCache
 
 

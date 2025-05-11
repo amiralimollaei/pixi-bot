@@ -8,25 +8,70 @@ from typing import Callable
 
 from .utils import exists
 
-from .chatting import AssistantPersona, Role, RoleMessage
+from .chatting import ChatRole, ChatMessage
 from .client import ChatClient
+
 
 # constatnt
 
 SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
 EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
-
 ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLet's begin! :) [SEND]"
-
-# the maximum lenght of the conversation in tokens (Approx.), before it get's cut off
-MAX_LENGTH = 32000
-
+MAX_LENGTH = 32000 # the maximum lenght of the conversation in tokens (Approx.), before it get's cut off
 SAVE_PATH = "./convo-v2/userdata"
-
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
+
+class AssistantPersona:
+    def __init__(self, name: str, age: int, occupation: str, memories: list[str], appearance: str, nationality: str):
+        assert name is not None and isinstance(name, str), f"expected `name` to not be None and be of type `str` but got `{name}`"
+        assert age is not None and isinstance(age, int), f"expected `age` to not be None and be of type `str` but got `{age}`"
+        assert occupation is None or isinstance(occupation, str), f"expected `occupation` to be None or be of type `str` but got `{occupation}`"
+        assert memories is None or isinstance(memories, list), f"expected `memories` to be None or be of type `list[str]` but got `{memories}`"
+        assert memories is not None and all([isinstance(m, str) for m in memories]), f"expected `memories` to be None or be of type `list[str]` but at least one element in the list is not of type `str`, got `{memories}`"
+        assert appearance is None or isinstance(appearance, str), f"expected `appearance` to be None or be of type `str` but got `{appearance}`"
+        assert nationality is None or isinstance(nationality, str), f"expected `nationality` to be None or be of type `str` but got `{nationality}`"
+        
+        self.name = name
+        self.age = age
+        self.occupation = occupation
+        self.memories = memories
+        self.appearance = appearance
+        self.nationality = nationality
+    
+    def to_dict(self) -> dict:
+        return dict(
+            name = self.name,
+            age = self.age,
+            occupation = self.occupation,
+            memories = self.memories,
+            appearance = self.appearance,
+            nationality = self.nationality,
+        )
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AssistantPersona':
+        return cls(
+            name = data.get("name"),
+            age = data.get("age"),
+            occupation = data.get("occupation"),
+            memories = data.get("memories", []),
+            appearance = data.get("appearance"),
+            nationality = data.get("nationality"),
+        )
+
+    @classmethod
+    def from_json(cls, file: str) -> 'AssistantPersona':
+        with open(file, "rb") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
+
+    def __str__(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+
 class ChatbotInstance:
-    def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[RoleMessage] = None):
+    def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[ChatMessage] = None):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
@@ -40,7 +85,7 @@ class ChatbotInstance:
         
         self.client = ChatClient(messages)
         if messages is not None:
-            self.client.add_message(RoleMessage(Role.ASSISTANT, ASSISTANT_PRE))
+            self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
     
     def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
         """
@@ -58,7 +103,7 @@ class ChatbotInstance:
             description = description
         )
     
-    def set_messages(self, messages: list[RoleMessage]):
+    def set_messages(self, messages: list[ChatMessage]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
         self.client.messages = messages
     
@@ -81,7 +126,7 @@ class ChatbotInstance:
             realtime = self.get_realtime_data()
         )
 
-    def stream_ask(self, message: RoleMessage | str, allow_ignore: bool = True, temporal: bool = False):
+    def stream_ask(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
         self.client.set_system(self.get_system_prompt(allow_ignore = allow_ignore))
 
         response: str = ""
@@ -146,7 +191,7 @@ class ChatbotInstance:
                 data = json.load(open(fname, "r", encoding="utf-8"))
                 self.persona = AssistantPersona.from_dict(data.get("persona"))
                 self.hash_prefix = data.get("prefix")
-                self.client.messages = [RoleMessage.from_dict(d) for d in data.get("messages") or []]
+                self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages") or []]
             except json.decoder.JSONDecodeError:
                 logging.warning(f"Unable to load the save file: {fname}, using defaults.")
         else:
@@ -158,10 +203,10 @@ class ChatbotInstance:
             uuid = data.get("uuid"),
             persona = AssistantPersona.from_dict(data.get("persona")),
             hash_prefix = data.get("prefix"),
-            messages = [RoleMessage.from_dict(d) for d in data.get("messages") or []]
+            messages = [ChatMessage.from_dict(d) for d in data.get("messages") or []]
         )
 
-    def live_chat(self, message: str | RoleMessage, with_memory: bool = True, allow_ignore: bool = True):
+    def live_chat(self, message: str | ChatMessage, with_memory: bool = True, allow_ignore: bool = True):
         yield from self.stream_ask(message, allow_ignore = allow_ignore, temporal = not with_memory)
 
 class CachedChatbotFactory:
@@ -214,7 +259,6 @@ class CachedChatbotFactory:
                 conversation.save()
             except Exception as e:
                 logging.warning(f"Failed to save conversation {identifier}: {e}")
-
 
 if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))

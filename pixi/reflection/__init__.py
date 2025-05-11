@@ -1,14 +1,6 @@
-from api.utils import ImageCache
-from enums import Platform
+from ..utils import ImageCache
+from ..enums import Platform
 
-# helper functions:
-
-def strip_message(message: str):
-    remove_starts = ["!pixi", "!pix", "!p", "@pixiaibot", "@pixiai", "@pixi", "@pixibot"]
-    for rs in remove_starts:
-        if message.lower().startswith(rs):
-            message = message[len(rs):]
-    return message
 
 class ReflectionAPI:
     class Forbidden(Exception):
