@@ -6,18 +6,15 @@ import asyncio
 from openai import OpenAI
 
 from .chatting import FunctionCall, ChatRole, ChatMessage
-
 from .utils import exists
 
 # constatnts
 
-MAX_LENGTH = 32000 # the maximum lenght of the conversation in tokens (Approx.), before it get's cut off for cost savings
-
+# the maximum lenght of the conversation in tokens (Approx.), before it get's cut off for cost savings
+MAX_LENGTH = 32000
 API_ENDPOINT = "https://api.deepinfra.com/v1/openai"
-
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
-# models: google/gemini-2.5-pro, deepseek-ai/DeepSeek-R1, deepseek-ai/DeepSeek-V3, meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8, meta-llama/Meta-Llama-3.1-405B-Instruct
 
 def _run_async(coro):
     try:
@@ -31,15 +28,18 @@ def _run_async(coro):
         nest_asyncio.apply()
         return loop.run_until_complete(coro)
 
+
 class ChatClient:
     def __init__(self, messages: list[ChatMessage] = None, model: str = "google/gemini-2.5-pro"):
         if messages is not None:
-            assert isinstance(messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
-            assert all([isinstance(m, ChatMessage) for m in messages]), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
+            assert isinstance(
+                messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
+            assert all([isinstance(m, ChatMessage) for m in messages]
+                       ), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
 
         self.model = model
         self.messages = messages or []
-        self.session = OpenAI(api_key = os.environ["DEEPINFRA_API_KEY"], base_url = API_ENDPOINT)
+        self.session = OpenAI(api_key=os.environ["DEEPINFRA_API_KEY"], base_url=API_ENDPOINT)
         self.system_prompt = None
         self.tools: dict = {}
         self.tool_schema: list[dict] = []
@@ -54,18 +54,18 @@ class ChatClient:
         """
         self.tools[name] = func
         self.tool_schema.append(dict(
-            type = "function",
-            function = dict(
-                name = name,
-                description = description or name,
-                parameters = parameters or dict(),
+            type="function",
+            function=dict(
+                name=name,
+                description=description or name,
+                parameters=parameters or dict(),
             )
         ))
 
     def set_system(self, prompt: str):
         assert prompt is not None and prompt != ""
         self.system_prompt = prompt
-    
+
     def add_message(self, message: ChatMessage | str):
         assert message is not None
         if isinstance(message, ChatMessage):
@@ -84,27 +84,27 @@ class ChatClient:
             self.messages.append(ChatMessage(role, message))
         else:
             raise ValueError(f"expected message to be a RoleMessage or a string, but got {message}.")
-    
+
     def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         # If tools are registered, add them to the request
-        openai_messages = self.get_openai_messages_dict(enable_timestamps = enable_timestamps)
+        openai_messages = self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
         kwargs = dict(
-            model = self.model,
-            messages = openai_messages,
-            temperature = 0.3,
-            max_tokens = MAX_LENGTH,
-            top_p = 0.5,
-            stream = stream,
+            model=self.model,
+            messages=openai_messages,
+            temperature=0.3,
+            max_tokens=MAX_LENGTH,
+            top_p=0.5,
+            stream=stream,
         )
         if self.tool_schema:
             kwargs["tools"] = self.tool_schema
         return self.session.chat.completions.create(**kwargs)
-    
+
     async def get_tool_results(self, tool_calls: list):
         """
         Execute tool calls and return results
         """
-        
+
         function_calls: list[FunctionCall] = []
         for tool_call in tool_calls:
             function = tool_call.function
@@ -118,11 +118,11 @@ class ChatClient:
                 index=index,
                 id=id
             ))
-        
+
         results = [ChatMessage(
             ChatRole.ASSISTANT,
-            content = None,
-            tool_calls = function_calls
+            content=None,
+            tool_calls=function_calls
         )]
         for fn in function_calls:
             func = self.tools.get(fn.name)
@@ -135,8 +135,8 @@ class ChatClient:
                 result = f"Tool '{fn.name}' not found."
             results.append(ChatMessage(
                 ChatRole.TOOL,
-                content = str(result),
-                tool_call_id = fn.id,
+                content=str(result),
+                tool_call_id=fn.id,
             ))
         return results
 
@@ -159,13 +159,13 @@ class ChatClient:
                 # now yields the response character by character for easier parsing
                 for char in content:
                     yield char
-        
+
         if response:
             self.messages.append(ChatMessage(
-                role = ChatRole.ASSISTANT,
-                content = response
+                role=ChatRole.ASSISTANT,
+                content=response
             ))
-        
+
         if finish_reason == "tool_calls":
             # Recursively call stream_request and yield its results
             yield from self.stream_request()
@@ -173,20 +173,20 @@ class ChatClient:
 
     def request(self, enable_timestamps: bool = True) -> str:
         choice = self.create_chat_completion(
-            stream = False,
-            enable_timestamps = enable_timestamps
+            stream=False,
+            enable_timestamps=enable_timestamps
         ).choices[0]
         if choice.message.content:
             return choice.message.content
 
         # if tools are called, reslove them and repeat the request recursively
-        if tool_calls:= choice.message.tool_calls:
+        if tool_calls := choice.message.tool_calls:
             self.messages += _run_async(self.get_tool_results(tool_calls))
-            return self.request(enable_timestamps = enable_timestamps)
+            return self.request(enable_timestamps=enable_timestamps)
 
     def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
         messages = self.messages.copy()
-        
+
         final_len = 0
         for idx, message in enumerate(messages):
             role = message.role
@@ -199,23 +199,24 @@ class ChatClient:
             print("WARN: unable to fit all messages in one request.")
             messages = messages[-idx:]
 
-        openai_messages = [msg.to_openai_dict(timestamps = enable_timestamps) for msg in messages]
+        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
         # add system as the last message to ensure it is in the model's context
         if exists(self.system_prompt):
-            openai_messages.append(ChatMessage(ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps = enable_timestamps))
+            openai_messages.append(ChatMessage(
+                ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps))
         return openai_messages
 
     def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
         if temporal:
             orig_messages = self.messages.copy()
-        
+
         if isinstance(message, str):
             message = ChatMessage(ChatRole.USER, message)
         else:
             assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
-        
+
         start_think = "<think>"
         end_think = "</think>"
 
@@ -235,11 +236,11 @@ class ChatClient:
 
         if temporal:
             self.messages = orig_messages
-        
+
     def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
         if temporal:
             orig_messages = self.messages.copy()
-            
+
         if isinstance(message, str):
             message = ChatMessage(ChatRole.USER, message)
         else:
@@ -247,24 +248,25 @@ class ChatClient:
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
 
-        response = THINK_PATTERN.sub("", self.request(enable_timestamps = enable_timestamps))
-        
+        response = THINK_PATTERN.sub("", self.request(enable_timestamps=enable_timestamps))
+
         if temporal:
             self.messages = orig_messages
         return response
 
     def to_dict(self):
         return dict(
-            system_prompt = self.system_prompt,
-            messages = [msg.to_dict() for msg in self.messages]
+            system_prompt=self.system_prompt,
+            messages=[msg.to_dict() for msg in self.messages]
         )
 
     @classmethod
     def from_dict(cls, data: dict):
         return cls(
-            messages = [ChatMessage.from_dict(msg) for msg in data.get("messages") or []],
-            system_prompt = data.get("system_prompt"),
+            messages=[ChatMessage.from_dict(msg) for msg in data.get("messages") or []],
+            system_prompt=data.get("system_prompt"),
         )
+
 
 if __name__ == "__main__":
     # Example dummy function hard coded to return the same weather
@@ -273,27 +275,27 @@ if __name__ == "__main__":
         """Get the current weather in a given location"""
         print("Calling get_current_weather client side.")
         return 75
-        
+
     chat = ChatClient()
     chat.register_tool(
-        name = "get_current_weather",
-        func = get_current_weather,
-        parameters = dict(
-            type = "object",
-            properties = {
+        name="get_current_weather",
+        func=get_current_weather,
+        parameters=dict(
+            type="object",
+            properties={
                 "location": {
                     "type": "string",
                     "description": "The location to get the weather for. (Required)",
                 }
             },
-            required = [
+            required=[
                 "location"
             ],
-            additionalProperties = False
+            additionalProperties=False
         ),
-        description = "Get the current weather in a given location."
+        description="Get the current weather in a given location."
     )
-    
+
     while True:
         query = input("You: ")
         print("LLM: ", end="")

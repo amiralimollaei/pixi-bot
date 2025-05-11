@@ -6,29 +6,31 @@ import hashlib
 from .client import ChatClient
 from .utils import exists, load_dotenv
 
+
 class MemoryItem:
     def __init__(self, content: str, timestamp: float = None):
         assert exists(content) and isinstance(content, str)
-        
+
         self.content = content
         self.time = timestamp if timestamp is not None else time.time()
 
     def to_dict(self) -> dict:
         return dict(
-            content = self.content,
-            time = self.time
+            content=self.content,
+            time=self.time
         )
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MemoryItem':
         return cls(
-            content = data.get("content"),
-            timestamp = data.get("time")
+            content=data.get("content"),
+            timestamp=data.get("time")
         )
 
     def hash(self) -> str:
         # Hash based on content and time for uniqueness
         return hashlib.sha256(f"{self.content}|{self.time}".encode("utf-8")).hexdigest()
+
 
 class MemoryAgent:
     def __init__(self, model: str = "google/gemma-3-27b-it", memories: list[MemoryItem] = None):
@@ -52,18 +54,18 @@ class MemoryAgent:
 
     def to_dict(self) -> dict:
         return dict(
-            memories = [m.to_dict() for m in self.memories]
+            memories=[m.to_dict() for m in self.memories]
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> 'MemoryAgent':
         memories = [MemoryItem.from_dict(m) for m in data.get("memories", [])]
-        return cls(memories = memories)
-    
+        return cls(memories=memories)
+
     def save_as(self, file: str):
         with open(file, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, ensure_ascii=False) 
-    
+            json.dump(self.to_dict(), f, ensure_ascii=False)
+
     @classmethod
     def from_file(cls, file: str) -> 'MemoryAgent':
         if os.path.isfile(file):
@@ -89,7 +91,7 @@ class MemoryAgent:
         return_type: 'hash' or 'index'
         """
         print(f"Retrieving memories for query: {query}")
- 
+
         prompt = "\n".join([
             f"Query: {query}",
             "",
@@ -98,6 +100,7 @@ class MemoryAgent:
         ])
         response = self.client.ask(prompt, temporal=True, enable_timestamps=False)
         return response.strip()
+
 
 if __name__ == "__main__":
     load_dotenv()

@@ -14,15 +14,15 @@ class ReflectionAPI:
 
     def get_identifier_from_message(self, message: discord.Message | discord.Interaction) -> str:
         channel = message.channel
-        
+
         # Check if the message is in a guild (server)
         if channel.guild is not None:
             # Use the guild ID as the unique identifier
             return f"guild#{channel.guild.id}"
-        
+
         # If the message is in a DM or group chat, use the channel ID
         return f"channel#{channel.id}"
-    
+
     def get_realtime_data(self, message: discord.Message):
         rt_data = {"Platform": "Discord"}
 
@@ -102,12 +102,12 @@ class ReflectionAPI:
             })
         if message.thread is not None:
             rt_data.update({"thread": message.thread.name})
-        
+
         return rt_data
 
     async def send_status_typing(self, message: discord.Message):
         await message.channel.typing()
-    
+
     def can_read_history(self, channel) -> bool:
         # Check if the bot can read message history in the channel
         if hasattr(channel, 'permissions_for'):
@@ -115,27 +115,28 @@ class ReflectionAPI:
             if perms and not perms.read_message_history:
                 return False
         return True
-    
+
     async def send_response(self, origin: discord.Message | discord.Interaction, text: str, ephemeral: bool = False, *args, **kwargs):
         if isinstance(origin, discord.Message):
             await origin.channel.send(text, *args, **kwargs)
         elif isinstance(origin, discord.Interaction):
-            await origin.response.send_message(text, *args, ephemeral = ephemeral, **kwargs)
+            await origin.response.send_message(text, *args, ephemeral=ephemeral, **kwargs)
         else:
-            raise TypeError(f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")   
-    
+            raise TypeError(
+                f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
+
     async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int = None, ephemeral: bool = False):
         if isinstance(message, discord.Message):
             # delay adds realism
             if delay is not None and delay > 0:
                 async with message.channel.typing():
                     await asyncio.sleep(delay)
-        
+
         num_retries = 5
         for i in range(num_retries):
             try:
                 if isinstance(message, discord.Interaction):
-                    await self.send_response(message, text, ephemeral = ephemeral)
+                    await self.send_response(message, text, ephemeral=ephemeral)
                 else:
                     if message.channel.type == discord.ChannelType.private:
                         await self.send_response(message, text)
@@ -152,25 +153,25 @@ class ReflectionAPI:
                 logging.warning(f"HTTPException while sending message: {e}, retrying ({i}/{num_retries})")
         else:
             raise RuntimeError(f"There was an unexpected error while send a message in channel {message.channel.id}")
-    
+
     def get_sender_id(self, message: discord.Message):
         return message.author.id
-    
+
     def get_sender_name(self, message: discord.Message):
         return message.author.display_name
-    
+
     def get_sender_information(self, message: discord.Message):
         user = message.author
         return dict(
-            id = user.id,
-            display_name = user.display_name,
-            mention_string = user.mention,
+            id=user.id,
+            display_name=user.display_name,
+            mention_string=user.mention,
         )
-        
+
     def is_message_from_the_bot(self, message: discord.Message) -> bool:
         bot_user = message._state.user
         return message.author.id == bot_user.id
-    
+
     async def fetch_attachment_images(self, message: discord.Message) -> list[ImageCache]:
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
         attached_images = []
@@ -178,13 +179,13 @@ class ReflectionAPI:
             if attachment.content_type in supported_image_types:
                 image_bytes = await attachment.read()
                 attached_images.append(ImageCache(
-                    image_bytes = image_bytes,
+                    image_bytes=image_bytes,
                 ))
         return attached_images
-    
+
     def get_message_text(self, message: discord.Message) -> str:
         return message.content if message.content else ''
-    
+
     async def fetch_message_reply(self, message: discord.Message) -> discord.Message:
         ref = message.reference
         if ref is None:
@@ -196,10 +197,10 @@ class ReflectionAPI:
     def is_bot_mentioned(self, message: discord.Message) -> bool:
         bot_user = message._state.user
         return bot_user is not None and bot_user in message.mentions
-    
+
     def is_inside_dm(self, message: discord.Message) -> bool:
         return message.channel.type == discord.ChannelType.private
-    
+
     async def is_dm_or_admin(self, interaction: discord.Interaction) -> bool:
         if isinstance(interaction.channel, discord.DMChannel):
             return True
@@ -207,6 +208,3 @@ class ReflectionAPI:
         if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:
             return True
         return False
-
-if __name__ == "__main__":
-    ReflectionAPI()

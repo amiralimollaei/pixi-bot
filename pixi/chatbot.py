@@ -6,10 +6,10 @@ import time
 import hashlib
 from typing import Callable
 
-from .utils import exists
 
 from .chatting import ChatRole, ChatMessage
 from .client import ChatClient
+from .utils import exists
 
 
 # constatnt
@@ -17,47 +17,53 @@ from .client import ChatClient
 SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
 EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
 ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLet's begin! :) [SEND]"
-MAX_LENGTH = 32000 # the maximum lenght of the conversation in tokens (Approx.), before it get's cut off
 SAVE_PATH = "./convo-v2/userdata"
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
 
 class AssistantPersona:
     def __init__(self, name: str, age: int, occupation: str, memories: list[str], appearance: str, nationality: str):
-        assert name is not None and isinstance(name, str), f"expected `name` to not be None and be of type `str` but got `{name}`"
-        assert age is not None and isinstance(age, int), f"expected `age` to not be None and be of type `str` but got `{age}`"
-        assert occupation is None or isinstance(occupation, str), f"expected `occupation` to be None or be of type `str` but got `{occupation}`"
-        assert memories is None or isinstance(memories, list), f"expected `memories` to be None or be of type `list[str]` but got `{memories}`"
-        assert memories is not None and all([isinstance(m, str) for m in memories]), f"expected `memories` to be None or be of type `list[str]` but at least one element in the list is not of type `str`, got `{memories}`"
-        assert appearance is None or isinstance(appearance, str), f"expected `appearance` to be None or be of type `str` but got `{appearance}`"
-        assert nationality is None or isinstance(nationality, str), f"expected `nationality` to be None or be of type `str` but got `{nationality}`"
-        
+        assert name is not None and isinstance(
+            name, str), f"expected `name` to not be None and be of type `str` but got `{name}`"
+        assert age is not None and isinstance(
+            age, int), f"expected `age` to not be None and be of type `str` but got `{age}`"
+        assert occupation is None or isinstance(
+            occupation, str), f"expected `occupation` to be None or be of type `str` but got `{occupation}`"
+        assert memories is None or isinstance(
+            memories, list), f"expected `memories` to be None or be of type `list[str]` but got `{memories}`"
+        assert memories is not None and all([isinstance(
+            m, str) for m in memories]), f"expected `memories` to be None or be of type `list[str]` but at least one element in the list is not of type `str`, got `{memories}`"
+        assert appearance is None or isinstance(
+            appearance, str), f"expected `appearance` to be None or be of type `str` but got `{appearance}`"
+        assert nationality is None or isinstance(
+            nationality, str), f"expected `nationality` to be None or be of type `str` but got `{nationality}`"
+
         self.name = name
         self.age = age
         self.occupation = occupation
         self.memories = memories
         self.appearance = appearance
         self.nationality = nationality
-    
+
     def to_dict(self) -> dict:
         return dict(
-            name = self.name,
-            age = self.age,
-            occupation = self.occupation,
-            memories = self.memories,
-            appearance = self.appearance,
-            nationality = self.nationality,
+            name=self.name,
+            age=self.age,
+            occupation=self.occupation,
+            memories=self.memories,
+            appearance=self.appearance,
+            nationality=self.nationality,
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> 'AssistantPersona':
         return cls(
-            name = data.get("name"),
-            age = data.get("age"),
-            occupation = data.get("occupation"),
-            memories = data.get("memories", []),
-            appearance = data.get("appearance"),
-            nationality = data.get("nationality"),
+            name=data.get("name"),
+            age=data.get("age"),
+            occupation=data.get("occupation"),
+            memories=data.get("memories", []),
+            appearance=data.get("appearance"),
+            nationality=data.get("nationality"),
         )
 
     @classmethod
@@ -79,14 +85,14 @@ class ChatbotInstance:
         self.uuid = uuid
         self.persona = persona
         self.prefix = hash_prefix
-        
+
         self.realtime_data = dict()
         self.is_notes_visible = False
-        
+
         self.client = ChatClient(messages)
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
-    
+
     def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
@@ -95,21 +101,21 @@ class ChatbotInstance:
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
-        
+
         self.client.register_tool(
-            name = name,
-            func = func,
-            parameters = parameters,
-            description = description
+            name=name,
+            func=func,
+            parameters=parameters,
+            description=description
         )
-    
+
     def set_messages(self, messages: list[ChatMessage]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
         self.client.messages = messages
-    
+
     def get_messages(self):
         return self.client.messages
-    
+
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
 
@@ -117,20 +123,20 @@ class ChatbotInstance:
         data = {"time and date": time.strftime("%a %d %b %Y, %I:%M%p")}
         data.update(self.realtime_data)
         return json.dumps(data, ensure_ascii=False)
-    
+
     def get_system_prompt(self, allow_ignore: bool = True):
         return SYSTEM_PROMPT.format(
-            persona = self.persona,
-            allow_ignore = allow_ignore,
-            examples = EXAMPLES,
-            realtime = self.get_realtime_data()
+            persona=self.persona,
+            allow_ignore=allow_ignore,
+            examples=EXAMPLES,
+            realtime=self.get_realtime_data()
         )
 
     def stream_ask(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
-        self.client.set_system(self.get_system_prompt(allow_ignore = allow_ignore))
+        self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
         response: str = ""
-        for chunk in self.client.stream_ask(message, temporal = temporal):
+        for chunk in self.client.stream_ask(message, temporal=temporal):
             response += chunk
 
             response = response.replace("\\[", "[").replace("\\]", "]")
@@ -138,7 +144,7 @@ class ChatbotInstance:
             if response.strip().endswith("[SEND]"):
                 yield self.proccess_response(response[:-6])
                 response = ""
-            
+
             if response.strip().endswith("[NONE]"):
                 if not allow_ignore:
                     response = ""
@@ -155,7 +161,7 @@ class ChatbotInstance:
     def proccess_response(self, msg: str):
         if "[NONE]" in msg:
             return "NO_RESPONSE"
-        
+
         if "[SEND]" in msg:
             msg = msg.replace("[NONE]", "")
 
@@ -166,18 +172,18 @@ class ChatbotInstance:
 
     def get_uuid_hash(self) -> str:
         return hashlib.sha256(f"{self.prefix}{self.uuid}".encode("utf-8")).hexdigest()
-    
+
     def get_file(self) -> str:
         return os.path.join(SAVE_PATH, self.get_uuid_hash() + ".json")
-    
+
     def to_dict(self):
         return dict(
-            uuid = self.uuid,
-            prefix = self.prefix,
-            persona = self.persona.to_dict(),
-            messages = [msg.to_dict() for msg in self.client.messages],
+            uuid=self.uuid,
+            prefix=self.prefix,
+            persona=self.persona.to_dict(),
+            messages=[msg.to_dict() for msg in self.client.messages],
         )
-    
+
     def save(self):
         # we make sure the save directory exists because we can't write to it, if it doesn't exist
         os.makedirs(SAVE_PATH, exist_ok=True)
@@ -191,30 +197,32 @@ class ChatbotInstance:
                 data = json.load(open(fname, "r", encoding="utf-8"))
                 self.persona = AssistantPersona.from_dict(data.get("persona"))
                 self.hash_prefix = data.get("prefix")
-                self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages") or []]
+                self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
             except json.decoder.JSONDecodeError:
-                logging.warning(f"Unable to load the save file: {fname}, using defaults.")
+                logging.warning(
+                    f"Unable to load the save file: {fname}, using defaults.")
         else:
             logging.warning("Unable to find the save file, using defaults.")
-        
+
     @classmethod
     def from_dict(cls, data: dict) -> 'ChatbotInstance':
         return cls(
-            uuid = data.get("uuid"),
-            persona = AssistantPersona.from_dict(data.get("persona")),
-            hash_prefix = data.get("prefix"),
-            messages = [ChatMessage.from_dict(d) for d in data.get("messages") or []]
+            uuid=data.get("uuid"),
+            persona=AssistantPersona.from_dict(data.get("persona")),
+            hash_prefix=data.get("prefix"),
+            messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])]
         )
 
     def live_chat(self, message: str | ChatMessage, with_memory: bool = True, allow_ignore: bool = True):
-        yield from self.stream_ask(message, allow_ignore = allow_ignore, temporal = not with_memory)
+        yield from self.stream_ask(message, allow_ignore=allow_ignore, temporal=not with_memory)
+
 
 class CachedChatbotFactory:
     def __init__(self, **kwargs):
         self.conversations: dict[str, ChatbotInstance] = {}
         self.kwargs = kwargs
         self.tools = []
-    
+
     def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
@@ -223,12 +231,12 @@ class CachedChatbotFactory:
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
-        
+
         self.tools.append(dict(
-            name = name,
-            func = func,
-            parameters = parameters,
-            description = description
+            name=name,
+            func=func,
+            parameters=parameters,
+            description=description
         ))
 
     def get(self, identifier: str) -> ChatbotInstance:
@@ -258,7 +266,8 @@ class CachedChatbotFactory:
             try:
                 conversation.save()
             except Exception as e:
-                logging.warning(f"Failed to save conversation {identifier}: {e}")
+                logging.exception(f"Failed to save conversation with {identifier}")
+
 
 if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))

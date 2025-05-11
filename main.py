@@ -18,7 +18,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-## https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
+# https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
 # Get the logger for 'httpx'
 httpx_logger = logging.getLogger("httpx")
 # Set the logging level to WARNING to ignore INFO and DEBUG logs
@@ -30,20 +30,22 @@ COMMAND_PREFIXES = ["!pixi", "!pix", "!p", "@pixiaibot", "@pixi"]
 
 # helper functions
 
+
 def remove_prefixes(text: str):
     for prefix in COMMAND_PREFIXES:
         text = text.removeprefix(prefix)
     return text
 
+
 class PixiClient:
     def __init__(self, platform: Platform, persona_file: str = "persona.json", enable_tool_calls: bool = False):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
-        self.chatbot_factory = CachedChatbotFactory(persona = self.persona, hash_prefix = platform)
-        self.reflection_api = ReflectionAPI(platform = platform)
-        
-        #self.init_memory_module() adds global memory to the bot, disabled for privacy
-        
+        self.chatbot_factory = CachedChatbotFactory(persona=self.persona, hash_prefix=platform)
+        self.reflection_api = ReflectionAPI(platform=platform)
+
+        # self.init_memory_module() adds global memory to the bot, disabled for privacy
+
         match platform:
             case Platform.DISCORD:
                 self.init_discord()
@@ -59,18 +61,18 @@ class PixiClient:
         if memory is not None:
             self.memory.add_memory(memory)
             self.memory.save_as("memories.json")
-        
+
         return result
-    
+
     def init_memory_module(self):
         self.memory = MemoryAgent.from_file("memories.json")
 
         self.chatbot_factory.register_tool(
-            name = "add_or_retrieve_memory",
-            func = self.add_or_retrieve_memory,
-            parameters = dict(
-                type = "object",
-                properties = {
+            name="add_or_retrieve_memory",
+            func=self.add_or_retrieve_memory,
+            parameters=dict(
+                type="object",
+                properties={
                     "query": {
                         "type": "string",
                         "description": "The query, which is used to identify the memory. (Optional)",
@@ -80,36 +82,36 @@ class PixiClient:
                         "description": "The memory to be added. (Optional)",
                     }
                 },
-                required = [],
-                additionalProperties = False
+                required=[],
+                additionalProperties=False
             ),
-            description = "Adds a memory to the your memories, so that you can query it later, or retrieves a memory from the your memories, \
+            description="Adds a memory to the your memories, so that you can query it later, or retrieves a memory from the your memories, \
             you must also state the name of the user in the query and the memory."
         )
-    
+
     async def fetch_channel_history_discord(self, channel_id: str, n: str):
         print(f"called fetch_channel_history({channel_id=}, {n=})")
-        
+
         channel_id = int(channel_id)
         channel = await self.client.fetch_channel(channel_id)
         n = int(n)
-        
+
         messages = []
         async for message in channel.history(limit=n):
             messages.append(dict(
-                from_user = self.reflection_api.get_sender_information(message),
-                message_text = self.reflection_api.get_message_text(message)
+                from_user=self.reflection_api.get_sender_information(message),
+                message_text=self.reflection_api.get_message_text(message)
             ))
 
         return "\n".join(["data: " + json.dumps(m, ensure_ascii=False) for m in messages[::-1]])
-    
+
     def init_discord_tools(self):
         self.chatbot_factory.register_tool(
-            name = "fetch_channel_history",
-            func = self.fetch_channel_history_discord,
-            parameters = dict(
-                type = "object",
-                properties = {
+            name="fetch_channel_history",
+            func=self.fetch_channel_history_discord,
+            parameters=dict(
+                type="object",
+                properties={
                     "channel_id": {
                         "type": "string",
                         "description": "The numerical channel id, which is used to identify the channel.",
@@ -119,12 +121,12 @@ class PixiClient:
                         "description": "the number of messages to fetch from the channel",
                     },
                 },
-                required = ["channel_id", "n"],
-                additionalProperties = False
+                required=["channel_id", "n"],
+                additionalProperties=False
             ),
-            description = "Fetches the last `n` message from a text channel"
+            description="Fetches the last `n` message from a text channel"
         )
-    
+
     async def notes_command(self, interaction):
         if not await self.reflection_api.is_dm_or_admin(interaction):
             await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
@@ -138,7 +140,7 @@ class PixiClient:
         except Exception:
             logging.exception(f"Failed to toggle notes")
             await self.reflection_api.send_reply(interaction, "Failed to toggle notes.")
-    
+
     async def reset_command(self, interaction):
         if not await self.reflection_api.is_dm_or_admin(interaction):
             await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
@@ -147,7 +149,7 @@ class PixiClient:
         logging.info(f"the conversation in {identifier} has been reset.")
         self.chatbot_factory.remove(identifier)
         await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
-    
+
     def init_discord(self):
         import discord
         from discord import app_commands
@@ -159,7 +161,7 @@ class PixiClient:
                 intents = discord.Intents.default()
                 intents.message_content = True
                 intents.members = True
-                super().__init__(intents = intents, *args, **kwargs)
+                super().__init__(intents=intents, *args, **kwargs)
                 self.tree = app_commands.CommandTree(self)
 
             async def setup_hook(self):
@@ -185,9 +187,9 @@ class PixiClient:
     def init_telegram(self):
         import telegram
         from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
-        
+
         self.token = os.environ["TELEGRAM_BOT_TOKEN"]
-        
+
         async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             return await self.on_message(message)
@@ -202,7 +204,7 @@ class PixiClient:
 
         async def notes(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
-            await self.notes_command(message)   
+            await self.notes_command(message)
 
         application = Application.builder().token(self.token).build()
         self.application = application
@@ -226,7 +228,7 @@ class PixiClient:
         try:
             await self.reflection_api.send_status_typing(message)
 
-            for resp in conversation.live_chat(chat_message, allow_ignore = allow_ignore):
+            for resp in conversation.live_chat(chat_message, allow_ignore=allow_ignore):
                 # the model may return "NO_RESPONSE" if it doesn't want to respond
                 if resp.strip() != "" and resp != "NO_RESPONSE":
                     response_time = time.time() - start_typing_time
@@ -263,13 +265,13 @@ class PixiClient:
         return await self.pixi_resp(chat_message, message)
 
     async def on_message(self, message):
-        
+
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return
 
         message_text = self.reflection_api.get_message_text(message)
-        
+
         # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
         is_inside_dm = self.reflection_api.is_inside_dm(message)
@@ -284,7 +286,7 @@ class PixiClient:
         attached_images = await self.reflection_api.fetch_attachment_images(message)
 
         metadata = dict(
-            from_user = self.reflection_api.get_sender_information(message)
+            from_user=self.reflection_api.get_sender_information(message)
         )
 
         # check if the message is a reply to a bot message
@@ -296,7 +298,8 @@ class PixiClient:
             # if the reply is to the last message that is sent by the bot, we don't need to do anything.
             reply_optimization = -1
             convo_messages = convo.get_messages()
-            matching_messages = [msg.content for msg in convo_messages if msg.content is not None and                                                                                                                                                                                                                                                                               reply_message_text in msg.content]
+            matching_messages = [
+                msg.content for msg in convo_messages if msg.content is not None and reply_message_text in msg.content]
             if matching_messages:
                 if convo_messages[-1].content in matching_messages:
                     reply_optimization = 2
@@ -340,8 +343,9 @@ class PixiClient:
 
 
 def run(platform: Platform):
-    pixi_client = PixiClient(platform=platform, enable_tool_calls = True)
+    pixi_client = PixiClient(platform=platform, enable_tool_calls=True)
     pixi_client.run()
+
 
 if __name__ == '__main__':
     import argparse
@@ -375,8 +379,8 @@ if __name__ == '__main__':
         import multiprocessing
 
         for plat in Platform:
-            poc = multiprocessing.Process(target = run, kwargs = dict(platform = plat))
+            poc = multiprocessing.Process(target=run, kwargs=dict(platform=plat))
             poc.start()
-            
+
     else:
         run(platform=Platform[platform])

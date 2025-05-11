@@ -8,22 +8,24 @@ from typing import Optional
 
 import PIL.Image as Image
 
+
 # helpers
 
-def exists(value, allow_empty_string = False):
+def exists(value, allow_empty_string=False):
     if value is None:
         return False
-    
+
     if isinstance(value, (int, float)):
         return True
 
     if isinstance(value, str):
         return value != "" or (value == "" and allow_empty_string)
-    
+
     if isinstance(value, (list, tuple, dict)):
         return len(value) != 0
 
     return True
+
 
 def load_dotenv():
     # load environment variables
@@ -35,6 +37,8 @@ def load_dotenv():
         dotenv.load_dotenv()
 
 # https://stackoverflow.com/a/76636817
+
+
 def format_time_ago(delta: float) -> str:
     """Return time difference as human-readable string"""
     periods = (
@@ -61,17 +65,17 @@ class ImageCache:
     def __init__(self, image_bytes: Optional[bytes] = None, hash_value: Optional[str] = None):
         assert image_bytes or hash_value, "Either image_bytes or hash_value must be provided."
         assert not (image_bytes and hash_value), "Only one of image_bytes or hash_value should be provided."
-        
+
         self.hash = None
         self.cached_image_bytes = None
-        
+
         if image_bytes is not None:
             assert isinstance(image_bytes, bytes), "image_bytes must be of type bytes."
             assert len(image_bytes) > 0, "image_bytes cannot be empty."
             self.hash = self.compute_hash(image_bytes)
             self.cached_image_bytes = self.optimize_image(Image.open(io.BytesIO(image_bytes)))
             self.save_to_cache()
-        
+
         if hash_value is not None:
             assert isinstance(hash_value, str), "hash_value must be of type str."
             assert len(hash_value) > 0, "hash_value cannot be empty."
@@ -95,7 +99,7 @@ class ImageCache:
             image.save(output, format="JPEG", quality=75)
             image_bytes = output.getvalue()
         return image_bytes
-    
+
     def save_to_cache(self):
         if not exists(self.cached_image_bytes):
             return
@@ -107,12 +111,12 @@ class ImageCache:
 
     @classmethod
     def from_dict(cls, data: dict):
-        if not (hash_value:= data.get("hash")):
+        if not (hash_value := data.get("hash")):
             raise ValueError("Hash value is required to load ImageCache instance.")
         return cls(hash_value=hash_value)
 
     def to_dict(self) -> dict:
-        return dict(hash = self.hash)
+        return dict(hash=self.hash)
 
     def exists(self) -> bool:
         path = self.cache_path
@@ -128,16 +132,17 @@ class ImageCache:
         else:
             raise FileNotFoundError("Image not found in cache.")
         return self.cached_image_bytes
-    
+
     def get_base64(self) -> Optional[str]:
-        if exists(optimized_image_bytes:= self.get_bytes()):
+        if exists(optimized_image_bytes := self.get_bytes()):
             return b64encode(optimized_image_bytes).decode("utf-8")
         return None
 
     def to_data_image_url(self) -> str:
-        if exists(image_base64:= self.get_base64()):
+        if exists(image_base64 := self.get_base64()):
             return f"data:image/jpeg;base64,{image_base64}"
         return None
+
 
 class Ansi(StrEnum):
     END = '\33[0m'
