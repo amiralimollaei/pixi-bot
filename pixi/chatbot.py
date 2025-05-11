@@ -6,6 +6,8 @@ import time
 import hashlib
 from typing import Callable
 
+from pixi.commands import CommandFunction, CommandManager
+
 
 from .chatting import ChatRole, ChatMessage
 from .client import ChatClient
@@ -88,12 +90,16 @@ class ChatbotInstance:
 
         self.realtime_data = dict()
         self.is_notes_visible = False
+        self.command_manager = CommandManager()
 
         self.client = ChatClient(messages)
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
 
-    def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
+    def add_command(self, name: str, field_name: str, function: CommandFunction, descriptioon: str = None):
+        self.command_manager.add_command(name, field_name, function, descriptioon)
+    
+    def add_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -102,7 +108,7 @@ class ChatbotInstance:
         description: description of the tool (string)
         """
 
-        self.client.register_tool(
+        self.client.add_tool(
             name=name,
             func=func,
             parameters=parameters,
@@ -129,30 +135,21 @@ class ChatbotInstance:
             persona=self.persona,
             allow_ignore=allow_ignore,
             examples=EXAMPLES,
-            realtime=self.get_realtime_data()
+            realtime=self.get_realtime_data(),
+            commands=self.command_manager.get_prompt()
         )
 
-    def stream_ask(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
+    async def stream_call(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
         response: str = ""
-        for chunk in self.client.stream_ask(message, temporal=temporal):
-            response += chunk
 
-            response = response.replace("\\[", "[").replace("\\]", "]")
-
-            if response.strip().endswith("[SEND]"):
-                yield self.proccess_response(response[:-6])
-                response = ""
-
-            if response.strip().endswith("[NONE]"):
-                if not allow_ignore:
-                    response = ""
-                else:
-                    response = response[:-6]
-
+        async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal)):
+            response += char 
+        
+        response = response.strip()
         if response != "":
-            yield self.proccess_response(response)
+            return self.proccess_response(response)
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible
@@ -213,16 +210,22 @@ class ChatbotInstance:
             messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])]
         )
 
-    def live_chat(self, message: str | ChatMessage, with_memory: bool = True, allow_ignore: bool = True):
-        yield from self.stream_ask(message, allow_ignore=allow_ignore, temporal=not with_memory)
-
 
 class CachedChatbotFactory:
     def __init__(self, **kwargs):
         self.conversations: dict[str, ChatbotInstance] = {}
         self.kwargs = kwargs
         self.tools = []
+        self.commands = []
 
+    def register_command(self, name: str, field_name: str, function: CommandFunction, descriptioon: str = None):
+        self.commands.append(dict(
+            name = name,
+            field_name = field_name,
+            function = function,
+            descriptioon = descriptioon
+        ))
+    
     def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
@@ -247,7 +250,11 @@ class CachedChatbotFactory:
             logging.info(f"initiated a conversation with {identifier}.")
 
         for tool_kwargs in self.tools:
-            convo.register_tool(**tool_kwargs)
+            convo.add_tool(**tool_kwargs)
+
+        for command_kwargs in self.commands:
+            convo.add_command(**command_kwargs)
+
         return convo
 
     def update(self, identifier: str, conversation: ChatbotInstance):
@@ -267,12 +274,3 @@ class CachedChatbotFactory:
                 conversation.save()
             except Exception as e:
                 logging.exception(f"Failed to save conversation with {identifier}")
-
-
-if __name__ == "__main__":
-    persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    conversation = ChatbotInstance(0, persona, "test")
-    while True:
-        query = input("You: ")
-        for resp in conversation.live_chat(query):
-            print("LLM: " + resp)

@@ -125,3 +125,6 @@ class ReflectionAPI:
         # Check if user has admin permissions to use the bot commands
         member = await interaction.get_bot().get_chat_member(interaction.chat.id, interaction.from_user.id)
         return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+
+    async def add_reaction(self, message: telegram.Message, emoji: str):
+        await message.set_reaction(emoji)

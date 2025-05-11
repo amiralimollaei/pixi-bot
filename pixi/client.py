@@ -6,7 +6,7 @@ import asyncio
 from openai import OpenAI
 
 from .chatting import FunctionCall, ChatRole, ChatMessage
-from .utils import exists
+from .utils import _run_async, exists
 
 # constatnts
 
@@ -14,19 +14,6 @@ from .utils import exists
 MAX_LENGTH = 32000
 API_ENDPOINT = "https://api.deepinfra.com/v1/openai"
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
-
-
-def _run_async(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No running event loop
-        return asyncio.run(coro)
-    else:
-        # Running inside an event loop (e.g., Jupyter, Discord)
-        import nest_asyncio
-        nest_asyncio.apply()
-        return loop.run_until_complete(coro)
 
 
 class ChatClient:
@@ -44,7 +31,7 @@ class ChatClient:
         self.tools: dict = {}
         self.tool_schema: list[dict] = []
 
-    def register_tool(self, name: str, func, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -277,7 +264,7 @@ if __name__ == "__main__":
         return 75
 
     chat = ChatClient()
-    chat.register_tool(
+    chat.add_tool(
         name="get_current_weather",
         func=get_current_weather,
         parameters=dict(

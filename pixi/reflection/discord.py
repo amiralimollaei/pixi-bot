@@ -208,3 +208,9 @@ class ReflectionAPI:
         if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:
             return True
         return False
+
+    async def add_reaction(self, message: discord.Message, emoji: str):
+        try:
+            await message.add_reaction(emoji)
+        except discord.Forbidden:
+            logging.exception("unable to add reaction to a message")

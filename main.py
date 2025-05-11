@@ -1,3 +1,4 @@
+from functools import partial
 import json
 import math
 import logging
@@ -43,7 +44,7 @@ class PixiClient:
         self.persona = AssistantPersona.from_json(persona_file)
         self.chatbot_factory = CachedChatbotFactory(persona=self.persona, hash_prefix=platform)
         self.reflection_api = ReflectionAPI(platform=platform)
-
+        
         # self.init_memory_module() adds global memory to the bot, disabled for privacy
 
         match platform:
@@ -53,7 +54,7 @@ class PixiClient:
                     self.init_discord_tools()
             case Platform.TELEGRAM:
                 self.init_telegram()
-
+    
     def add_or_retrieve_memory(self, query: str = None, memory: str = None):
         result = None
         if query is not None:
@@ -126,7 +127,7 @@ class PixiClient:
             ),
             description="Fetches the last `n` message from a text channel"
         )
-
+    
     async def notes_command(self, interaction):
         if not await self.reflection_api.is_dm_or_admin(interaction):
             await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
@@ -220,22 +221,59 @@ class PixiClient:
 
     async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):
         start_typing_time = time.time()
+        responded = False
+        
         conversation = self.get_conversation(self.reflection_api.get_identifier_from_message(message))
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
+        
+        
+        async def on_send_command(text):
+            nonlocal responded
+            nonlocal start_typing_time
+            response_time = time.time() - start_typing_time
+            
+            delay = max(0, (0.5 + (1.8 ** math.log2(1+len(text))) / 10) - response_time)
+            await self.reflection_api.send_reply(message, text, delay)
+            
+            start_typing_time = time.time()
+            
+            responded = True
+        
+        async def on_note_command(thoughts):
+            if conversation.is_notes_visible:
+                await self.reflection_api.send_reply(message, f"> {thoughts}")
+        
+        async def on_react_command(reaction):
+            await self.reflection_api.add_reaction(message, reaction)
+            
+        conversation.add_command(
+            name="send",
+            field_name="message",
+            function=on_send_command,
+            descriptioon="sends a message"
+        )
+        
+        conversation.add_command(
+            name="note",
+            field_name="thoughts",
+            function=on_note_command,
+            descriptioon="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
+        )
+        
+        conversation.add_command(
+            name="react",
+            field_name="emoji",
+            function=on_react_command,
+            descriptioon="react with an emoji to the message immediately preceeding the current message, you may react to messages that are shocking or otherwise in need of immediate emotional reaction"
+        )
+        
         messages_checkpoint = conversation.get_messages().copy()
 
-        responded = False
         try:
             await self.reflection_api.send_status_typing(message)
-
-            for resp in conversation.live_chat(chat_message, allow_ignore=allow_ignore):
-                # the model may return "NO_RESPONSE" if it doesn't want to respond
-                if resp.strip() != "" and resp != "NO_RESPONSE":
-                    response_time = time.time() - start_typing_time
-                    delay = max(0, (0.5 + (1.8 ** math.log2(1+len(resp))) / 10) - response_time)
-                    await self.reflection_api.send_reply(message, resp, delay)
-                    start_typing_time = time.time()
-                    responded = True
+            noncall_result = await conversation.stream_call(chat_message, allow_ignore=allow_ignore)
+            if noncall_result:
+                logging.warning(f"{noncall_result=}")
         except ReflectionAPI.Forbidden:
             logging.exception(f"Cannot send message in channel {message.channel.id}")
         except Exception:

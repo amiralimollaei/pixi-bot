@@ -68,3 +68,6 @@ class ReflectionAPI:
 
     async def is_dm_or_admin(self, interaction) -> bool:
         return await self._ref.is_dm_or_admin(interaction)
+
+    async def add_reaction(self, message, emoji: str):
+        return await self._ref.add_reaction(message, emoji)
