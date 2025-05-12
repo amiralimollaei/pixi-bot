@@ -4,7 +4,6 @@ import os
 import json
 import time
 import hashlib
-from typing import Callable
 
 from pixi.commands import AsyncCommandManager
 

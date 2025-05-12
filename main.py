@@ -264,7 +264,7 @@ class PixiClient:
             name="react",
             field_name="emoji",
             function=on_react_command,
-            descriptioon="react with an emoji to the message immediately preceeding the current message, you may react to messages that are shocking or otherwise in need of immediate emotional reaction"
+            descriptioon="react with an emoji to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
         
         messages_checkpoint = conversation.get_messages().copy()

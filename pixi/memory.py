@@ -3,7 +3,7 @@ import os
 import time
 import hashlib
 
-from .client import ChatClient
+from .client import AsyncChatClient
 from .utils import exists, load_dotenv
 
 
