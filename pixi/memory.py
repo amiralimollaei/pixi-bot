@@ -4,7 +4,7 @@ import time
 import hashlib
 
 from .client import AsyncChatClient
-from .utils import exists, load_dotenv
+from .utils import _run_async, exists, load_dotenv
 
 
 class MemoryItem:
@@ -36,7 +36,7 @@ class MemoryAgent:
     def __init__(self, model: str = "google/gemma-3-27b-it", memories: list[MemoryItem] = None):
         self.memories: list[MemoryItem] = memories or []
         self.model = model
-        self.client = ChatClient(model=model)
+        self.client = AsyncChatClient(model=model)
         self.system_prompt = "\n".join([
             "*You are a memory retrieval agent**",
             ""
@@ -98,7 +98,7 @@ class MemoryAgent:
             "Memories:",
             "\n".join([f"- {m.content}" for m in self.memories]),
         ])
-        response = self.client.ask(prompt, temporal=True, enable_timestamps=False)
+        response = _run_async(self.client.ask(prompt, temporal=True, enable_timestamps=False))
         return response.strip()
 
 
