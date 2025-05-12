@@ -1,41 +1,41 @@
 import re
 import os
 import json
-import asyncio
+from typing import Awaitable, Callable
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from .chatting import FunctionCall, ChatRole, ChatMessage
-from .utils import _run_async, exists
-
-# constatnts
-
-# the maximum lenght of the conversation in tokens (Approx.), before it get's cut off for cost savings
-MAX_LENGTH = 32000
-API_ENDPOINT = "https://api.deepinfra.com/v1/openai"
-THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
+from .utils import exists
 
 
-class ChatClient:
-    def __init__(self, messages: list[ChatMessage] = None, model: str = "google/gemini-2.5-pro"):
+Callback = Callable[[str], Awaitable[None]]
+
+
+class AsyncChatClient:
+    MAX_LENGTH = 32000
+    THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
+
+    def __init__(self, messages: list[ChatMessage] = None, model: str = "google/gemini-2.5-pro", base_url: str = "https://api.deepinfra.com/v1/openai"):
         if messages is not None:
             assert isinstance(
                 messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
-            assert all([isinstance(m, ChatMessage) for m in messages]
-                       ), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
+            for m in messages:
+                assert isinstance(
+                    m, ChatMessage), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
 
         self.model = model
         self.messages = messages or []
-        self.session = OpenAI(api_key=os.environ["DEEPINFRA_API_KEY"], base_url=API_ENDPOINT)
+        self.session = AsyncOpenAI(api_key=os.environ["DEEPINFRA_API_KEY"], base_url=base_url)
         self.system_prompt = None
         self.tools: dict = {}
         self.tool_schema: list[dict] = []
 
-    def add_tool(self, name: str, func, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
-        func: callable
+        func: (str) -> Awaitable[None]
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
@@ -72,20 +72,21 @@ class ChatClient:
         else:
             raise ValueError(f"expected message to be a RoleMessage or a string, but got {message}.")
 
-    def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
+    async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         # If tools are registered, add them to the request
         openai_messages = self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
         kwargs = dict(
             model=self.model,
             messages=openai_messages,
             temperature=0.3,
-            max_tokens=MAX_LENGTH,
+            max_tokens=self.MAX_LENGTH,
             top_p=0.5,
             stream=stream,
         )
         if self.tool_schema:
             kwargs["tools"] = self.tool_schema
-        return self.session.chat.completions.create(**kwargs)
+
+        return await self.session.chat.completions.create(**kwargs)
 
     async def get_tool_results(self, tool_calls: list):
         """
@@ -127,16 +128,16 @@ class ChatClient:
             ))
         return results
 
-    def stream_request(self):
+    async def stream_request(self):
         response = ""
         finish_reason = None
-        for event in self.create_chat_completion(stream=True):
+        async for event in await self.create_chat_completion(stream=True):
             if event.choices is None or len(event.choices) == 0:
                 continue
             choice = event.choices[0]
 
             if exists(_tool_calls := choice.delta.tool_calls):
-                self.messages += _run_async(self.get_tool_results(_tool_calls))
+                self.messages += await self.get_tool_results(_tool_calls)
 
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
@@ -155,11 +156,11 @@ class ChatClient:
 
         if finish_reason == "tool_calls":
             # Recursively call stream_request and yield its results
-            yield from self.stream_request()
-            return
+            async for chunk in self.stream_request():
+                yield chunk
 
-    def request(self, enable_timestamps: bool = True) -> str:
-        choice = self.create_chat_completion(
+    async def request(self, enable_timestamps: bool = True) -> str:
+        choice = await self.create_chat_completion(
             stream=False,
             enable_timestamps=enable_timestamps
         ).choices[0]
@@ -168,7 +169,7 @@ class ChatClient:
 
         # if tools are called, reslove them and repeat the request recursively
         if tool_calls := choice.message.tool_calls:
-            self.messages += _run_async(self.get_tool_results(tool_calls))
+            self.messages += await self.get_tool_results(tool_calls)
             return self.request(enable_timestamps=enable_timestamps)
 
     def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
@@ -179,7 +180,7 @@ class ChatClient:
             role = message.role
             context = message.content or ""
             final_len += len(role) + len(context) + 3
-            if final_len > MAX_LENGTH * 4:
+            if final_len > self.MAX_LENGTH * 4:
                 break
 
         if len(messages) != (idx + 1):
@@ -193,7 +194,7 @@ class ChatClient:
                 ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps))
         return openai_messages
 
-    def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
+    async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
         if temporal:
             orig_messages = self.messages.copy()
 
@@ -209,14 +210,14 @@ class ChatClient:
 
         response: str = ""
         is_thinking = False
-        for chunk in self.stream_request():
+        async for chunk in self.stream_request():
             response += chunk
 
             if response.endswith(start_think):
                 is_thinking = True
             elif response.endswith(end_think):
                 is_thinking = False
-                response = THINK_PATTERN.sub("", response)
+                response = self.THINK_PATTERN.sub("", response)
 
             if not is_thinking and response.strip() != "":
                 yield chunk
@@ -224,7 +225,7 @@ class ChatClient:
         if temporal:
             self.messages = orig_messages
 
-    def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
+    async def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
         if temporal:
             orig_messages = self.messages.copy()
 
@@ -235,7 +236,8 @@ class ChatClient:
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
 
-        response = THINK_PATTERN.sub("", self.request(enable_timestamps=enable_timestamps))
+        response = await self.request(enable_timestamps=enable_timestamps)
+        response = self.THINK_PATTERN.sub("", )
 
         if temporal:
             self.messages = orig_messages
@@ -255,15 +257,15 @@ class ChatClient:
         )
 
 
-if __name__ == "__main__":
+async def main():
     # Example dummy function hard coded to return the same weather
     # In production, this could be your backend API or an external API
-    def get_current_weather(location):
+    async def get_current_weather(location):
         """Get the current weather in a given location"""
         print("Calling get_current_weather client side.")
         return 75
 
-    chat = ChatClient()
+    chat = AsyncChatClient()
     chat.add_tool(
         name="get_current_weather",
         func=get_current_weather,
@@ -287,7 +289,11 @@ if __name__ == "__main__":
         query = input("You: ")
         print("LLM: ", end="")
         response = ""
-        for resp in chat.stream_ask(query):
+        async for resp in chat.stream_ask(query):
             response += resp
             print(resp, end="", flush=True)
         print()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

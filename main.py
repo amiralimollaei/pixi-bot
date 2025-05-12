@@ -6,7 +6,7 @@ import time
 import os
 
 from pixi.chatting import ChatMessage
-from pixi.chatbot import AssistantPersona, CachedChatbotFactory, ChatbotInstance
+from pixi.chatbot import AssistantPersona, CachedAsyncChatbotFactory, AsyncChatbotInstance
 
 from pixi.utils import Ansi, load_dotenv
 from pixi.enums import ChatRole, Platform, Messages
@@ -42,7 +42,7 @@ class PixiClient:
     def __init__(self, platform: Platform, persona_file: str = "persona.json", enable_tool_calls: bool = False):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
-        self.chatbot_factory = CachedChatbotFactory(persona=self.persona, hash_prefix=platform)
+        self.chatbot_factory = CachedAsyncChatbotFactory(persona=self.persona, hash_prefix=platform)
         self.reflection_api = ReflectionAPI(platform=platform)
         
         # self.init_memory_module() adds global memory to the bot, disabled for privacy
@@ -55,7 +55,7 @@ class PixiClient:
             case Platform.TELEGRAM:
                 self.init_telegram()
     
-    def add_or_retrieve_memory(self, query: str = None, memory: str = None):
+    async def add_or_retrieve_memory(self, query: str = None, memory: str = None):
         result = None
         if query is not None:
             result = self.memory.retrieve_memories(query)
@@ -216,7 +216,7 @@ class PixiClient:
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
 
-    def get_conversation(self, identifier: str) -> ChatbotInstance:
+    def get_conversation(self, identifier: str) -> AsyncChatbotInstance:
         return self.chatbot_factory.get(identifier)
 
     async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):

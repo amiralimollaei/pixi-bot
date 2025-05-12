@@ -6,11 +6,11 @@ import time
 import hashlib
 from typing import Callable
 
-from pixi.commands import CommandFunction, CommandManager
+from pixi.commands import AsyncCommandManager
 
 
 from .chatting import ChatRole, ChatMessage
-from .client import ChatClient
+from .client import AsyncChatClient, Callback
 from .utils import exists
 
 
@@ -78,7 +78,7 @@ class AssistantPersona:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
-class ChatbotInstance:
+class AsyncChatbotInstance:
     def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[ChatMessage] = None):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
@@ -90,20 +90,20 @@ class ChatbotInstance:
 
         self.realtime_data = dict()
         self.is_notes_visible = False
-        self.command_manager = CommandManager()
+        self.command_manager = AsyncCommandManager()
 
-        self.client = ChatClient(messages)
+        self.client = AsyncChatClient(messages)
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
 
-    def add_command(self, name: str, field_name: str, function: CommandFunction, descriptioon: str = None):
+    def add_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.command_manager.add_command(name, field_name, function, descriptioon)
     
-    def add_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
-        func: callable
+        func: Callback
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
@@ -143,7 +143,6 @@ class ChatbotInstance:
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
         response: str = ""
-
         async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal)):
             response += char 
         
@@ -202,7 +201,7 @@ class ChatbotInstance:
             logging.warning("Unable to find the save file, using defaults.")
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'ChatbotInstance':
+    def from_dict(cls, data: dict) -> 'AsyncChatbotInstance':
         return cls(
             uuid=data.get("uuid"),
             persona=AssistantPersona.from_dict(data.get("persona")),
@@ -211,14 +210,14 @@ class ChatbotInstance:
         )
 
 
-class CachedChatbotFactory:
+class CachedAsyncChatbotFactory:
     def __init__(self, **kwargs):
-        self.conversations: dict[str, ChatbotInstance] = {}
+        self.conversations: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
         self.tools = []
         self.commands = []
 
-    def register_command(self, name: str, field_name: str, function: CommandFunction, descriptioon: str = None):
+    def register_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.commands.append(dict(
             name = name,
             field_name = field_name,
@@ -226,11 +225,11 @@ class CachedChatbotFactory:
             descriptioon = descriptioon
         ))
     
-    def register_tool(self, name: str, func: Callable, parameters: dict = None, description: str = None):
+    def register_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
-        func: callable
+        func: Callback
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
@@ -242,8 +241,8 @@ class CachedChatbotFactory:
             description=description
         ))
 
-    def get(self, identifier: str) -> ChatbotInstance:
-        convo = self.conversations.get(identifier, ChatbotInstance(identifier, **self.kwargs))
+    def get(self, identifier: str) -> AsyncChatbotInstance:
+        convo = self.conversations.get(identifier, AsyncChatbotInstance(identifier, **self.kwargs))
         if identifier not in self.conversations:
             convo.load()
             self.update(identifier, convo)
@@ -257,14 +256,14 @@ class CachedChatbotFactory:
 
         return convo
 
-    def update(self, identifier: str, conversation: ChatbotInstance):
+    def update(self, identifier: str, conversation: AsyncChatbotInstance):
         self.conversations.update({identifier: conversation})
 
     def remove(self, identifier: str):
         if identifier in self.conversations.keys():
             del self.conversations[identifier]
 
-        fname = ChatbotInstance(identifier, **self.kwargs).get_file()
+        fname = AsyncChatbotInstance(identifier, **self.kwargs).get_file()
         if os.path.exists(fname):
             os.remove(fname)
 

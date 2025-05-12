@@ -1,5 +1,5 @@
 import json
-from pixi.chatbot import AssistantPersona, ChatbotInstance
+from pixi.chatbot import AssistantPersona, AsyncChatbotInstance
 from pixi.utils import load_dotenv
 
 
@@ -7,7 +7,7 @@ if __name__ == "__main__":
     load_dotenv()
     
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    instance = ChatbotInstance(0, persona, "test")
+    instance = AsyncChatbotInstance(0, persona, "test")
     
     async def psudo_send_command(text):
         print("LLM: " + text)
