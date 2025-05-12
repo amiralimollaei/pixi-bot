@@ -222,8 +222,8 @@ class PixiClient:
     async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):
         start_typing_time = time.time()
         responded = False
-        
-        conversation = self.get_conversation(self.reflection_api.get_identifier_from_message(message))
+        identifier = self.reflection_api.get_identifier_from_message(message)
+        conversation = self.get_conversation(identifier)
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
         
         
@@ -275,9 +275,9 @@ class PixiClient:
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
         except ReflectionAPI.Forbidden:
-            logging.exception(f"Cannot send message in channel {message.channel.id}")
+            logging.exception(f"Cannot send message in {identifier}")
         except Exception:
-            logging.exception(f"Unknown error while responding to a message in channel {message.channel.id}")
+            logging.exception(f"Unknown error while responding to a message in {identifier}")
             await self.reflection_api.send_reply(message, Messages.SOMETHING_WENT_WRONG)
 
         if responded:
