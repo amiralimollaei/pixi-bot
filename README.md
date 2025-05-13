@@ -7,7 +7,8 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 ## Requirements
 
 - Python >= 3.10
-- Pillow (`pip install pillow`)
+- pillow (for image caching, `pip install pillow`)
+- ffmpegio (for audio caching, `pip install ffmpegio`)
 
 ## Usage
 

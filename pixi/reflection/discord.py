@@ -3,8 +3,9 @@ import asyncio
 
 import discord
 
+from ..caching import ImageCache, AudioCache, UnsupportedMediaException
+
 from ..enums import Platform
-from ..utils import ImageCache
 
 
 class ReflectionAPI:
@@ -173,15 +174,25 @@ class ReflectionAPI:
         return message.author.id == bot_user.id
 
     async def fetch_attachment_images(self, message: discord.Message) -> list[ImageCache]:
-        supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
-        attached_images = []
+        supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
+        attachments = []
         for attachment in message.attachments:
-            if attachment.content_type in supported_image_types:
-                image_bytes = await attachment.read()
-                attached_images.append(ImageCache(
-                    image_bytes=image_bytes,
-                ))
-        return attached_images
+            if attachment.content_type in supported_mime_types:
+                attachments.append(ImageCache(await attachment.read()))
+        return attachments
+    
+    async def fetch_attachment_audio(self, message: discord.Message) -> list[AudioCache]:
+        # Only allow compressed audio formats
+        supported_mime_types = {'audio/mp3', 'audio/mpeg', 'audio/aac', 'audio/ogg'}
+        supported_extensions = {'.mp3', '.aac', '.ogg'}
+        attachments = []
+        for attachment in message.attachments:
+            mime = attachment.content_type
+            ext = attachment.filename.lower().rsplit('.', 1)[-1] if '.' in attachment.filename else ''
+            ext = f'.{ext}'
+            if (mime and mime in supported_mime_types) or (ext in supported_extensions):
+                attachments.append(AudioCache(await attachment.read()))
+        return attachments
 
     def get_message_text(self, message: discord.Message) -> str:
         return message.content if message.content else ''

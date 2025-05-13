@@ -2,7 +2,8 @@ import json
 import time
 
 from .enums import ChatRole
-from .utils import ImageCache, exists, format_time_ago
+from .utils import exists, format_time_ago
+from .caching import AudioCache, ImageCache, UnsupportedMediaException
 
 
 class FunctionCall:
@@ -54,6 +55,7 @@ class ChatMessage:
         metadata: dict = None,
         message_time: float = -1,
         images: ImageCache | list[ImageCache] = None,
+        audio: AudioCache | list[AudioCache] = None,
         tool_calls: list[FunctionCall] = None,
         tool_call_id: str = None
     ):
@@ -68,6 +70,17 @@ class ChatMessage:
                            ), f"Images must be of type ImageCache or list[ImageCache], but at least one of the list elements is not of type ImageCache, got {images}."
         else:
             images = []
+        
+        if audio is not None:
+            assert isinstance(audio, (AudioCache, list)
+                              ), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
+            if isinstance(audio, AudioCache):
+                audio = [audio]
+            else:
+                assert all([isinstance(i, AudioCache) for i in audio]
+                           ), f"audio must be of type AudioCache or list[AudioCache], but at least one of the list elements is not of type ImageCache, got {audio}."
+        else:
+            audio = []
 
         # validating each role's requirements
         match role:
@@ -131,6 +144,7 @@ class ChatMessage:
         self.time = (message_time if message_time > 0 else time.time())
 
         self.images = images  # Should be an ImageCache instance or a list of ImageCache instances or None
+        self.audio = audio
 
         # store function calls and function results
         self.tool_calls: list[FunctionCall] = tool_calls
@@ -142,8 +156,9 @@ class ChatMessage:
             content=self.content,
             metadata=self.metadata,
             time=self.time,
-            images=[i.to_dict() for i in self.images or []],
-            tool_calls=[i.to_dict() for i in self.tool_calls or []],
+            images=[x.to_dict() for x in self.images or []],
+            audio=[x.to_dict() for x in self.audio or []],
+            tool_calls=[x.to_dict() for x in self.tool_calls or []],
             tool_call_id=self.tool_call_id
         )
 
@@ -179,7 +194,15 @@ class ChatMessage:
                 for img in self.images:
                     content_dict.append(dict(
                         type="image_url",
-                        image_url=dict(url=img.to_data_image_url())
+                        image_url=dict(url=img.to_data_url())
+                    ))
+                for audio in self.audio:
+                    content_dict.append(dict(
+                        input_audio = dict(
+                            data = audio.to_base64(),
+                            format = "wav" # for some reason this value is not used by the API is required to be mp3 or wav
+                        ),
+                        type="input_audio",
                     ))
                 openai_dict.update(dict(content=content_dict))
             case ChatRole.ASSISTANT:
