@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import logging
 import re
 import os
@@ -21,31 +22,15 @@ ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLe
 SAVE_PATH = "./convo-v2/userdata"
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
-
+@dataclass
 class AssistantPersona:
-    def __init__(self, name: str, age: int, occupation: str, memories: list[str], appearance: str, nationality: str):
-        assert name is not None and isinstance(
-            name, str), f"expected `name` to not be None and be of type `str` but got `{name}`"
-        assert age is not None and isinstance(
-            age, int), f"expected `age` to not be None and be of type `str` but got `{age}`"
-        assert occupation is None or isinstance(
-            occupation, str), f"expected `occupation` to be None or be of type `str` but got `{occupation}`"
-        assert memories is None or isinstance(
-            memories, list), f"expected `memories` to be None or be of type `list[str]` but got `{memories}`"
-        assert memories is not None and all([isinstance(
-            m, str) for m in memories]), f"expected `memories` to be None or be of type `list[str]` but at least one element in the list is not of type `str`, got `{memories}`"
-        assert appearance is None or isinstance(
-            appearance, str), f"expected `appearance` to be None or be of type `str` but got `{appearance}`"
-        assert nationality is None or isinstance(
-            nationality, str), f"expected `nationality` to be None or be of type `str` but got `{nationality}`"
-
-        self.name = name
-        self.age = age
-        self.occupation = occupation
-        self.memories = memories
-        self.appearance = appearance
-        self.nationality = nationality
-
+    name: str
+    age: int = None
+    occupation: str = None
+    memories: list[str] = None
+    appearance: str = None
+    nationality: str= None
+    
     def to_dict(self) -> dict:
         return dict(
             name=self.name,
@@ -55,14 +40,14 @@ class AssistantPersona:
             appearance=self.appearance,
             nationality=self.nationality,
         )
-
+    
     @classmethod
     def from_dict(cls, data: dict) -> 'AssistantPersona':
         return cls(
             name=data.get("name"),
             age=data.get("age"),
             occupation=data.get("occupation"),
-            memories=data.get("memories", []),
+            memories=data.get("memories"),
             appearance=data.get("appearance"),
             nationality=data.get("nationality"),
         )
