@@ -13,7 +13,7 @@ from .base import MediaCache, CompressedMedia, UnsupportedMediaException
 
 CACHE_DIR = os.path.join(".cache", "audio")
 CACHE_SAMPLE_RATE = 16000
-CACHE_KBIT_RATE = 32
+CACHE_KBIT_RATE = 24
 CACHE_MAX_DURATION = 30
 
 # helpers
