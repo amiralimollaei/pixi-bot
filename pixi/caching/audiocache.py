@@ -38,31 +38,28 @@ class AudioCache(MediaCache):
         )
 
     def compress(self, data_bytes: bytes) -> CompressedMedia:
-        # ...existing code...
         with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=f".{self.format}") as tmp_out:
             tmp_in.write(data_bytes)
             tmp_in.flush()
 
-            # Use ffprobe to get duration
             duration = get_audio_duration(tmp_in.name)
-            rate_in, data = ffmpegio.audio.read(tmp_in.name)
-            is_cut_off = False
-            if self.strict and duration > CACHE_MAX_DURATION:
+            exceeds_max_duration = duration > CACHE_MAX_DURATION
+            if self.strict and exceeds_max_duration:
                 raise UnsupportedMediaException(f"Unsupported media type or format: audio should not be longer than {CACHE_MAX_DURATION} secounds.")
-            else:
-                data = data[:int(CACHE_MAX_DURATION * rate_in)]
-                is_cut_off = True
-            ffmpegio.audio.write(
+
+            # Use ffmpeg to cut the audio to CACHE_MAX_DURATION
+            ffmpegio.transcode(
+                tmp_in.name,
                 tmp_out.name,
-                rate_in,
-                data,
                 overwrite=True,
                 ar=CACHE_SAMPLE_RATE,
                 ac=1,
-                map="0:a:0",
                 format=self.format,
-                **{"b:a": f"{CACHE_KBIT_RATE}k"}
+                **{"b:a": f"{CACHE_KBIT_RATE}k"},
+                ss=0,
+                t=CACHE_MAX_DURATION
             )
+
             tmp_out.seek(0)
             audio_bytes = tmp_out.read()
 
@@ -70,5 +67,5 @@ class AudioCache(MediaCache):
             mime_type=self.mime_type,
             bytes=audio_bytes,
             format=self.format,
-            metadata=dict(duration=duration, is_cut_off=is_cut_off)
+            metadata=dict(duration=CACHE_MAX_DURATION, is_cut_off=exceeds_max_duration)
         )
