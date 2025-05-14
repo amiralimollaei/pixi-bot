@@ -322,6 +322,7 @@ class PixiClient:
         convo = self.chatbot_factory.get(convo_id)
 
         attached_images = await self.reflection_api.fetch_attachment_images(message)
+        attached_audio = await self.reflection_api.fetch_attachment_audio(message)
 
         metadata = dict(
             from_user=self.reflection_api.get_sender_information(message)
@@ -369,7 +370,7 @@ class PixiClient:
                         "message": reply_message_text
                     })
         # convert everything into `RoleMessage``
-        role_message = ChatMessage(role=ChatRole.USER, content=message_text, metadata=metadata, images=attached_images)
+        role_message = ChatMessage(role=ChatRole.USER, content=message_text, metadata=metadata, images=attached_images, audio=attached_audio)
         await self.pixi_resp_retry(role_message, message)
 
     def run(self):

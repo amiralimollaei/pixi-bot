@@ -1,5 +1,5 @@
 from ..enums import Platform
-from ..utils import ImageCache
+from ..caching import ImageCache, AudioCache
 
 
 class ReflectionAPI:
@@ -54,6 +54,9 @@ class ReflectionAPI:
     async def fetch_attachment_images(self, message) -> list[ImageCache]:
         return await self._ref.fetch_attachment_images(message)
 
+    async def fetch_attachment_audio(self, message) -> list[AudioCache]:
+        return await self._ref.fetch_attachment_audio(message)
+    
     def get_message_text(self, message) -> str:
         return self._ref.get_message_text(message)
 
