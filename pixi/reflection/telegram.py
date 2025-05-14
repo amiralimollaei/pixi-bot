@@ -5,7 +5,7 @@ import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
 
 from ..enums import Platform
-from ..utils import ImageCache
+from ..caching import ImageCache, AudioCache, UnsupportedMediaException
 
 
 class ReflectionAPI:
@@ -89,19 +89,47 @@ class ReflectionAPI:
 
     async def fetch_attachment_images(self, message: telegram.Message) -> list[ImageCache]:
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
-        attached_images = []
+        attachments = []
         # Telegram sends images as 'photo' (list of sizes) or as 'document' (if sent as file)
+        image_bytes = None
         if message.photo:
             # Get the highest resolution photo
             photo = message.photo[-1]
             file = await photo.get_file()
             image_bytes = await file.download_as_bytearray()
-            attached_images.append(ImageCache(image_bytes=bytes(image_bytes)))
         elif message.document and message.document.mime_type and message.document.mime_type in supported_image_types:
             file = await message.document.get_file()
             image_bytes = await file.download_as_bytearray()
-            attached_images.append(ImageCache(image_bytes=bytes(image_bytes)))
-        return attached_images
+        if image_bytes:
+            attachments.append(ImageCache(bytes(image_bytes)))
+        return attachments
+
+    async def fetch_attachment_audio(self, message: telegram.Message) -> list[AudioCache]:
+        # Only allow compressed audio formats
+        supported_audio_types = {'audio/mp3', 'audio/aac', 'audio/ogg'}
+        supported_extensions = {'.mp3', '.aac', '.ogg'}
+        attachments = []
+        audio_bytes = None
+        if message.audio and message.audio.mime_type in supported_audio_types:
+            file = await message.audio.get_file()
+            audio_bytes = await file.download_as_bytearray()
+        elif (
+            message.document
+            and message.document.mime_type
+            and message.document.mime_type in supported_audio_types
+        ):
+            file = await message.document.get_file()
+            audio_bytes = await file.download_as_bytearray()
+        elif (
+            message.document
+            and message.document.file_name
+            and any(message.document.file_name.lower().endswith(ext) for ext in supported_extensions)
+        ):
+            file = await message.document.get_file()
+            audio_bytes = await file.download_as_bytearray()
+        if audio_bytes:
+            attachments.append(AudioCache(bytes(audio_bytes)))
+        return attachments
 
     def get_message_text(self, message: telegram.Message) -> str:
         text = message.text_markdown_v2 or message.caption_markdown_v2
