@@ -16,6 +16,16 @@ CACHE_SAMPLE_RATE = 16000
 CACHE_KBIT_RATE = 32
 CACHE_MAX_DURATION = 30
 
+# helpers
+
+def get_audio_duration(filepath: str) -> float:
+    """Get duration of audio file using ffmpegio."""
+    import ffmpegio
+    info = ffmpegio.probe.full_details(filepath, select_streams='a')
+    # info['streams'] is a list of audio streams; take the first one
+    duration = float(info['streams'][0]['duration'])
+    return duration
+
 class AudioCache(MediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None, strict: bool = False):
         self.strict = strict
@@ -28,15 +38,14 @@ class AudioCache(MediaCache):
         )
 
     def compress(self, data_bytes: bytes) -> CompressedMedia:
-        # Write input bytes to a temporary in-memory buffer
-        input_buffer = io.BytesIO(data_bytes)
-
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp_in, tempfile.NamedTemporaryFile(suffix=".aac") as tmp_out:
-            tmp_in.write(input_buffer.read())
+        # ...existing code...
+        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=f".{self.format}") as tmp_out:
+            tmp_in.write(data_bytes)
             tmp_in.flush()
 
+            # Use ffprobe to get duration
+            duration = get_audio_duration(tmp_in.name)
             rate_in, data = ffmpegio.audio.read(tmp_in.name)
-            duration = data.shape[0] / rate_in
             is_cut_off = False
             if self.strict and duration > CACHE_MAX_DURATION:
                 raise UnsupportedMediaException(f"Unsupported media type or format: audio should not be longer than {CACHE_MAX_DURATION} secounds.")
@@ -61,5 +70,5 @@ class AudioCache(MediaCache):
             mime_type=self.mime_type,
             bytes=audio_bytes,
             format=self.format,
-            metadata=dict(duration = duration, is_cut_off = is_cut_off)
+            metadata=dict(duration=duration, is_cut_off=is_cut_off)
         )
