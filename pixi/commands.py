@@ -1,12 +1,12 @@
 import re
 from typing import Iterator, AsyncGenerator
 
-from pixi.client import Callback
+from .client import Callback
 
 
 # constants
 
-COMMAND_PATTERN = re.compile(r"\[(\w+)(?::\s?(.*))?]")
+COMMAND_PATTERN = re.compile(r"(\w+)(?:\s?:\s?([\s\S]*))?")
 
 
 class AsyncCommandManager:
@@ -49,7 +49,9 @@ class AsyncCommandManager:
                 inside_command -= 1
 
                 if inside_command == 0:
-                    matches = COMMAND_PATTERN.match(command_str)
+                    _command_str = command_str[1:-1]
+                    matches = COMMAND_PATTERN.match(_command_str)
+                    command_str.split(":")
                     if not matches:
                         raise SyntaxError(f"Invalid Command: `{command_str}`")
                     groups = matches.groups()
@@ -102,6 +104,7 @@ if __name__ == "__main__":
     ])
 
     print(test_text)
+    print("\n---------\n")
 
     import asyncio
 
