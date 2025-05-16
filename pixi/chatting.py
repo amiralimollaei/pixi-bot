@@ -3,7 +3,7 @@ import time
 
 from .enums import ChatRole
 from .utils import exists, format_time_ago
-from .caching import AudioCache, ImageCache, UnsupportedMediaException
+from .caching import AudioCache, ImageCache
 
 
 class FunctionCall:
@@ -70,7 +70,7 @@ class ChatMessage:
                            ), f"Images must be of type ImageCache or list[ImageCache], but at least one of the list elements is not of type ImageCache, got {images}."
         else:
             images = []
-        
+
         if audio is not None:
             assert isinstance(audio, (AudioCache, list)
                               ), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
@@ -198,9 +198,9 @@ class ChatMessage:
                     ))
                 for audio in self.audio:
                     content_dict.append(dict(
-                        input_audio = dict(
-                            data = audio.to_base64(),
-                            format = "wav" # for some reason this value is not used by the API is required to be mp3 or wav
+                        input_audio=dict(
+                            data=audio.to_base64(),
+                            format="wav"  # for some reason this value is not used by the API is required to be mp3 or wav
                         ),
                         type="input_audio",
                     ))

@@ -6,13 +6,10 @@ import json
 import time
 import hashlib
 
-from pixi.commands import AsyncCommandManager
-
-
+from .commands import AsyncCommandManager
 from .chatting import ChatRole, ChatMessage
 from .client import AsyncChatClient, Callback
 from .utils import exists
-
 
 # constatnt
 
@@ -22,6 +19,7 @@ ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLe
 SAVE_PATH = "./convo-v2/userdata"
 NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
 
+
 @dataclass
 class AssistantPersona:
     name: str
@@ -29,8 +27,8 @@ class AssistantPersona:
     occupation: str = None
     memories: list[str] = None
     appearance: str = None
-    nationality: str= None
-    
+    nationality: str = None
+
     def to_dict(self) -> dict:
         return dict(
             name=self.name,
@@ -40,7 +38,7 @@ class AssistantPersona:
             appearance=self.appearance,
             nationality=self.nationality,
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> 'AssistantPersona':
         return cls(
@@ -82,7 +80,7 @@ class AsyncChatbotInstance:
 
     def add_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.command_manager.add_command(name, field_name, function, descriptioon)
-    
+
     def add_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
@@ -128,8 +126,8 @@ class AsyncChatbotInstance:
 
         response: str = ""
         async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal)):
-            response += char 
-        
+            response += char
+
         response = response.strip()
         if response != "":
             return self.proccess_response(response)
@@ -203,12 +201,12 @@ class CachedAsyncChatbotFactory:
 
     def register_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.commands.append(dict(
-            name = name,
-            field_name = field_name,
-            function = function,
-            descriptioon = descriptioon
+            name=name,
+            field_name=field_name,
+            function=function,
+            descriptioon=descriptioon
         ))
-    
+
     def register_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.

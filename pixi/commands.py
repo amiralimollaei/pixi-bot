@@ -30,11 +30,11 @@ class AsyncCommandManager:
     async def stream_commands(self, stream: Iterator | AsyncGenerator):
         inside_command = 0
         command_str = ""
-        
+
         async def process(char):
             nonlocal inside_command
             nonlocal command_str
-            
+
             result = None
 
             if char == "[":
@@ -44,10 +44,10 @@ class AsyncCommandManager:
                 command_str += char
             else:
                 result = char
-            
+
             if char == "]":
                 inside_command -= 1
-                
+
                 if inside_command == 0:
                     matches = COMMAND_PATTERN.match(command_str)
                     if not matches:
@@ -64,9 +64,9 @@ class AsyncCommandManager:
                         raise NotImplementedError(f"The command `{command_name}` is not implemented.")
 
                     command_str = ""
- 
+
             return result
-        
+
         if isinstance(stream, Iterator):
             for char in stream:
                 result = await process(char)
@@ -83,9 +83,10 @@ class AsyncCommandManager:
 
 if __name__ == "__main__":
     command_maneger = AsyncCommandManager()
+
     async def send(x):
         print(f"SEND: {x}")
-    
+
     command_maneger.add_command(
         name="send",
         field_name="message",
@@ -99,7 +100,7 @@ if __name__ == "__main__":
         "Nested command test [SEND: This is a [test]!]",
         "The following command does not exist and will result in an error: [NONE]"
     ])
-    
+
     print(test_text)
 
     import asyncio
