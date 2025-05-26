@@ -4,7 +4,7 @@ import time
 import hashlib
 
 from .client import AsyncChatClient
-from .utils import _run_async, exists, load_dotenv
+from .utils import exists, load_dotenv
 
 
 class MemoryItem:
@@ -85,7 +85,7 @@ class MemoryAgent:
         print(f"Removing memory with hash: {memory_hash}")
         self.memories = [m for m in self.memories if m.hash() != memory_hash]
 
-    def retrieve_memories(self, query: str) -> list:
+    async def retrieve_memories(self, query: str) -> list:
         """
         Retrieves relevant memories by sending all memory hashes (or indices) and a query to another agent.
         return_type: 'hash' or 'index'
@@ -98,33 +98,5 @@ class MemoryAgent:
             "Memories:",
             "\n".join([f"- {m.content}" for m in self.memories]),
         ])
-        response = _run_async(self.client.ask(prompt, temporal=True, enable_timestamps=False))
+        response = await self.client.ask(prompt, temporal=True, enable_timestamps=False)
         return response.strip()
-
-
-if __name__ == "__main__":
-    load_dotenv()
-
-    # Example usage
-    memory = MemoryAgent()
-    memory.add_memory("Happy ghast is added to minecraft in 2025.")
-    memory.add_memory("minecraft 1.21.5 is very good")
-    memory.add_memory("Jake is not responding to my message, it's been a month")
-    memory.add_memory("Jake loves playing CSGo, Pubg and Minecraft")
-    memory.add_memory("Once worked at a secret cat cafe, inside of our college")
-    memory.add_memory("My favorite place to hang out is the backyard of our College")
-    memory.add_memory("I hate pinapple pizza")
-    memory.add_memory("I hate anime")
-    memory.add_memory("I am a funny person, poeple love to hand out with me")
-    memory.add_memory("I konw how to translate, and would be happy got help")
-    memory.add_memory("6 years of Python experience, little C# and Java experience")
-    memory.add_memory("Been learning Rust for the past 6 months")
-    memory.add_memory("Has been on Telegram for a year or so (the social media platform)")
-    memory.add_memory("Just recently joined Discord (the social media platform)")
-    memory.add_memory("I am a huge fan of the arts, and I like drawing my own pencil sketches")
-    memory.add_memory("I am a bit of a Foodie, I like pancakes more than waffles")
-    memory.add_memory("I like gaming, and watching Youtube in my free time")
-    memory.add_memory("I like cats (CARs), and birds (BIRBs)")
-    memory.add_memory("People say I have a great smile")
-    retrieved_memory = memory.retrieve_memories("smile")
-    print(retrieved_memory)

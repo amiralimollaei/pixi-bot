@@ -1,4 +1,3 @@
-from functools import partial
 import json
 import math
 import logging
@@ -7,12 +6,10 @@ import os
 
 from pixi.chatting import ChatMessage
 from pixi.chatbot import AssistantPersona, CachedAsyncChatbotFactory, AsyncChatbotInstance
-
-from pixi.utils import Ansi, load_dotenv
 from pixi.enums import ChatRole, Platform, Messages
-
 from pixi.reflection import ReflectionAPI
 from pixi.memory import MemoryAgent
+from pixi.utils import Ansi, load_dotenv
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",

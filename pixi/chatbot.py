@@ -6,7 +6,7 @@ import json
 import time
 import hashlib
 
-from .commands import AsyncCommandManager
+from .commands import AsyncCommand, AsyncCommandManager
 from .chatting import ChatRole, ChatMessage
 from .client import AsyncChatClient, Callback
 from .utils import exists
@@ -78,6 +78,9 @@ class AsyncChatbotInstance:
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
 
+    def add_command(self, command: AsyncCommand):
+        self.command_manager.add_command(command)
+    
     def add_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.command_manager.add_command(name, field_name, function, descriptioon)
 

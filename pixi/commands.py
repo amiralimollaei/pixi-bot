@@ -1,30 +1,48 @@
-import re
-from typing import Iterator, AsyncGenerator
+from dataclasses import dataclass
+from types import FunctionType
+from typing import Awaitable, Callable, Iterator, AsyncGenerator, Optional
 
-from .client import Callback
+AsyncCallback = Callable[[str], Awaitable[None]]
 
-
-# constants
-
-COMMAND_PATTERN = re.compile(r"(\w+)(?:\s?:\s?([\s\S]*))?")
+@dataclass
+class AsyncCommand:
+    name: str
+    field_name: str
+    function: AsyncCallback
+    description: Optional[str] = None
+    
+    def get_syntax(self):
+        desc = self.description or "no description"
+        return f"[{self.name}:<{self.field_name}>]: {desc}"
+    
+    async def __call__(self, *args, **kwds):
+        return await self.function(*args, **kwds)
+    
+    def __str__(self):
+        return f"<async-function {self.name}>"
 
 
 class AsyncCommandManager:
     def __init__(self):
-        self.commands: dict = dict()
+        self.commands: dict[str, AsyncCommand] = dict()
 
-    def add_command(self, name: str, field_name: str, function: Callback, description: str = None):
+    def add_command(self, command: AsyncCommand):
+        assert command is not None
+        self.commands.update({command.name.lower(): command})
+    
+    def add_command(self, name: str, field_name: str, function: AsyncCallback, description: str = None):
         assert name is not None
         assert function is not None
         assert field_name is not None
-        self.commands.update({name.lower(): dict(
-            function=function,
+        self.commands.update({name.lower(): AsyncCommand(
+            name=name,
             field_name=field_name,
+            function=function,
             description=description,
         )})
 
     def get_prompt(self):
-        return "\n".join([f"- [{name}:<{func.get('field_name')}>]: {desc}" for name, func in self.commands.items() if (desc := func.get("description"))])
+        return "\n".join(["- "+func.get_syntax() for name, func in self.commands.items()])
 
     # consumes commands and runs them automatically
     async def stream_commands(self, stream: Iterator | AsyncGenerator):
@@ -50,18 +68,19 @@ class AsyncCommandManager:
 
                 if inside_command == 0:
                     _command_str = command_str[1:-1]
-                    matches = COMMAND_PATTERN.match(_command_str)
-                    command_str.split(":")
-                    if not matches:
-                        raise SyntaxError(f"Invalid Command: `{command_str}`")
-                    groups = matches.groups()
+                    seperator_idx = None
+                    if ":" in command_str:
+                        seperator_idx = _command_str.index(":")
 
-                    command_name = groups[0]
-                    command_data = matches.groups()[1] if len(groups) >= 2 else None
+                    if seperator_idx:
+                        command_name = _command_str[:seperator_idx].strip()
+                        command_data = _command_str[seperator_idx+1:].strip()
+                    else:
+                        command_name = _command_str
 
                     command = self.commands.get(command_name.lower())
                     if command is not None:
-                        await command["function"](command_data)
+                        await command(command_data)
                     else:
                         raise NotImplementedError(f"The command `{command_name}` is not implemented.")
 

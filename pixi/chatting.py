@@ -2,7 +2,7 @@ import json
 import time
 
 from .enums import ChatRole
-from .utils import exists, format_time_ago
+from .utils import exists, format_time_ago_extended
 from .caching import AudioCache, ImageCache
 
 
@@ -180,7 +180,7 @@ class ChatMessage:
             case ChatRole.USER:
                 content = [f"User: {self.content}"]
                 if timestamps:
-                    timefmt = format_time_ago(time.time()-self.time)
+                    timefmt = format_time_ago_extended(time.time()-self.time)
                     content.append(f"Time: {timefmt}")
                 if self.metadata is not None:
                     content += [
