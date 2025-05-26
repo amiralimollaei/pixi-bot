@@ -3,10 +3,12 @@ import math
 import logging
 import time
 import os
+import random
 
 from pixi.chatting import ChatMessage
 from pixi.chatbot import AssistantPersona, CachedAsyncChatbotFactory, AsyncChatbotInstance
 from pixi.enums import ChatRole, Platform, Messages
+from pixi.giphy.api import AsyncGiphyAPI
 from pixi.reflection import ReflectionAPI
 from pixi.memory import MemoryAgent
 from pixi.utils import Ansi, load_dotenv
@@ -103,6 +105,22 @@ class PixiClient:
 
         return "\n".join(["data: " + json.dumps(m, ensure_ascii=False) for m in messages[::-1]])
 
+    async def search_gif(self, query: str):
+        print(f"called search_gif({query=})")
+        
+        results = []
+        async with AsyncGiphyAPI() as api:
+            resp = await api.search(query, rating="g")
+            data = resp.get("data")
+            for gif in data:
+                if id:=gif.get("id"):
+                    results.append(dict(
+                        slug = gif.get("slug"),
+                        title = gif.get("title"),
+                        url = f"https://i.giphy.com/{id}.webp"
+                    ))
+        return results
+    
     def init_discord_tools(self):
         self.chatbot_factory.register_tool(
             name="fetch_channel_history",
@@ -123,6 +141,23 @@ class PixiClient:
                 additionalProperties=False
             ),
             description="Fetches the last `n` message from a text channel"
+        )
+
+        self.chatbot_factory.register_tool(
+            name="search_gif",
+            func=self.search_gif,
+            parameters=dict(
+                type="object",
+                properties={
+                    "query": {
+                        "type": "string",
+                        "description": "The search query.",
+                    },
+                },
+                required=["query"],
+                additionalProperties=False
+            ),
+            description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's url as a disctint chat message."
         )
     
     async def notes_command(self, interaction):
@@ -247,7 +282,7 @@ class PixiClient:
             name="send",
             field_name="message",
             function=on_send_command,
-            descriptioon="sends a message"
+            descriptioon="sends a text as a disctint chat message"
         )
         
         conversation.add_command(
@@ -263,7 +298,7 @@ class PixiClient:
             function=on_react_command,
             descriptioon="react with an emoji to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
-        
+
         messages_checkpoint = conversation.get_messages().copy()
 
         try:
