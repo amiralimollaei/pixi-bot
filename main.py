@@ -90,7 +90,7 @@ class PixiClient:
         )
 
     async def fetch_channel_history_discord(self, channel_id: str, n: str):
-        print(f"called fetch_channel_history({channel_id=}, {n=})")
+        logging.info(f"calling fetch_channel_history({channel_id=}, {n=})")
 
         channel_id = int(channel_id)
         channel = await self.client.fetch_channel(channel_id)
@@ -106,8 +106,8 @@ class PixiClient:
         return "\n".join(["data: " + json.dumps(m, ensure_ascii=False) for m in messages[::-1]])
 
     async def search_gif(self, query: str):
-        print(f"called search_gif({query=})")
-        
+        logging.info(f"calling search_gif({query=})")
+
         results = []
         async with AsyncGiphyAPI() as api:
             resp = await api.search(query, rating="g")
