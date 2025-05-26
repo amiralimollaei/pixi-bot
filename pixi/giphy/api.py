@@ -28,7 +28,6 @@ class AsyncGiphyAPI:
                 if value is None:
                     continue
                 params.update({key: value})
-        print(params)
         resp = await self.session.get(url, params=params)
         result = await resp.json()
         await resp.release()
