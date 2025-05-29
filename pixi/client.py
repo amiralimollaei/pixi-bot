@@ -1,3 +1,4 @@
+import logging
 import re
 import os
 import json
@@ -16,7 +17,7 @@ class AsyncChatClient:
     MAX_LENGTH = 32000
     THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
-    def __init__(self, messages: list[ChatMessage] = None, model: str = "google/gemini-2.5-pro", base_url: str = "https://api.deepinfra.com/v1/openai"):
+    def __init__(self, messages: list[ChatMessage] = None, model: str = "google/gemini-2.5-flash", base_url: str = "https://api.deepinfra.com/v1/openai"):
         if messages is not None:
             assert isinstance(
                 messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
@@ -184,7 +185,7 @@ class AsyncChatClient:
                 break
 
         if len(messages) != (idx + 1):
-            print("WARN: unable to fit all messages in one request.")
+            logging.warning("unable to fit all messages in one request.")
             messages = messages[-idx:]
 
         openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]

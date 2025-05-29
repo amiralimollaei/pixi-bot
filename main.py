@@ -110,17 +110,18 @@ class PixiClient:
 
         results = []
         async with AsyncGiphyAPI() as api:
-            resp = await api.search(query, rating="g")
+            resp = await api.search(query)
             data = resp.get("data")
             for gif in data:
                 if id:=gif.get("id"):
                     results.append(dict(
                         slug = gif.get("slug"),
                         title = gif.get("title"),
+                        rating = gif.get("rating"),
                         url = f"https://i.giphy.com/{id}.webp"
                     ))
         return results
-    
+
     def init_discord_tools(self):
         self.chatbot_factory.register_tool(
             name="fetch_channel_history",
