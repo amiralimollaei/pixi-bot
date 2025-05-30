@@ -26,16 +26,17 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 ### For Discord
 
 - Install `discord.py` using `pip install discord.py`
-- Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
+- Set `OPENAI_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
 - Run `python main.py --platform discord`
 
 ### For Telegram
 
 - Install `python-telegram-bot` using `pip install "python-telegram-bot"`
-- Set `DEEPINFRA_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
+- Set `OPENAI_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
 - Run `python main.py --platform telegram`
 
 ### Using dotenv
 
 - Install `dotenv` using `pip install dotenv`
-- Create a `.env` file and set `DEEPINFRA_API_KEY`, `DISCORD_BOT_TOKEN` and `TELEGRAM_BOT_TOKEN` environment variables inside the file then run the main python files.
+- Create a `.env` file and set `OPENAI_API_KEY`, `DISCORD_BOT_TOKEN` and `TELEGRAM_BOT_TOKEN` environment variables inside the file then run the main python files.
+- Optionally set `GIPHY_API_KEY` for GIF features
