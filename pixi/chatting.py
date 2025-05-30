@@ -81,7 +81,7 @@ class ChatMessage:
                            ), f"audio must be of type AudioCache or list[AudioCache], but at least one of the list elements is not of type ImageCache, got {audio}."
         else:
             audio = []
-
+        
         # validating each role's requirements
         match role:
             case ChatRole.SYSTEM:
@@ -165,7 +165,7 @@ class ChatMessage:
     @classmethod
     def from_dict(cls, data: dict) -> 'ChatMessage':
         return cls(
-            role=data["role"],
+            role=ChatRole[data["role"].upper()],
             content=data.get("content"),
             metadata=data.get("metadata"),
             message_time=data.get("time", time.time()),
@@ -175,19 +175,19 @@ class ChatMessage:
         )
 
     def to_openai_dict(self, timestamps: bool = True) -> dict:
-        openai_dict = dict(role=self.role)
+        openai_dict = dict(role=self.role.name.lower())  # ensure role is in lower case
         match self.role:
             case ChatRole.USER:
                 content = [f"User: {self.content}"]
                 if timestamps:
                     timefmt = format_time_ago_extended(time.time()-self.time)
-                    content.append(f"Time: {timefmt}")
+                    content.append(f"Time Ago: {timefmt}")
                 if self.metadata is not None:
                     content += [
                         "Metadata:",
                         ""
                         "```json",
-                        json.dumps(self.metadata, ensure_ascii=False),
+                        json.dumps(self.metadata, ensure_ascii=False, indent=4),
                         "```"
                     ]
                 content_dict = [dict(type="text", text="\n".join(content))]

@@ -16,7 +16,7 @@
 
 {commands}
 
-**IMPORTANT**: You MUST ONLY use any of the above commands if they is enabled, otherwise your response will not be accepted.
+**IMPORTANT**: You MUST ONLY use any of the above commands if it is enabled, otherwise your response will not be accepted.
 
 **Additional details**:
 

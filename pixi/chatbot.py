@@ -5,10 +5,11 @@ import os
 import json
 import time
 import hashlib
+from typing import Optional
 
 from .commands import AsyncCommand, AsyncCommandManager
 from .chatting import ChatRole, ChatMessage
-from .client import AsyncChatClient, Callback
+from .chatclient import AsyncChatClient, Callback
 from .utils import exists
 
 # constatnt
@@ -61,7 +62,14 @@ class AssistantPersona:
 
 
 class AsyncChatbotInstance:
-    def __init__(self, uuid: int | str, persona: AssistantPersona, hash_prefix: str, messages: list[ChatMessage] = None):
+    def __init__(self,
+                 uuid: int | str,
+                 persona: AssistantPersona,
+                 hash_prefix: str,
+                 messages: list[ChatMessage] = None,
+                 model: Optional[str] = None,
+                 api_url: Optional[str] = None
+                 ):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
@@ -74,13 +82,13 @@ class AsyncChatbotInstance:
         self.is_notes_visible = False
         self.command_manager = AsyncCommandManager()
 
-        self.client = AsyncChatClient(messages)
+        self.client = AsyncChatClient(messages, model=model, base_url=api_url)
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
 
     def add_command(self, command: AsyncCommand):
         self.command_manager.add_command(command)
-    
+
     def add_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
         self.command_manager.add_command(name, field_name, function, descriptioon)
 
@@ -111,9 +119,9 @@ class AsyncChatbotInstance:
         self.realtime_data.update(data)
 
     def get_realtime_data(self):
-        data = {"time and date": time.strftime("%a %d %b %Y, %I:%M%p")}
+        data = {"Date": time.strftime("%a %d %b %Y, %I:%M%p")}
         data.update(self.realtime_data)
-        return json.dumps(data, ensure_ascii=False)
+        return json.dumps(data, ensure_ascii=False, indent=4)
 
     def get_system_prompt(self, allow_ignore: bool = True):
         return SYSTEM_PROMPT.format(

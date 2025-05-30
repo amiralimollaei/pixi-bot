@@ -3,8 +3,8 @@ import os
 import time
 import hashlib
 
-from .client import AsyncChatClient
-from .utils import exists, load_dotenv
+from ..chatclient import AsyncChatClient
+from ..utils import exists
 
 
 class MemoryItem:
