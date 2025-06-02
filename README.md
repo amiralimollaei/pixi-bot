@@ -8,10 +8,10 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 - **Multi-platform support:** Works with Discord and Telegram out of the box.
 - **Tool calling:** Supports calling external tools and APIs from chat.
-- **Image support:** Can generate, cache, and recieve images.
-- **Audio support:** Can cache and recieve audio content.
+- **Image support:** Can recieve, compress and cache images.
+- **Audio support:** Can recieve, compress and cache audio.
 - **Persona configuration:** Easily modify the bot's persona and behavior.
-- **Extensible:** Easily add new commands, tools, or integrations.
+- **Extensible:** Easily add new commands, tools, or integrations (WIP).
 - **Environment variable and dotenv support:** Securely manage API keys and tokens.
 
 ## Requirements
