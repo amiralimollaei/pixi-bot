@@ -21,26 +21,6 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - pillow (for image caching, `pip install pillow`)
 - ffmpegio (for audio caching, `pip install ffmpegio`)
 
-## Getting Started
-
-### For Discord
-
-- Install `discord.py` using `pip install discord.py`
-- Set `OPENAI_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
-- Run `python main.py --platform discord -m gpt-4o`
-
-### For Telegram
-
-- Install `python-telegram-bot` using `pip install "python-telegram-bot"`
-- Set `OPENAI_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
-- Run `python main.py --platform telegram -m gpt-4o`
-
-### Using dotenv
-
-- Install `dotenv` using `pip install dotenv`
-- Create a `.env` file and set `OPENAI_API_KEY`, `DISCORD_BOT_TOKEN` and `TELEGRAM_BOT_TOKEN` environment variables inside the file then run the main python files.
-- Optionally set `GIPHY_API_KEY` for GIF features
-
 ## Usage
 
 > you can see the following message by running `python main.py --help`
@@ -70,3 +50,23 @@ options:
   --database-names DATABASE_NAMES [DATABASE_NAMES ...], -d DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
 ```
+
+## Getting Started
+
+### For Discord
+
+- Install `discord.py` using `pip install discord.py`
+- Set `OPENAI_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
+- Run `python main.py --platform discord -m gpt-4o`
+
+### For Telegram
+
+- Install `python-telegram-bot` using `pip install "python-telegram-bot"`
+- Set `OPENAI_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
+- Run `python main.py --platform telegram -m gpt-4o`
+
+### Using dotenv
+
+- Install `dotenv` using `pip install dotenv`
+- Create a `.env` file and set `OPENAI_API_KEY`, `DISCORD_BOT_TOKEN` and `TELEGRAM_BOT_TOKEN` environment variables inside the file then run the main python files.
+- Optionally set `GIPHY_API_KEY` for GIF features
