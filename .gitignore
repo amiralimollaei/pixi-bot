@@ -179,3 +179,8 @@ convo-v2/
 # test files
 test.py
 start.sh
+
+# database files
+*.csv
+*.zst
+*.zstd

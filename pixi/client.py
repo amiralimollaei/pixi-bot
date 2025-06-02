@@ -1,21 +1,25 @@
 import asyncio
+import json
 import logging
 import math
 import os
 import time
 
 
-from pixi.agents.retrievalagent import RetrievalAgent
+from pixi.agents import RetrievalAgent, MemoryAgent
+from pixi.apis import AsyncGiphyAPI, AsyncWikimediaAPI
 from pixi.chatbot import AssistantPersona, AsyncChatbotInstance, CachedAsyncChatbotFactory
 from pixi.chatting import ChatMessage
+from pixi.database import DirectoryDatabase
 from pixi.enums import ChatRole, Messages, Platform
-from pixi.apis import AsyncGiphyAPI, AsyncWikimediaAPI
-from pixi.agents.memory import MemoryAgent
 from pixi.reflection import ReflectionAPI
 
 # constants
 
 COMMAND_PREFIXES = ["!pixi", "!pix", "!p"]
+# SEARCH_NOTICE = "You MUST CEHCK EVERY AVAILABLE SOURCE before giving up (e.g. other wikis, databases, etc.), sometimes the answer you're looking for is not in an obvious place."
+
+SEARCH_NOTICE = ""
 
 # helper functions
 
@@ -27,12 +31,17 @@ def remove_prefixes(text: str):
 
 
 class PixiClient:
-    def __init__(self, platform: Platform, model: str, api_url: str, persona_file: str = "persona.json", enable_tool_calls: bool = False):
+    def __init__(self, platform: Platform, *, model: str, helper_model: str, api_url: str, persona_file: str = "persona.json", database_names: list[str] | None = None, enable_tool_calls: bool = False):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
         self.chatbot_factory = CachedAsyncChatbotFactory(
             model=model, api_url=api_url, persona=self.persona, hash_prefix=platform)
         self.reflection_api = ReflectionAPI(platform=platform)
+
+        self.helper_model = helper_model
+
+        self.database_names = database_names or []
+        self.__tools_initalized = asyncio.Event()
 
         try:
             self.giphy_api = AsyncGiphyAPI()
@@ -43,8 +52,8 @@ class PixiClient:
         # minecarft wiki search tools
         self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
 
-        # wikipedia wiki search tools (diabled as the bot will not use other wikis in the present of this wiki)
-        # self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
+        # wikipedia wiki search tools (diabled as the AI will almost never use other sources in its presence)
+        self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
 
         # self.init_memory_module() adds global memory to the bot, disabled for privacy
 
@@ -58,6 +67,90 @@ class PixiClient:
                     self.init_discord_tools()
             case Platform.TELEGRAM:
                 self.init_telegram()
+
+    async def _init_database_tools(self):
+        await asyncio.gather(*(
+            self.init_database_tool(database_name) for database_name in self.database_names
+        ))
+        self.__tools_initalized.set()
+
+    async def init_database_tool(self, database_name: str):
+        database_api = await DirectoryDatabase.from_directory(database_name)
+
+        async def search_database(keyword: str):
+            logging.info(f"calling search_{database_name}_database({keyword=})")
+
+            resp = await database_api.search(keyword)
+            matches = [dict(
+                title=match.title,
+                snippet=match.snippet,
+                id=match.id,
+                source=match.source
+            ) for match in resp.matches]
+            return matches
+
+        self.chatbot_factory.register_tool(
+            name=f"search_{database_name}_database",
+            func=search_database,
+            parameters=dict(
+                type="object",
+                properties=dict(
+                    keyword=dict(
+                        type="string",
+                        description=f"The search keyword to find matches in the database text from the {database_name} database",
+                    ),
+                ),
+                required=["keyword"],
+                additionalProperties=False
+            ),
+            description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
+        )
+
+        async def query_database(query: str, ids: str = None):
+            logging.info(f"calling query_{database_name}_database({query=}, {ids=})")
+
+            retrieval_agent = RetrievalAgent(model=self.helper_model)
+            id_list = list(map(lambda x: x.strip(), ids.split(",")))
+
+            async def fetch_and_add(entry_id: int):
+                nonlocal retrieval_agent
+                resp = await database_api.get_entry(entry_id)
+                data = dict(
+                    content=resp.content,
+                    id=resp.id,
+                    title=resp.title,
+                    source=resp.source,
+                )
+
+                retrieval_agent.add_context(json.dumps(data, ensure_ascii=True, indent=4))
+
+            await asyncio.gather(*(fetch_and_add(int(entry_id)) for entry_id in id_list))
+            result = await retrieval_agent.retrieve(query)
+            return result
+
+        self.chatbot_factory.register_tool(
+            name=f"query_{database_name}_database",
+            func=query_database,
+            parameters=dict(
+                type="object",
+                properties=dict(
+                    query=dict(
+                        type="string",
+                        description=f"A question or a statement that you want to find information about.",
+                    ),
+                    ids=dict(
+                        type="string",
+                        description=f"Comma-seperated numerical entry ids to fetch and query information from, use `search_{database_name}_database` to optain entry ids based a search term.",
+                    ),
+                ),
+                required=["query", "ids"],
+                additionalProperties=False
+            ),
+            description=f"runs an LLM agent to fetch and query the contents of the {database_name} database using the \
+                entry ids for finding relevent entries and a more detailed query for finding relevent information, \
+                note that this will not return all the information that the page contains, you might need to use \
+                this command multiple times to get all the information out of the database entry. {SEARCH_NOTICE}"
+        )
 
     def init_memory_module(self):
         self.memory = MemoryAgent.from_file("memories.json")
@@ -107,11 +200,10 @@ class PixiClient:
         async def fetch_wiki_page(pageid: str):
             logging.info(f"calling fetch_{wiki_name}_wiki_page({pageid=})")
 
-            resp = await wiki_api.get_wikitext(pageid=pageid)
+            resp = await wiki_api.get_page(pageid=pageid)
             page_content = resp.get("parse", {})
             return page_content
 
-        
         self.chatbot_factory.register_tool(
             name=f"search_{wiki_name}_wiki",
             func=search_wiki,
@@ -126,7 +218,7 @@ class PixiClient:
                 required=["keyword"],
                 additionalProperties=False
             ),
-            description=f"Searches the {wiki_name} wiki based on a keyword and returns the page metadata. you may use this function multiple times to find the specific page you're looking for."
+            description=f"Searches the {wiki_name} wiki based on a keyword and returns the page metadata. you may use this function multiple times to find the specific page you're looking for"
         )
         if enable_fetch:
             self.chatbot_factory.register_tool(
@@ -149,7 +241,7 @@ class PixiClient:
         async def query_wiki(query: str, pageids: str = None):
             logging.info(f"calling query_{wiki_name}_wiki({query=}, {pageids=})")
 
-            retrieval_agent = RetrievalAgent(model="google/gemini-2.5-flash")
+            retrieval_agent = RetrievalAgent(model=self.helper_model)
 
             pageid_list = []
             if pageids is None:
@@ -163,17 +255,16 @@ class PixiClient:
                         pageid_list.append(pageid)
             else:
                 pageid_list = list(map(lambda x: x.strip(), pageids.split(",")))
-            
+
             async def fetch_and_add(pageid: str):
-                resp = await wiki_api.get_wikitext(pageid)
-                page_wikitext = resp.get("parse", {}).get("wikitext", {}).get("*", {})
-                if page_wikitext:
-                    retrieval_agent.add_context(page_wikitext)
-                    logging.info(f"added context from {pageid=}")
+                nonlocal retrieval_agent
+                resp = await wiki_api.get_page(pageid=pageid)
+                page_data = resp.get("parse")
+                retrieval_agent.add_context(json.dumps(page_data, ensure_ascii=False, indent=4))
 
             await asyncio.gather(*(fetch_and_add(pageid) for pageid in pageid_list[:5]))
-
-            return await retrieval_agent.retrieve(query)
+            result = await retrieval_agent.retrieve(query)
+            return result
 
         self.chatbot_factory.register_tool(
             name=f"query_{wiki_name}_wiki",
@@ -193,7 +284,10 @@ class PixiClient:
                 required=["query", "pageids"],
                 additionalProperties=False
             ),
-            description=f"runs an LLM agent to fetch and query the contents of the {wiki_name} wiki using a keyword for finding relevent pages and a more detailed query for finding relevent information, note that this will not return all the information that the page contains, you might need to use this command multiple times to get all the information out of the wiki page."
+            description=f"runs an LLM agent to fetch and query the contents of the {wiki_name} wiki using the \
+            pages numberical ids to fetch relevent pages and a detailed query for finding relevent information, \
+            note that this will not return all the information that the page contains, you might need to use \
+            this command multiple times to get all the information out of the wiki page. {SEARCH_NOTICE}"
         )
 
     def init_discord_tools(self):
@@ -368,6 +462,10 @@ class PixiClient:
         return self.chatbot_factory.get(identifier)
 
     async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):
+        if not self.__tools_initalized.is_set():
+            await self._init_database_tools()
+            await self.__tools_initalized.wait()
+
         start_typing_time = time.time()
         responded = False
         identifier = self.reflection_api.get_identifier_from_message(message)
@@ -400,7 +498,7 @@ class PixiClient:
             name="send",
             field_name="message",
             function=send_command,
-            descriptioon="sends a text as a distinct chat message, you MUST use this command to send a text"
+            descriptioon="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         )
 
         conversation.add_command(
@@ -414,7 +512,7 @@ class PixiClient:
             name="react",
             field_name="emoji",
             function=react_command,
-            descriptioon="react with an emoji to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
+            descriptioon="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
 
         messages_checkpoint = conversation.get_messages().copy()

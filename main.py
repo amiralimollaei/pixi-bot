@@ -16,9 +16,17 @@ httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.WARNING)
 
 
-def run(platform: Platform, model: str, api_url: str, enable_tool_calls=True):
-    client = PixiClient(platform=platform, model=model, api_url=api_url, enable_tool_calls=enable_tool_calls)
+def run(platform: Platform, *, model: str, helper_model: str, api_url: str, database_names: list[str] | None = None, enable_tool_calls=True):
+    client = PixiClient(
+        platform=platform,
+        model=model,
+        helper_model=helper_model,
+        api_url=api_url,
+        database_names=database_names,
+        enable_tool_calls=enable_tool_calls
+    )
     client.run()
+
 
 if __name__ == '__main__':
     from pixi.utils import load_dotenv
@@ -47,8 +55,14 @@ if __name__ == '__main__':
     parser.add_argument(
         "--model", "-m",
         type=str,
+        default="google/gemini-2.5-pro",
+        help="Model to use for the bot. Default is 'google/gemini-2.5-pro`."
+    )
+    parser.add_argument(
+        "--helper-model",
+        type=str,
         default="google/gemini-2.5-flash",
-        help="Model to use for the bot. Default is 'google/gemini-2.5-flash`."
+        help="Model to use for agentic tools. Default is 'google/gemini-2.5-flash`."
     )
     parser.add_argument(
         "--api-url", "-a",
@@ -61,6 +75,13 @@ if __name__ == '__main__':
         action="store_true",
         help="Disable tool calls for the bot."
     )
+    parser.add_argument(
+        "--database-names", "-d",
+        type=str,
+        nargs="+",
+        default=None,
+        help="add the name of databases to use (space-separated)."
+    )
     args = parser.parse_args()
 
     # Set logging level
@@ -68,8 +89,10 @@ if __name__ == '__main__':
 
     client_args = dict(
         model=args.model,
+        helper_model=args.helper_model,
         api_url=args.api_url,
-        enable_tool_calls=not args.disable_tool_calls
+        enable_tool_calls=not args.disable_tool_calls,
+        database_names=args.database_names
     )
 
     try:
@@ -88,4 +111,3 @@ if __name__ == '__main__':
         logging.info("Shutting down the bot.")
         for process in processes:
             process.join()
-

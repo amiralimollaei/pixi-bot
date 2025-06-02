@@ -13,10 +13,11 @@ class RetrievalAgent:
         self.system_prompt = "\n".join([
             "## You are a context retrieval agent",
             ""
-            "Given a list of context inputs and a query, you MUST return any relevant information that could be used to answer the query.",
-            "Write the response wihtout loosing any data, mention all the details.",
+            "Given a list of entries and a query, you must return any context that is relevent to the query.",
+            "Write the response without loosing any data, mention all the details, the less you summerize is the better.",
+            ""
             "output a json object with the following keys:",
-            " - `relevant`: a list of relevant information that could be used to answer the query",
+            " - `relevant`: a list of all information that could possibly be used to answer the query in any way",
             " - `source`: a list of sources where the information was found, if applicable",
             " - `confidence`: a score value between 1 and 10 indicating how confident you are in the information provided",
             ""
@@ -24,12 +25,9 @@ class RetrievalAgent:
             "```json",
             "{",
             "  \"relevant\": [\"Villagers can be cured from zombie villagers by using a splash potion of weakness and a golden apple.\"],",
-            "  \"source\": [\"pageid:154847\"\]",
+            "  \"source\": [\"pageid:154847\"]",
             "  \"confidence\": 9",
             "}",
-            "If there is no relevant information, simply return an empty response.",
-            ""
-            "**NOTE**: do not just list the context inputs, but rather synthesize the information to provide a coherent response."
             ])
         self.client.set_system(self.system_prompt)
 

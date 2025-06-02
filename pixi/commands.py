@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from types import FunctionType
 from typing import Awaitable, Callable, Iterator, AsyncGenerator, Optional
 
 AsyncCallback = Callable[[str], Awaitable[None]]
@@ -10,7 +9,12 @@ class AsyncCommand:
     field_name: str
     function: AsyncCallback
     description: Optional[str] = None
-    
+
+    # TODO: implement callbacks for when we enter the command (after the command name) and when
+    # we leave the command (before executing the command but right after the command is completed)
+    enter_callback: Optional[AsyncCallback] = None
+    leave_callback: Optional[AsyncCallback] = None
+
     def get_syntax(self):
         desc = self.description or "no description"
         return f"[{self.name}:<{self.field_name}>]: {desc}"
