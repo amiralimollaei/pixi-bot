@@ -21,8 +21,8 @@ COMMAND_PREFIXES = ["!pixi", "!pix", "!p"]
 
 SEARCH_NOTICE = ""
 
-# helper functions
 
+# helper functions
 
 def remove_prefixes(text: str):
     for prefix in COMMAND_PREFIXES:
@@ -52,7 +52,7 @@ class PixiClient:
         # minecarft wiki search tools
         self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
 
-        # wikipedia wiki search tools (diabled as the AI will almost never use other sources in its presence)
+        # wikipedia wiki search tools
         self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
 
         # self.init_memory_module() adds global memory to the bot, disabled for privacy

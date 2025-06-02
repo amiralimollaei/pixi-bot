@@ -3,6 +3,7 @@ from typing import Awaitable, Callable, Iterator, AsyncGenerator, Optional
 
 AsyncCallback = Callable[[str], Awaitable[None]]
 
+
 @dataclass
 class AsyncCommand:
     name: str
@@ -18,10 +19,10 @@ class AsyncCommand:
     def get_syntax(self):
         desc = self.description or "no description"
         return f"[{self.name}:<{self.field_name}>]: {desc}"
-    
+
     async def __call__(self, *args, **kwds):
         return await self.function(*args, **kwds)
-    
+
     def __str__(self):
         return f"<async-function {self.name}>"
 
@@ -33,7 +34,7 @@ class AsyncCommandManager:
     def add_command(self, command: AsyncCommand):
         assert command is not None
         self.commands.update({command.name.lower(): command})
-    
+
     def add_command(self, name: str, field_name: str, function: AsyncCallback, description: str = None):
         assert name is not None
         assert function is not None
