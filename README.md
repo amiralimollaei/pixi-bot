@@ -27,13 +27,13 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 - Install `discord.py` using `pip install discord.py`
 - Set `OPENAI_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
-- Run `python main.py --platform discord`
+- Run `python main.py --platform discord -m gpt-4o`
 
 ### For Telegram
 
 - Install `python-telegram-bot` using `pip install "python-telegram-bot"`
 - Set `OPENAI_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
-- Run `python main.py --platform telegram`
+- Run `python main.py --platform telegram -m gpt-4o`
 
 ### Using dotenv
 
