@@ -85,17 +85,11 @@ class PixiClient:
     async def init_database_tool(self, database_name: str):
         database_api = await DirectoryDatabase.from_directory(database_name)
 
+        async def get_entry_as_str(entry_id: int):
+            return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False, indent=4)
+        
         async def search_database(keyword: str):
-            logging.info(f"calling search_{database_name}_database({keyword=})")
-
-            resp = await database_api.search(keyword)
-            matches = [dict(
-                title=match.title,
-                snippet=match.snippet,
-                id=match.id,
-                source=match.source
-            ) for match in resp.matches]
-            return matches
+            return [asdict(match) for match in await database_api.search(keyword)]
 
         self.chatbot_factory.register_tool(
             name=f"search_{database_name}_database",
@@ -115,26 +109,10 @@ class PixiClient:
         )
 
         async def query_database(query: str, ids: str = None):
-            logging.info(f"calling query_{database_name}_database({query=}, {ids=})")
-
-            retrieval_agent = RetrievalAgent(model=self.helper_model)
-            id_list = list(map(lambda x: x.strip(), ids.split(",")))
-
-            async def fetch_and_add(entry_id: int):
-                nonlocal retrieval_agent
-                resp = await database_api.get_entry(entry_id)
-                data = dict(
-                    content=resp.content,
-                    id=resp.id,
-                    title=resp.title,
-                    source=resp.source,
-                )
-
-                retrieval_agent.add_context(json.dumps(data, ensure_ascii=True, indent=4))
-
-            await asyncio.gather(*(fetch_and_add(int(entry_id)) for entry_id in id_list))
-            result = await retrieval_agent.retrieve(query)
-            return result
+            return await RetrievalAgent(
+                model=self.helper_model,
+                context=await asyncio.gather(*(get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")))
+            ).retrieve(query)
 
         self.chatbot_factory.register_tool(
             name=f"query_{database_name}_database",

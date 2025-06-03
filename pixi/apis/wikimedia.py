@@ -29,15 +29,15 @@ class AsyncWikimediaAPI(APIBase):
             origin="*",
             generator="search",
             gsrsearch=srsearch,
-            gsrlimit=50,
+            gsrlimit=20,
             gsrinfo="",
             gsrprop="snippet",
             prop="extracts|info",
             inprop="url",
             exintro=1,
             explaintext=1,
-            exsentences=10,
-            exlimit=20
+            exchars=500,
+            exlimit=3
         )
 
         results = []
