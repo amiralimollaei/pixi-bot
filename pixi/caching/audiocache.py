@@ -18,6 +18,7 @@ CACHE_MAX_DURATION = 30
 
 # helpers
 
+
 def get_audio_duration(filepath: str) -> float:
     """Get duration of audio file using ffmpegio."""
     import ffmpegio
@@ -25,6 +26,7 @@ def get_audio_duration(filepath: str) -> float:
     # info['streams'] is a list of audio streams; take the first one
     duration = float(info['streams'][0]['duration'])
     return duration
+
 
 class AudioCache(MediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None, strict: bool = False):
@@ -45,7 +47,8 @@ class AudioCache(MediaCache):
             duration = get_audio_duration(tmp_in.name)
             exceeds_max_duration = duration > CACHE_MAX_DURATION
             if self.strict and exceeds_max_duration:
-                raise UnsupportedMediaException(f"Unsupported media type or format: audio should not be longer than {CACHE_MAX_DURATION} secounds.")
+                raise UnsupportedMediaException(
+                    f"Unsupported media type or format: audio should not be longer than {CACHE_MAX_DURATION} secounds.")
 
             # Use ffmpeg to cut the audio to CACHE_MAX_DURATION
             ffmpegio.transcode(

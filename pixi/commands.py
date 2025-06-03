@@ -124,6 +124,7 @@ if __name__ == "__main__":
     test_text = "\n".join([
         "[SEND: This is a test!]",
         "Nested command test [SEND: This is a [test]!]",
+        "Markdown inside command test [SEND: This is a (link)[https://example.com]!]",
         "The following command does not exist and will result in an error: [NONE]"
     ])
 

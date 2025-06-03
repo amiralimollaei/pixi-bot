@@ -67,8 +67,7 @@ class AsyncChatbotInstance:
                  persona: AssistantPersona,
                  hash_prefix: str,
                  messages: list[ChatMessage] = None,
-                 model: Optional[str] = None,
-                 api_url: Optional[str] = None
+                 **client_kwargs,
                  ):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
@@ -82,7 +81,7 @@ class AsyncChatbotInstance:
         self.is_notes_visible = False
         self.command_manager = AsyncCommandManager()
 
-        self.client = AsyncChatClient(messages, model=model, base_url=api_url)
+        self.client = AsyncChatClient(messages, **client_kwargs)
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
 
@@ -135,29 +134,15 @@ class AsyncChatbotInstance:
     async def stream_call(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
-        response: str = ""
+        response = ""
         async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal)):
             response += char
 
-        response = response.strip()
-        if response != "":
-            return self.proccess_response(response)
+        return response.strip() or None
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible
         return self.is_notes_visible
-
-    def proccess_response(self, msg: str):
-        if "[NONE]" in msg:
-            return "NO_RESPONSE"
-
-        if "[SEND]" in msg:
-            msg = msg.replace("[NONE]", "")
-
-        if not self.is_notes_visible:
-            msg = NOTES_PATTERN.sub("", msg)
-
-        return msg.strip()
 
     def get_uuid_hash(self) -> str:
         return hashlib.sha256(f"{self.prefix}{self.uuid}".encode("utf-8")).hexdigest()
@@ -188,18 +173,18 @@ class AsyncChatbotInstance:
                 self.hash_prefix = data.get("prefix")
                 self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
             except json.decoder.JSONDecodeError:
-                logging.warning(
-                    f"Unable to load the save file: {fname}, using defaults.")
+                logging.warning(f"Unable to load the instance save file `{fname}`, using default values.")
         else:
-            logging.warning("Unable to find the save file, using defaults.")
+            logging.warning(f"Unable to find the instance save file {fname}`, using default values.")
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'AsyncChatbotInstance':
+    def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
         return cls(
             uuid=data.get("uuid"),
             persona=AssistantPersona.from_dict(data.get("persona")),
             hash_prefix=data.get("prefix"),
-            messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])]
+            messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])],
+            **client_kwargs
         )
 
 
@@ -239,7 +224,7 @@ class CachedAsyncChatbotFactory:
         if identifier not in self.conversations:
             convo.load()
             self.update(identifier, convo)
-            logging.info(f"initiated a conversation with {identifier}.")
+            logging.info(f"initiated a conversation with {identifier=}.")
 
         for tool_kwargs in self.tools:
             convo.add_tool(**tool_kwargs)
@@ -265,4 +250,4 @@ class CachedAsyncChatbotFactory:
             try:
                 conversation.save()
             except Exception as e:
-                logging.exception(f"Failed to save conversation with {identifier}")
+                logging.exception(f"Failed to save conversation with {identifier=}")

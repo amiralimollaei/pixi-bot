@@ -16,14 +16,25 @@ httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.WARNING)
 
 
-def run(platform: Platform, *, model: str, helper_model: str, api_url: str, database_names: list[str] | None = None, enable_tool_calls=True):
+def run(
+    platform: Platform,
+    *,
+    model: str,
+    helper_model: str,
+    api_url: str,
+    database_names: list[str] | None = None,
+    enable_tool_calls=True,
+    log_tool_calls=False
+):
+    # create an instance of the bot and run it
     client = PixiClient(
         platform=platform,
         model=model,
         helper_model=helper_model,
         api_url=api_url,
         database_names=database_names,
-        enable_tool_calls=enable_tool_calls
+        enable_tool_calls=enable_tool_calls,
+        log_tool_calls=log_tool_calls
     )
     client.run()
 
@@ -73,7 +84,12 @@ if __name__ == '__main__':
     parser.add_argument(
         "--disable-tool-calls",
         action="store_true",
-        help="Disable tool calls for the bot."
+        help="Disable tool calls"
+    )
+    parser.add_argument(
+        "--log-tool-calls",
+        action="store_true",
+        help="Enable logging for tool calls (enabled by default when running with logging level DEBUG)"
     )
     parser.add_argument(
         "--database-names", "-d",
@@ -92,7 +108,8 @@ if __name__ == '__main__':
         helper_model=args.helper_model,
         api_url=args.api_url,
         enable_tool_calls=not args.disable_tool_calls,
-        database_names=args.database_names
+        database_names=args.database_names,
+        log_tool_calls=args.log_tool_calls
     )
 
     try:

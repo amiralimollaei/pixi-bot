@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Optional
 
@@ -31,9 +32,15 @@ class APIBase:
 
         self.api_key = api_key
 
-    async def request(self, url: str, data: Optional[dict] = None):
+    async def request(self, url: str, data: Optional[dict] = None) -> str | dict | list:
         data = data | dict(api_key=self.api_key)
         params = {k: v for k, v in data.items() if v is not None}
         async with aiohttp.ClientSession(self.base) as session:
             async with session.get(url, params=params) as resp:
-                return await resp.json()
+                content = await resp.read()
+                if content.startswith(b"{") and content.endswith(b"}"):
+                    return json.loads(content)
+                elif content.startswith(b"[") and content.endswith(b"]"):
+                    return json.loads(content)
+                else:
+                    return content.decode("utf-8")

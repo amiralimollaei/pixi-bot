@@ -5,6 +5,7 @@ import os
 import re
 from dataclasses import dataclass
 from glob import glob
+from typing import Optional
 
 import zstandard
 import aiofiles
@@ -25,19 +26,12 @@ class DatasetEntry:
 
 
 @dataclass
-class Match:
+class QueryMatch:
     title: str
     snippet: str
     id: int
     num_matches: int
     source: str | None = None
-
-
-@dataclass
-class SearchResult:
-    matches: list[Match] | None
-    failed: bool = False
-
 
 class DocumentDataset:
     def __init__(self, data: dict[int, DatasetEntry] | None = None):
@@ -70,7 +64,7 @@ class DocumentDataset:
                          "a", "an", "so", "is", "we", "us", "and", "the",
                          "they", "that", "this", "these", "those"
                      ]
-                     ) -> SearchResult:
+                     ) -> list[QueryMatch]:
         matches = []
         _query = re.split(r"[^\w]", query.lower())
         for entry in self.data.values():
@@ -95,7 +89,7 @@ class DocumentDataset:
                     num_matches += 1
 
             if num_matches != 0:
-                matches.append(Match(
+                matches.append(QueryMatch(
                     title=entry.title,
                     snippet="\n".join(snippet),
                     id=entry.id,
@@ -103,7 +97,7 @@ class DocumentDataset:
                     source=entry.source
                 ))
 
-        return SearchResult(matches=sorted(matches, key=lambda x: x.num_matches, reverse=True), failed=False)
+        return sorted(matches, key=lambda x: x.num_matches, reverse=True)
 
 
 class DirectoryDatabase:
@@ -113,7 +107,7 @@ class DirectoryDatabase:
         self.directory = directory
         self.dataset = dataset or DocumentDataset()
 
-    async def search(self, query: str) -> SearchResult:
+    async def search(self, query: str) -> list[QueryMatch]:
         return await self.dataset.search(query=query)
 
     async def get_entry(self, id: int) -> DatasetEntry:

@@ -19,7 +19,7 @@ MAX_LENGTH = 32000
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
 class AsyncChatClient:
-    def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None, log_tool_calls: bool = False):
         if messages is not None:
             assert isinstance(
                 messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
@@ -33,6 +33,7 @@ class AsyncChatClient:
         assert exists(self.model), f"model must be set, but got {self.model}"
         assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
         self.messages = messages or []
+        self.log_tool_calls = log_tool_calls
         self.session = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY"), base_url=self.base_url)
         self.system_prompt = None
         self.tools: dict = {}
@@ -122,14 +123,23 @@ class AsyncChatClient:
         for fn in function_calls:
             func = self.tools.get(fn.name)
             if func:
+                func_args_str = ", ".join([(f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}") for k, v in fn.arguments.items()])
                 try:
+                    if self.log_tool_calls:
+                        logging.info(f"Calling {fn.name}({func_args_str})...")
+                    else:
+                        logging.debug(f"Calling {fn.name}({func_args_str})...")
                     result = await func(**fn.arguments)
                     result = json.dumps(result, indent=3, ensure_ascii=False)
                 except Exception as e:
-                    logging.exception(f"Error calling tool '{fn.name}'")
+                    logging.exception(f"Error calling tool '{fn.name}({func_args_str})'")
                     result = f"Tool error: {e}"
             else:
                 result = f"Tool '{fn.name}' not found."
+            if self.log_tool_calls:
+                logging.info(f"Call {fn.name}({func_args_str}): {result}")
+            else:
+                logging.debug(f"Call {fn.name}({func_args_str}): {result}")
             results.append(ChatMessage(
                 ChatRole.TOOL,
                 content=result,

@@ -25,7 +25,7 @@ class RetrievalAgent:
             "```json",
             "{",
             "  \"relevant\": [\"Villagers can be cured from zombie villagers by using a splash potion of weakness and a golden apple.\"],",
-            "  \"source\": [\"pageid:154847\"]",
+            "  \"source\": [\"page_title:Villagers\"]",
             "  \"confidence\": 9",
             "}",
             ])
