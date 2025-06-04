@@ -529,12 +529,12 @@ class PixiClient:
             else:
                 if reply_optimization == 1:
                     metadata["in_reply_to"].update({
-                        "from": reply_message.author.display_name,
+                        "from": self.reflection_api.get_sender_information(reply_message),
                         "partial_message": reply_message_text[:64]
                     })
                 else:
                     metadata["in_reply_to"].update({
-                        "from": reply_message.author.display_name,
+                        "from": self.reflection_api.get_sender_information(reply_message),
                         "message": reply_message_text
                     })
         # convert everything into `RoleMessage``

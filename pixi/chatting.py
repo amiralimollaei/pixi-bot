@@ -180,8 +180,9 @@ class ChatMessage:
             case ChatRole.USER:
                 content = [f"User: {self.content}"]
                 if timestamps:
-                    timefmt = format_time_ago_extended(time.time()-self.time)
-                    content.append(f"Time Ago: {timefmt}")
+                    fmt_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(self.time))
+                    fmt_diff_time = format_time_ago_extended(time.time()-self.time)
+                    content.append(f"Sent At: {fmt_time} ({fmt_diff_time})")
                 if self.metadata is not None:
                     content += [
                         "Metadata:",

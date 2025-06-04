@@ -29,7 +29,7 @@ class AsyncWikimediaAPI(APIBase):
             origin="*",
             generator="search",
             gsrsearch=srsearch,
-            gsrlimit=20,
+            gsrlimit=5,
             gsrinfo="",
             gsrprop="snippet",
             prop="extracts|info",

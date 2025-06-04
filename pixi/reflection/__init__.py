@@ -45,7 +45,7 @@ class ReflectionAPI:
     def get_sender_name(self, message) -> str:
         return self._ref.get_sender_name(message)
 
-    def get_sender_information(self, message) -> str:
+    def get_sender_information(self, message) -> dict:
         return self._ref.get_sender_information(message)
 
     def is_message_from_the_bot(self, message) -> bool:
