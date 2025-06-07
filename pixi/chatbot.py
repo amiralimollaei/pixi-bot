@@ -1,11 +1,9 @@
 from dataclasses import dataclass
 import logging
-import re
 import os
 import json
 import time
 import hashlib
-from typing import Optional
 
 from .commands import AsyncCommand, AsyncCommandManager
 from .chatting import ChatRole, ChatMessage
@@ -16,10 +14,8 @@ from .utils import exists
 
 SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
 EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
-ASSISTANT_PRE = "(NOTE: I accept the guidelines of the system)\nOK! [SEND]\nLLLet's begin! :) [SEND]"
+ASSISTANT_PRE = "[NOTE: I accept the guidelines of the system] [SEND: OK!] [SEND: LLLet's begin!]"
 SAVE_PATH = "./convo-v2/userdata"
-NOTES_PATTERN = re.compile(r"(?i)\s?\(\s?NOTE:[^)]*\s?\)\s?")
-
 
 @dataclass
 class AssistantPersona:
