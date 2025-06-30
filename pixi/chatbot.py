@@ -7,7 +7,7 @@ import hashlib
 
 from .commands import AsyncCommand, AsyncCommandManager
 from .chatting import ChatRole, ChatMessage
-from .chatclient import AsyncChatClient, Callback
+from .chatclient import AsyncChatClient, AsyncFunction
 from .utils import exists
 
 # constatnt
@@ -62,7 +62,7 @@ class AsyncChatbotInstance:
                  uuid: int | str,
                  persona: AssistantPersona,
                  hash_prefix: str,
-                 messages: list[ChatMessage] = None,
+                 messages: list[ChatMessage] | None = None,
                  **client_kwargs,
                  ):
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
@@ -84,10 +84,10 @@ class AsyncChatbotInstance:
     def add_command(self, command: AsyncCommand):
         self.command_manager.add_command(command)
 
-    def add_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
+    def add_command(self, name: str, field_name: str, function: AsyncFunction, descriptioon: str = None):
         self.command_manager.add_command(name, field_name, function, descriptioon)
 
-    def add_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func: AsyncFunction, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -116,7 +116,7 @@ class AsyncChatbotInstance:
     def get_realtime_data(self):
         data = {"Date": time.strftime("%a %d %b %Y, %I:%M%p")}
         data.update(self.realtime_data)
-        return json.dumps(data, ensure_ascii=False, indent=4)
+        return json.dumps(data, ensure_ascii=False)
 
     def get_system_prompt(self, allow_ignore: bool = True):
         return SYSTEM_PROMPT.format(
@@ -191,7 +191,7 @@ class CachedAsyncChatbotFactory:
         self.tools = []
         self.commands = []
 
-    def register_command(self, name: str, field_name: str, function: Callback, descriptioon: str = None):
+    def register_command(self, name: str, field_name: str, function: AsyncFunction, descriptioon: str = None):
         self.commands.append(dict(
             name=name,
             field_name=field_name,
@@ -199,7 +199,7 @@ class CachedAsyncChatbotFactory:
             descriptioon=descriptioon
         ))
 
-    def register_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
+    def register_tool(self, name: str, func: AsyncFunction, parameters: dict = None, description: str = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)

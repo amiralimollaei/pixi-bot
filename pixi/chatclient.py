@@ -2,7 +2,8 @@ import logging
 import re
 import os
 import json
-from typing import Awaitable, Callable, Optional
+from types import CoroutineType
+from typing import Any, Awaitable, Callable, Optional
 
 from openai import AsyncOpenAI
 
@@ -10,13 +11,14 @@ from .chatting import FunctionCall, ChatRole, ChatMessage
 from .utils import exists
 
 
-Callback = Callable[[str], Awaitable[None]]
+AsyncFunction = Callable[..., CoroutineType]
 
 DEFAULT_BASE_URL = "https://api.deepinfra.com/v1/openai"
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 
 MAX_LENGTH = 32000
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
+
 
 class AsyncChatClient:
     def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None, log_tool_calls: bool = False):
@@ -34,12 +36,13 @@ class AsyncChatClient:
         assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
         self.messages = messages or []
         self.log_tool_calls = log_tool_calls
-        self.session = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY"), base_url=self.base_url)
+        self.session = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")
+                                   or os.getenv("DEEPINFRA_API_KEY"), base_url=self.base_url)
         self.system_prompt = None
         self.tools: dict = {}
         self.tool_schema: list[dict] = []
 
-    def add_tool(self, name: str, func: Callback, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func: AsyncFunction, parameters: dict | None = None, description: str | None = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -87,14 +90,14 @@ class AsyncChatClient:
             model=self.model,
             messages=openai_messages,
             temperature=0.7,
-            #max_tokens=MAX_LENGTH,
+            # max_tokens=MAX_LENGTH,
             top_p=0.9,
             stream=stream,
         )
         if self.tool_schema:
             kwargs["tools"] = self.tool_schema
 
-        return await self.session.chat.completions.create(**kwargs)
+        return await self.session.chat.completions.create(**kwargs)  # type: ignore
 
     async def get_tool_results(self, tool_calls: list):
         """
@@ -123,23 +126,27 @@ class AsyncChatClient:
         for fn in function_calls:
             func = self.tools.get(fn.name)
             if func:
-                func_args_str = ", ".join([(f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}") for k, v in fn.arguments.items()])
+                func_args_str = ", ".join([(f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
+                                          for k, v in fn.arguments.items()])
                 try:
                     if self.log_tool_calls:
                         logging.info(f"Calling {fn.name}({func_args_str})...")
                     else:
                         logging.debug(f"Calling {fn.name}({func_args_str})...")
                     result = await func(**fn.arguments)
-                    result = json.dumps(result, indent=3, ensure_ascii=False)
+                    result = json.dumps(result, ensure_ascii=False)
                 except Exception as e:
                     logging.exception(f"Error calling tool '{fn.name}({func_args_str})'")
                     result = f"Tool error: {e}"
+
+                if self.log_tool_calls:
+                    logging.info(f"Call {fn.name}({func_args_str}): {result}")
+                else:
+                    logging.debug(f"Call {fn.name}({func_args_str}): {result}")
             else:
-                result = f"Tool '{fn.name}' not found."
-            if self.log_tool_calls:
-                logging.info(f"Call {fn.name}({func_args_str}): {result}")
-            else:
-                logging.debug(f"Call {fn.name}({func_args_str}): {result}")
+                result = f"Tool '{fn.name}' was not found."
+                logging.warning(f"Tool '{fn.name}' was not found.")
+
             results.append(ChatMessage(
                 ChatRole.TOOL,
                 content=result,
@@ -170,7 +177,7 @@ class AsyncChatClient:
                     yield char
         if verbose:
             print()
-        
+
         if response:
             self.messages.append(ChatMessage(
                 role=ChatRole.ASSISTANT,
@@ -182,7 +189,7 @@ class AsyncChatClient:
             async for chunk in self.stream_request():
                 yield chunk
 
-    async def request(self, enable_timestamps: bool = True) -> str:
+    async def request(self, enable_timestamps: bool = True) -> str | None:
         choice = (await self.create_chat_completion(
             stream=False,
             enable_timestamps=enable_timestamps
@@ -193,28 +200,34 @@ class AsyncChatClient:
         # if tools are called, reslove them and repeat the request recursively
         if tool_calls := choice.message.tool_calls:
             self.messages += await self.get_tool_results(tool_calls)
-            return self.request(enable_timestamps=enable_timestamps)
+            return await self.request(enable_timestamps=enable_timestamps)
 
     def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
+        if len(self.messages) == 0:
+            return list()
+
         messages = self.messages.copy()
 
         final_len = 0
-        for idx, message in enumerate(messages):
+        for cutoff_index, message in enumerate(messages):
             role = message.role
             context = message.content or ""
             final_len += len(role) + len(context) + 3
             if final_len > MAX_LENGTH * 4:
                 break
+        else:
+            cutoff_index = None
 
-        if len(messages) != (idx + 1):
+        if cutoff_index:
             logging.warning("unable to fit all messages in one request.")
-            messages = messages[-idx:]
+            messages = messages[-cutoff_index:]
 
         openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
         # add system as the last message to ensure it is in the model's context
         if exists(self.system_prompt):
-            openai_messages.append(ChatMessage(
-                ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps))
+            openai_messages.append(
+                ChatMessage(ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps)
+            )
         return openai_messages
 
     async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
@@ -228,6 +241,8 @@ class AsyncChatClient:
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
 
+        # TODO: fix the check for think tags opening
+        
         start_think = "<think>"
         end_think = "</think>"
 
@@ -246,7 +261,7 @@ class AsyncChatClient:
                 yield chunk
 
         if temporal:
-            self.messages = orig_messages
+            self.messages = orig_messages # type: ignore
 
     async def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
         if temporal:
@@ -260,15 +275,15 @@ class AsyncChatClient:
         self.messages.append(message)
 
         response = await self.request(enable_timestamps=enable_timestamps)
-        response = THINK_PATTERN.sub("", )
+        if response is not None:
+            response = THINK_PATTERN.sub("", response)
 
         if temporal:
-            self.messages = orig_messages
+            self.messages = orig_messages # type: ignore
         return response
 
     def to_dict(self):
         return dict(
-            system_prompt=self.system_prompt,
             messages=[msg.to_dict() for msg in self.messages]
         )
 
@@ -276,7 +291,6 @@ class AsyncChatClient:
     def from_dict(cls, data: dict):
         return cls(
             messages=[ChatMessage.from_dict(msg) for msg in data.get("messages") or []],
-            system_prompt=data.get("system_prompt"),
         )
 
 

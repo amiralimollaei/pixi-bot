@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Iterator, AsyncGenerator, Optional
+from types import CoroutineType
+from typing import  Any, Callable, Iterator, AsyncGenerator, Optional, overload
 
-AsyncCallback = Callable[[str], Awaitable[None]]
+AsyncCallback = Callable[..., CoroutineType]
 
 
 @dataclass
@@ -31,20 +32,20 @@ class AsyncCommandManager:
     def __init__(self):
         self.commands: dict[str, AsyncCommand] = dict()
 
-    def add_command(self, command: AsyncCommand):
+    def _add_command(self, command: AsyncCommand):
         assert command is not None
         self.commands.update({command.name.lower(): command})
 
-    def add_command(self, name: str, field_name: str, function: AsyncCallback, description: str = None):
+    def add_command(self, name: str, field_name: str, function: AsyncCallback, description: str | None = None):
         assert name is not None
         assert function is not None
         assert field_name is not None
-        self.commands.update({name.lower(): AsyncCommand(
+        self._add_command(AsyncCommand(
             name=name,
             field_name=field_name,
             function=function,
             description=description,
-        )})
+        ))
 
     def get_prompt(self):
         return "\n".join(["- "+func.get_syntax() for name, func in self.commands.items()])
@@ -77,6 +78,7 @@ class AsyncCommandManager:
                     if ":" in command_str:
                         seperator_idx = _command_str.index(":")
 
+                    command_data = None
                     if seperator_idx:
                         command_name = _command_str[:seperator_idx].strip()
                         command_data = _command_str[seperator_idx+1:].strip()

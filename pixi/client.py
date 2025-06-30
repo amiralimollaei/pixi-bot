@@ -63,11 +63,10 @@ class PixiClient:
             self.giphy_api = None
 
         # TODO: add configurable wikis
-        self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
-        self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
-
-        if not enable_tool_calls:
-            logging.warning("Tool calls are disabled, running with limited functionality.")
+        if self.enable_tool_calls:
+            self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
+            self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
+            # self.init_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
         match platform:
             case Platform.DISCORD:
@@ -77,17 +76,26 @@ class PixiClient:
                 self.init_telegram()
 
     async def __init_database_tools(self):
+        if not self.enable_tool_calls:
+            logging.warning("tried to initalize a database tool, but tool calls are disabled")
+            self.database_tools_initalized.set()
+            return
+        
         await asyncio.gather(*(
             self.init_database_tool(database_name) for database_name in self.database_names
         ))
         self.database_tools_initalized.set()
 
     async def init_database_tool(self, database_name: str):
+        if not self.enable_tool_calls:
+            logging.warning("tried to initalize a database tool, but tool calls are disabled")
+            return
+
         database_api = await DirectoryDatabase.from_directory(database_name)
 
         async def get_entry_as_str(entry_id: int):
-            return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False, indent=4)
-        
+            return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False)
+
         async def search_database(keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
 
@@ -108,7 +116,9 @@ class PixiClient:
             description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
         )
 
-        async def query_database(query: str, ids: str = None):
+        async def query_database(query: str, ids: str):
+            if ids is None:
+                return "no result, no ids specified"
             return await RetrievalAgent(
                 model=self.helper_model,
                 context=await asyncio.gather(*(get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")))
@@ -136,6 +146,10 @@ class PixiClient:
         )
 
     def init_mediawiki_tools(self, url: str, wiki_name: str):
+        if not self.enable_tool_calls:
+            logging.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
+            return
+        
         wiki_api = AsyncWikimediaAPI(url)
 
         async def search_wiki(keyword: str):
@@ -205,39 +219,22 @@ class PixiClient:
         )
 
     def init_discord_tools(self):
+        if not self.enable_tool_calls:
+            logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
+            return
+        
         async def fetch_channel_history(channel_id: str, n: str):
             logging.info(f"calling fetch_channel_history({channel_id=}, {n=})")
-
-            channel_id = int(channel_id)
-            channel = await self.client.fetch_channel(channel_id)
-            n = int(n)
-
+            channel = await self.client.fetch_channel(int(channel_id))
             messages = []
-            async for message in channel.history(limit=n):
+            # TODO: check channel type
+            async for message in channel.history(limit=int(n)):
                 messages.append(dict(
                     from_user=self.reflection_api.get_sender_information(message),
                     message_text=self.reflection_api.get_message_text(message)
                 ))
 
             return messages[::-1]
-
-        async def search_gif(query: str):
-            logging.info(f"calling search_gif({query=})")
-            resp = await self.giphy_api.search(query, rating="pg")
-            data = resp.get("data")
-            results = []
-            if data is None:
-                logging.warning(f"No GIFs found for query: {query}")
-                return []
-            for gif in data:
-                if id := gif.get("id"):
-                    results.append(dict(
-                        slug=gif.get("slug"),
-                        title=gif.get("title"),
-                        rating=gif.get("rating"),
-                        url=f"https://i.giphy.com/{id}.webp"
-                    ))
-            return results
 
         self.chatbot_factory.register_tool(
             name="fetch_channel_history",
@@ -261,6 +258,25 @@ class PixiClient:
         )
 
         if self.giphy_api is not None:
+            async def search_gif(query: str):
+                logging.info(f"calling search_gif({query=})")
+                assert self.giphy_api is not None
+                resp: dict = await self.giphy_api.search(query, rating="pg") # type: ignore
+                data = resp.get("data")
+                results = []
+                if data is None:
+                    logging.warning(f"No GIFs found for query: {query}")
+                    return []
+                for gif in data:
+                    if id := gif.get("id"):
+                        results.append(dict(
+                            slug=gif.get("slug"),
+                            title=gif.get("title"),
+                            rating=gif.get("rating"),
+                            url=f"https://i.giphy.com/{id}.webp"
+                        ))
+                return results
+            
             self.chatbot_factory.register_tool(
                 name="search_gif",
                 func=search_gif,
@@ -389,7 +405,7 @@ class PixiClient:
         conversation = self.get_conversation(identifier)
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
 
-        async def send_command(text):
+        async def send_command(text: str):
             nonlocal responded
             nonlocal start_typing_time
             response_time = time.time() - start_typing_time
@@ -445,7 +461,7 @@ class PixiClient:
             logging.exception(f"Cannot send message in {identifier}")
         except Exception:
             logging.exception(f"Unknown error while responding to a message in {identifier}")
-            await self.reflection_api.send_reply(message, Messages.SOMETHING_WENT_WRONG)
+            await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
 
         if responded:
             conversation.save()
@@ -545,6 +561,7 @@ class PixiClient:
     def run(self):
         match self.platform:
             case Platform.DISCORD:
+                assert self.token
                 self.client.run(self.token, log_handler=None)
             case Platform.TELEGRAM:
                 self.application.run_polling()
@@ -552,8 +569,10 @@ class PixiClient:
     async def run_async(self):
         match self.platform:
             case Platform.DISCORD:
+                assert self.token
                 await self.client.start(self.token)
             case Platform.TELEGRAM:
                 await self.application.initialize()
                 await self.application.start()
+                assert self.application.updater
                 await self.application.updater.start_polling()

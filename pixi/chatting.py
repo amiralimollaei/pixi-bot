@@ -50,14 +50,14 @@ class FunctionCall:
 class ChatMessage:
     def __init__(
         self,
-        role: ChatRole,
-        content: str,
-        metadata: dict = None,
+        role: ChatRole | str,
+        content: str | None,
+        metadata: dict | None = None,
         message_time: float = -1,
-        images: ImageCache | list[ImageCache] = None,
-        audio: AudioCache | list[AudioCache] = None,
-        tool_calls: list[FunctionCall] = None,
-        tool_call_id: str = None
+        images: ImageCache | list[ImageCache] | None = None,
+        audio: AudioCache | list[AudioCache] | None = None,
+        tool_calls: list[FunctionCall] | None = None,
+        tool_call_id: str | None = None
     ):
         assert role is not None, f"expected `role` to be of type `Role` and not be None, but got `{role}`"
         if images is not None:
@@ -81,7 +81,7 @@ class ChatMessage:
                            ), f"audio must be of type AudioCache or list[AudioCache], but at least one of the list elements is not of type ImageCache, got {audio}."
         else:
             audio = []
-        
+
         # validating each role's requirements
         match role:
             case ChatRole.SYSTEM:
@@ -147,7 +147,7 @@ class ChatMessage:
         self.audio = audio
 
         # store function calls and function results
-        self.tool_calls: list[FunctionCall] = tool_calls
+        self.tool_calls: list[FunctionCall] = tool_calls or []
         self.tool_call_id = tool_call_id
 
     def to_dict(self) -> dict:
@@ -175,7 +175,7 @@ class ChatMessage:
         )
 
     def to_openai_dict(self, timestamps: bool = True) -> dict:
-        openai_dict = dict(role=self.role.name.lower())  # ensure role is in lower case
+        openai_dict = dict(role=self.role.lower())  # ensure role is in lower case
         match self.role:
             case ChatRole.USER:
                 content = [f"User: {self.content}"]
@@ -188,10 +188,10 @@ class ChatMessage:
                         "Metadata:",
                         ""
                         "```json",
-                        json.dumps(self.metadata, ensure_ascii=False, indent=4),
+                        json.dumps(self.metadata, ensure_ascii=False),
                         "```"
                     ]
-                content_dict = [dict(type="text", text="\n".join(content))]
+                content_dict: list[dict] = [dict(type="text", text="\n".join(content))]
                 for img in self.images:
                     content_dict.append(dict(
                         type="image_url",
@@ -205,19 +205,19 @@ class ChatMessage:
                         ),
                         type="input_audio",
                     ))
-                openai_dict.update(dict(content=content_dict))
+                openai_dict.update(dict(content=content_dict))  # type: ignore
             case ChatRole.ASSISTANT:
                 if exists(self.content, True):
-                    openai_dict.update(dict(content=self.content))
+                    openai_dict.update(dict(content=self.content)) # type: ignore
                 else:
                     openai_dict.update(dict(
                         tool_calls=[i.to_openai_dict() for i in self.tool_calls]
-                    ))
+                    ))  # type: ignore
             case ChatRole.TOOL:
                 openai_dict.update(dict(
                     content=self.content,
                     tool_call_id=self.tool_call_id
-                ))
+                ))  # type: ignore
             case _:
-                openai_dict.update(dict(content=self.content))
+                openai_dict.update(dict(content=self.content)) # type: ignore
         return openai_dict

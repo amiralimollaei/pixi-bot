@@ -4,7 +4,7 @@ import asyncio
 import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
 
-from ..enums import Platform
+from ..enums import Platform, Messages
 from ..caching import ImageCache, AudioCache, UnsupportedMediaException
 
 
@@ -27,12 +27,21 @@ class ReflectionAPI:
             case _:
                 return f"chat#{chat.id}"
 
-    def get_realtime_data(self, message: telegram.Message):
-        return {
-            "Platform": "Telegram",
-            "Chat type": message.chat.type,
-            "Chat title": message.chat.title
-        }
+    def get_channel_info(self, message: telegram.Message) -> dict:
+        return {"type": message.chat.type, "name": message.chat.title, "id": message.chat.id}
+
+    def get_guild_info(self, guild) -> dict:
+        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("get_guild_info", self.platform.title()))
+    
+    def get_thread_info(self, thread) -> dict:
+        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("get_thread_info", self.platform.title()))
+
+    
+    def get_realtime_data(self, message: telegram.Message) -> dict:
+        return dict(
+            platform="Telegram",
+            current_channel_info=self.get_channel_info(message),
+        )
 
     async def send_status_typing(self, message: telegram.Message):
         await message.chat.send_chat_action(ChatAction.TYPING)
@@ -46,7 +55,7 @@ class ReflectionAPI:
         except telegram.error.BadRequest:
             await origin.reply_text(text, *args, **kwargs)
 
-    async def send_reply(self, message: telegram.Message, text: str, delay: int = None, ephemeral: bool = False):
+    async def send_reply(self, message: telegram.Message, text: str, delay: int | None = None, ephemeral: bool = False):
         chat_id = message.chat_id
 
         # delay adds realism
@@ -70,21 +79,25 @@ class ReflectionAPI:
             raise RuntimeError(f"There was an unexpected error while send a message in chat {chat_id}")
 
     def get_sender_id(self, message: telegram.Message):
+        assert message.from_user is not None, "from_user is None"
         return message.from_user.id
 
     def get_sender_name(self, message: telegram.Message):
+        assert message.from_user is not None, "from_user is None"
         return message.from_user.full_name
 
     def get_sender_information(self, message: telegram.Message):
+        assert message.from_user is not None, "from_user is None"
         user = message.from_user
         return dict(
             id=user.id,
             username=user.username,
             full_name=user.full_name,
-            mention_string="@" + user.username,
+            mention_string=f"@{user.username}",
         )
 
     def is_message_from_the_bot(self, message: telegram.Message) -> bool:
+        assert message.from_user is not None, "from_user is None"
         return message.get_bot().id == message.from_user.id
 
     async def fetch_attachment_images(self, message: telegram.Message) -> list[ImageCache]:
@@ -137,7 +150,7 @@ class ReflectionAPI:
             text = ""
         return text
 
-    async def fetch_message_reply(self, message: telegram.Message) -> telegram.Message:
+    async def fetch_message_reply(self, message: telegram.Message) -> telegram.Message | None:
         return message.reply_to_message
 
     def is_bot_mentioned(self, message: telegram.Message):
@@ -148,6 +161,8 @@ class ReflectionAPI:
         return message.chat.type == ChatType.PRIVATE
 
     async def is_dm_or_admin(self, interaction: telegram.Message) -> bool:
+        assert interaction.from_user is not None, "from_user is None"
+
         if interaction.chat.type == ChatType.PRIVATE:
             return True
         # Check if user has admin permissions to use the bot commands

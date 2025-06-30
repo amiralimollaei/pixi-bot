@@ -111,9 +111,9 @@ if __name__ == '__main__':
         database_names=args.database_names,
         log_tool_calls=args.log_tool_calls
     )
-
+    
+    processes = []
     try:
-        processes = []
         platform = args.platform.upper()
         if platform == "ALL":
             for plat in Platform:

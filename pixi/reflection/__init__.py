@@ -24,6 +24,15 @@ class ReflectionAPI:
     def get_identifier_from_message(self, message) -> str:
         return self._ref.get_identifier_from_message(message)
 
+    def get_channel_info(self, message) -> dict:
+        return self._ref.get_channel_info(message)
+
+    def get_guild_info(self, guild) -> dict:
+        return self._ref.get_guild_info(guild)
+
+    def get_thread_info(self, thread) -> dict:
+        return self._ref.get_thread_info(thread)
+
     def get_realtime_data(self, message) -> dict:
         return self._ref.get_realtime_data(message)
 
@@ -36,7 +45,7 @@ class ReflectionAPI:
     async def send_response(self, origin, text: str, ephemeral: bool = False, *args, **kwargs):
         return await self._ref.send_response(origin, text, ephemeral, *args, **kwargs)
 
-    async def send_reply(self, message, text: str, delay: int = None, ephemeral: bool = False) -> bool:
+    async def send_reply(self, message, text: str, delay: int | None = None, ephemeral: bool = False):
         return await self._ref.send_reply(message, text, delay, ephemeral)
 
     def get_sender_id(self, message) -> int:
@@ -56,7 +65,7 @@ class ReflectionAPI:
 
     async def fetch_attachment_audio(self, message) -> list[AudioCache]:
         return await self._ref.fetch_attachment_audio(message)
-    
+
     def get_message_text(self, message) -> str:
         return self._ref.get_message_text(message)
 
@@ -69,8 +78,8 @@ class ReflectionAPI:
     def is_inside_dm(self, message) -> bool:
         return self._ref.is_inside_dm(message)
 
-    async def is_dm_or_admin(self, interaction) -> bool:
-        return await self._ref.is_dm_or_admin(interaction)
+    async def is_dm_or_admin(self, origin) -> bool:
+        return await self._ref.is_dm_or_admin(origin)
 
     async def add_reaction(self, message, emoji: str):
         return await self._ref.add_reaction(message, emoji)

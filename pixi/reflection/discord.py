@@ -15,6 +15,7 @@ class ReflectionAPI:
 
     def get_identifier_from_message(self, message: discord.Message | discord.Interaction) -> str:
         channel = message.channel
+        assert channel is not None, "chanel is None"
 
         # Check if the message is in a guild (server)
         if channel.guild is not None:
@@ -24,85 +25,90 @@ class ReflectionAPI:
         # If the message is in a DM or group chat, use the channel ID
         return f"channel#{channel.id}"
 
-    def get_realtime_data(self, message: discord.Message):
-        rt_data = {"Platform": "Discord"}
-
+    def get_channel_info(self, message: discord.Message) -> dict:
         match message.channel.type:
             case discord.ChannelType.private:
-                rt_data.update({"text_channel": {"type": "DM / Private Chat"}})
+                channel_info = {"type": "DM / Private Chat", "id": message.channel.id}
             case discord.ChannelType.group:
-                rt_data.update({"text_channel": {"type": "Group Chat"}})
+                channel_info = {"type": "Group Chat", "id": message.channel.id}
             case discord.ChannelType.text:
-                channle_name = message.channel.name
-                rt_data.update({"text_channel": {"type": "Unknown", "name": channle_name}})
+                channle_name = getattr(message.channel, 'name', "Unknown")
+                channel_info = {"type": "Text", "name": channle_name, "id": message.channel.id}
             case _:
                 channle_name = getattr(message.channel, 'name', "Unknown")
-                rt_data.update({"text_channel": {"type": "Unknown", "name": channle_name}})
-        rt_data["text_channel"].update({"id": message.channel.id})
+                channel_info = {"type": "Unknown", "name": channle_name, "id": message.channel.id}
+        return channel_info
+
+    def get_guild_info(self, guild: discord.Guild) -> dict:
+        return {
+            "name": guild.name,
+            "members_count": guild.member_count,
+            "categories": [{
+                "name": cat.name,
+                "is_nsfw": cat.nsfw,
+                "stage_channels": [{
+                    "name": c.name,
+                    "id": c.id,
+                    "is_nsfw": c.nsfw,
+                    "user_limit": c.user_limit,
+                    "connected_listeners": {
+                        "count": len(c.listeners),
+                        "members": [m.display_name for m in c.listeners]
+                    },
+                    "channel_url": c.jump_url
+                } for c in cat.stage_channels],
+                "voice_channels": [{
+                    "name": c.name,
+                    "id": c.id,
+                    "is_nsfw": c.nsfw,
+                    "user_limit": c.user_limit,
+                    "connected_members": {
+                        "count": len(c.members),
+                        "members": [m.display_name for m in c.members]
+                    },
+                    "channel_url": c.jump_url
+                } for c in cat.voice_channels],
+                "text_channels": [{
+                    "name": c.name,
+                    "id": c.id,
+                    "is_nsfw": c.nsfw,
+                    "channel_url": c.jump_url
+                } for c in cat.text_channels],
+            } for cat in guild.categories],
+            "members": [{
+                "display_name": m.display_name,
+                "mention_string": m.mention,
+                "id": m.id,
+                "roles": [
+                    {
+                        "name": r.name,
+                        "color": '#{:06X}'.format(r.color.value),
+                        "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
+                    } for r in m.roles
+                ],
+            } for m in guild.members]
+        }
+
+    def get_thread_info(self, thread: discord.Thread) -> dict:
+        return {
+            "name": thread.name,
+            "members_count": thread.member_count,
+            "members": [{
+                "id": m.id,
+            } for m in thread.members]
+        }
+
+    def get_realtime_data(self, message: discord.Message) -> dict:
+        rt_data = dict(
+            platform="Discord",
+            current_channel_info=self.get_channel_info(message)
+        )
 
         if message.guild is not None:
-            rt_data.update({
-                "guild": {
-                    "name": message.guild.name,
-                    "members_count": message.guild.member_count,
-                    "categories": [
-                        {
-                            "name": cat.name,
-                            "is_nsfw": cat.nsfw,
-                            "stage_channels": [
-                                {
-                                    "name": c.name,
-                                    "id": c.id,
-                                    "is_nsfw": c.nsfw,
-                                    "user_limit": c.user_limit,
-                                    "connected_listeners": {
-                                        "count": len(c.listeners),
-                                        "members": [m.display_name for m in c.listeners]
-                                    },
-                                    "channel_url": c.jump_url
-                                } for c in cat.stage_channels
-                            ],
-                            "voice_channels": [
-                                {
-                                    "name": c.name,
-                                    "id": c.id,
-                                    "is_nsfw": c.nsfw,
-                                    "user_limit": c.user_limit,
-                                    "connected_members": {
-                                        "count": len(c.members),
-                                        "members": [m.display_name for m in c.members]
-                                    },
-                                    "channel_url": c.jump_url
-                                } for c in cat.voice_channels
-                            ],
-                            "text_channels": [
-                                {
-                                    "name": c.name,
-                                    "id": c.id,
-                                    "is_nsfw": c.nsfw,
-                                    "channel_url": c.jump_url
-                                } for c in cat.text_channels
-                            ],
-                        } for cat in message.guild.categories
-                    ]
-                }
-            })
-            rt_data.update({
-                "members_count": message.guild.member_count,
-                "members": [{
-                    "display_name": m.display_name,
-                    "roles": [
-                        {
-                            "name": r.name,
-                            "color": '#{:06X}'.format(r.color.value),
-                            "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
-                        } for r in m.roles
-                    ],
-                    "mention_string": m.mention,
-                } for m in message.guild.members]
-            })
+            rt_data.update(guild=self.get_guild_info(message.guild))
+
         if message.thread is not None:
-            rt_data.update({"thread": message.thread.name})
+            rt_data.update(thread=self.get_thread_info(message.thread))
 
         return rt_data
 
@@ -126,7 +132,7 @@ class ReflectionAPI:
             raise TypeError(
                 f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
 
-    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int = None, ephemeral: bool = False):
+    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int | None = None, ephemeral: bool = False):
         if isinstance(message, discord.Message):
             # delay adds realism
             if delay is not None and delay > 0:
@@ -145,15 +151,17 @@ class ReflectionAPI:
                         if self.can_read_history(message.channel):
                             await self.send_response(message, text, reference=message)
                         else:
-                            await self.send_response(f"{message.author.mention} {text}")
+                            await self.send_response(message, f"{message.author.mention} {text}")
                 break
             except discord.Forbidden as e:
                 logging.exception(f"Forbidden")
-                raise RuntimeError(f"Cannot send message in channel {message.channel.id}")
+                channel_id = message.channel.id if message.channel else None
+                raise RuntimeError(f"Cannot send message in channel ({channel_id=})")
             except discord.HTTPException as e:
                 logging.warning(f"HTTPException while sending message: {e}, retrying ({i}/{num_retries})")
         else:
-            raise RuntimeError(f"There was an unexpected error while send a message in channel {message.channel.id}")
+            channel_id = message.channel.id if message.channel else None
+            raise RuntimeError(f"There was an unexpected error while send a message in channel ({channel_id=})")
 
     def get_sender_id(self, message: discord.Message):
         return message.author.id
@@ -171,6 +179,7 @@ class ReflectionAPI:
 
     def is_message_from_the_bot(self, message: discord.Message) -> bool:
         bot_user = message._state.user
+        assert bot_user is not None, "bot_user is None"
         return message.author.id == bot_user.id
 
     async def fetch_attachment_images(self, message: discord.Message) -> list[ImageCache]:
@@ -180,7 +189,7 @@ class ReflectionAPI:
             if attachment.content_type in supported_mime_types:
                 attachments.append(ImageCache(await attachment.read()))
         return attachments
-    
+
     async def fetch_attachment_audio(self, message: discord.Message) -> list[AudioCache]:
         # Only allow compressed audio formats
         supported_mime_types = {'audio/mp3', 'audio/mpeg', 'audio/aac', 'audio/ogg'}
@@ -197,12 +206,14 @@ class ReflectionAPI:
     def get_message_text(self, message: discord.Message) -> str:
         return message.content if message.content else ''
 
-    async def fetch_message_reply(self, message: discord.Message) -> discord.Message:
+    async def fetch_message_reply(self, message: discord.Message) -> discord.Message | None:
         ref = message.reference
         if ref is None:
-            return None
+            return
         if ref.cached_message:
             return ref.cached_message
+        if ref.message_id is None:
+            return
         return await message.channel.fetch_message(ref.message_id)
 
     def is_bot_mentioned(self, message: discord.Message) -> bool:
@@ -216,7 +227,7 @@ class ReflectionAPI:
         if isinstance(interaction.channel, discord.DMChannel):
             return True
         # check if user has admin permissions to use the bot commands
-        if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:
+        if hasattr(interaction.user, 'guild_permissions') and interaction.user.guild_permissions.administrator:  # type: ignore
             return True
         return False
 

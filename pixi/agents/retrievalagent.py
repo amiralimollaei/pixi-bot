@@ -67,7 +67,7 @@ class RetrievalAgent:
         prompt = "\n".join([
             "Context:",
             "```json",
-            json.dumps(self.context, indent=4),
+            json.dumps(self.context),
             "```",
             ""
             f"Query: \"{query}\"",
