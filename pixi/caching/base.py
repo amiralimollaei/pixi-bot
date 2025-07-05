@@ -9,21 +9,24 @@ from ..utils import exists
 
 class UnsupportedMediaException(Exception):
     """Exception raised when an unsupported media type or format is encountered."""
+
     def __init__(self, message="Unsupported media type or format."):
         super().__init__(message)
+
 
 @dataclass
 class CompressedMedia:
     mime_type: str
-    bytes: str
-    format: str = None
-    metadata: dict = None
-    
+    bytes: bytes
+    format: Optional[str] = None
+    metadata: Optional[dict] = None
+
     def to_base64(self):
         return b64encode(self.bytes).decode("utf-8")
-    
+
     def to_data_url(self):
         return "data:image/jpeg;base64," + self.to_base64()
+
 
 class MediaCache:
     """
@@ -52,9 +55,9 @@ class MediaCache:
                 self.load_cache()
             else:
                 self.media = self.compress(data_bytes)
-                
+
                 os.makedirs(self.cache_dir, exist_ok=True)
-                
+
                 path = self.cache_path
                 if path and not os.path.isfile(path):
                     with open(path, "wb") as f:
@@ -83,36 +86,37 @@ class MediaCache:
     def from_dict(cls, data: dict):
         if not (hash_value := data.get("hash")):
             raise ValueError("Hash value is required to load ImageCache instance.")
-        return cls(hash_value=hash_value)
+        return cls(hash_value=hash_value)  # type: ignore
 
     def to_dict(self) -> dict:
         return dict(hash=self.hash)
 
     def exists(self) -> bool:
         path = self.cache_path
-        return exists(path) and os.path.isfile(path)
+        return exists(path) and os.path.isfile(path)  # type: ignore
 
     def __ensure_initialized(self):
         if self.media is None:
             raise RuntimeError("attemted to access uninitialized cache")
-    
+
     def load_cache(self):
         if self.media is None:
             path = self.cache_path
             if path and os.path.exists(path):
                 with open(path, "rb") as f:
                     self.media = CompressedMedia(
-                        mime_type = self.mime_type,
-                        bytes = f.read(),
-                        format = self.format,
+                        mime_type=self.mime_type,
+                        bytes=f.read(),
+                        format=self.format,
                     )
             else:
                 raise FileNotFoundError("Media not found in cache.")
         return self.media
-    
+
     def get_bytes(self) -> Optional[bytes]:
         if self.media is None:
             self.load_cache()
+        assert self.media
         return self.media.bytes
 
     def get_mime_type(self) -> str:
@@ -123,8 +127,10 @@ class MediaCache:
 
     def to_data_url(self) -> str:
         self.__ensure_initialized()
+        assert self.media
         return self.media.to_data_url()
 
     def to_base64(self) -> str:
         self.__ensure_initialized()
+        assert self.media
         return self.media.to_base64()

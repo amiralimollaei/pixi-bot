@@ -1,23 +1,33 @@
+from dataclasses import dataclass
+from typing import Any
+import logging
+import re
+import os
 import json
 import time
 
+from openai import AsyncOpenAI
+
 from .enums import ChatRole
-from .utils import exists, format_time_ago_extended
+from .utils import exists, format_time_ago
 from .caching import AudioCache, ImageCache
+from .typing import Optional, AsyncFunction
+
+# constants
+
+DEFAULT_BASE_URL = "https://api.deepinfra.com/v1/openai"
+DEFAULT_MODEL = "google/gemini-2.5-flash"
+
+MAX_LENGTH = 32000
+THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
 
+@dataclass
 class FunctionCall:
-    def __init__(self, name: str, arguments: dict, index: int, id: str):
-        assert exists(name) and isinstance(name, str), f"expected `name` to be of type `str` but got {name}"
-        assert exists(arguments) and isinstance(
-            arguments, dict), f"expected `arguments` to be of type `dict` but got {arguments}"
-        assert exists(index) and isinstance(index, int), f"expected `index` to be of type `int` but got {index}"
-        assert exists(id) and isinstance(id, str), f"expected `id` to be of type `str` but got {id}"
-
-        self.name = name
-        self.arguments = arguments
-        self.index = index
-        self.id = id
+    name: str
+    index: int
+    id: str
+    arguments: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return dict(
@@ -40,45 +50,56 @@ class FunctionCall:
     @classmethod
     def from_dict(cls, data: dict) -> 'FunctionCall':
         return cls(
-            name=data.get("name"),
+            name=data["name"],
+            index=data["index"],
+            id=data["id"],
             arguments=data.get("arguments"),
-            index=data.get("index"),
-            id=data.get("id")
         )
-
 
 class ChatMessage:
     def __init__(
         self,
         role: ChatRole | str,
-        content: str | None,
-        metadata: dict | None = None,
-        message_time: float = -1,
-        images: ImageCache | list[ImageCache] | None = None,
-        audio: AudioCache | list[AudioCache] | None = None,
-        tool_calls: list[FunctionCall] | None = None,
-        tool_call_id: str | None = None
-    ):
+        content: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        message_time: Optional[float] = None,
+        images: Optional[ImageCache | list[ImageCache]] = None,
+        audio: Optional[AudioCache | list[AudioCache]] = None,
+        tool_calls: Optional[list[FunctionCall]] = None,
+        tool_call_id: Optional[str] = None,
+        *,
+        # TODO: add type hints and type checks
+        instance_id: Optional[str] = None,
+        origin = None,
+        bot = None
+    ): 
+        self.instance_id = instance_id
+
+        # the original message that this message is instantiated from, should be of type
+        # discord.Message or telegram.Message, but the type is not specified here to avoid import
+        # errors if one library is not found, is used mostly to reply to the original message
+        self.origin = origin
+        
+        self.bot = bot
+
         assert role is not None, f"expected `role` to be of type `Role` and not be None, but got `{role}`"
         if images is not None:
-            assert isinstance(images, (ImageCache, list)
-                              ), f"Images must be of type ImageCache or list[ImageCache], but got {images}."
+            assert isinstance(images, (ImageCache, list)), f"Images must be of type ImageCache or list[ImageCache], but got {images}."
             if isinstance(images, ImageCache):
                 images = [images]
             else:
-                assert all([isinstance(i, ImageCache) for i in images]
-                           ), f"Images must be of type ImageCache or list[ImageCache], but at least one of the list elements is not of type ImageCache, got {images}."
+                for image in images:
+                    assert isinstance(image, ImageCache), f"expected image to be ImageCache, but got {image}."
         else:
             images = []
 
         if audio is not None:
-            assert isinstance(audio, (AudioCache, list)
-                              ), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
+            assert isinstance(audio, (AudioCache, list)), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
             if isinstance(audio, AudioCache):
                 audio = [audio]
             else:
-                assert all([isinstance(i, AudioCache) for i in audio]
-                           ), f"audio must be of type AudioCache or list[AudioCache], but at least one of the list elements is not of type ImageCache, got {audio}."
+                for _audio in audio:
+                    assert isinstance(_audio, AudioCache), f"expected audio to be of type AudioCache, but got {_audio}."
         else:
             audio = []
 
@@ -141,7 +162,7 @@ class ChatMessage:
         self.role = role
         self.content = content
         self.metadata = metadata
-        self.time = (message_time if message_time > 0 else time.time())
+        self.time = (message_time if message_time and message_time > 0 else time.time())
 
         self.images = images  # Should be an ImageCache instance or a list of ImageCache instances or None
         self.audio = audio
@@ -149,6 +170,12 @@ class ChatMessage:
         # store function calls and function results
         self.tool_calls: list[FunctionCall] = tool_calls or []
         self.tool_call_id = tool_call_id
+
+    @property
+    async def instance(self):
+        if not self.bot:
+            return
+        return await self.bot.get_conversation(self.instance_id)
 
     def to_dict(self) -> dict:
         return dict(
@@ -181,7 +208,7 @@ class ChatMessage:
                 content = [f"User: {self.content}"]
                 if timestamps:
                     fmt_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(self.time))
-                    fmt_diff_time = format_time_ago_extended(time.time()-self.time)
+                    fmt_diff_time = format_time_ago(time.time()-self.time)
                     content.append(f"Sent At: {fmt_time} ({fmt_diff_time})")
                 if self.metadata is not None:
                     content += [
@@ -221,3 +248,280 @@ class ChatMessage:
             case _:
                 openai_dict.update(dict(content=self.content)) # type: ignore
         return openai_dict
+
+class AsyncChatClient:
+    def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None, log_tool_calls: bool = False):
+        if messages is not None:
+            assert isinstance(
+                messages, list), f"expected messages to be of type `list[RoleMessage]` or be None, but got `{messages}`"
+            for m in messages:
+                assert isinstance(
+                    m, ChatMessage), f"expected messages to be of type `list[RoleMessage]` or be None, but at least one element in the list is not of type `RoleMessage`, got `{messages}`"
+        self.base_url = base_url or DEFAULT_BASE_URL
+        assert exists(self.base_url), f"base_url must be set, but got {self.base_url}"
+        assert isinstance(self.base_url, str), f"base_url must be a string, but got {self.base_url}"
+        self.model = model or DEFAULT_MODEL
+        assert exists(self.model), f"model must be set, but got {self.model}"
+        assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
+        self.messages = messages or []
+        self.log_tool_calls = log_tool_calls
+        self.session = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")
+                                   or os.getenv("DEEPINFRA_API_KEY"), base_url=self.base_url)
+        self.system_prompt = None
+        self.tools: dict = {}
+
+    def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
+        """
+        Register a tool (function) for tool calling.
+        name: tool name (string)
+        func: (str) -> Awaitable[None]
+        parameters: OpenAI tool/function parameters schema (dict)
+        description: description of the tool (string)
+        """
+        self.tools[name] = dict(
+            func = func,
+            schema = dict(
+                type="function",
+                function=dict(
+                    name=name,
+                    description=description or name,
+                    parameters=parameters or dict(),
+                )
+            )
+        )
+
+    def set_system(self, prompt: str):
+        assert prompt is not None and prompt != ""
+        self.system_prompt = prompt
+
+    def add_message(self, message: ChatMessage | str):
+        assert message is not None
+        if isinstance(message, ChatMessage):
+            self.messages.append(message)
+        elif isinstance(message, str):
+            role = None
+            match self.messages[-1].role:
+                case ChatRole.SYSTEM:
+                    role = ChatRole.ASSISTANT
+                case ChatRole.ASSISTANT:
+                    role = ChatRole.USER
+                case ChatRole.USER:
+                    role = ChatRole.ASSISTANT
+                case _:
+                    role = ChatRole.ASSISTANT
+            self.messages.append(ChatMessage(role, message))
+        else:
+            raise ValueError(f"expected message to be a RoleMessage or a string, but got {message}.")
+
+    async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
+        # If tools are registered, add them to the request
+        openai_messages = self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
+        kwargs = dict(
+            model=self.model,
+            messages=openai_messages,
+            temperature=0.7,
+            # max_tokens=MAX_LENGTH,
+            top_p=0.9,
+            stream=stream,
+        )
+        if self.tools:
+            kwargs["tools"] = [v["schema"] for k, v in self.tools.items()]
+
+        return await self.session.chat.completions.create(**kwargs)  # type: ignore
+
+    async def get_tool_results(self, tool_calls: list):
+        """
+        Execute tool calls and return results
+        """
+
+        function_calls: list[FunctionCall] = []
+        for tool_call in tool_calls:
+            function = tool_call.function
+            function_name = function.name
+            function_arguments = json.loads(function.arguments)
+            index = tool_call.index
+            id = tool_call.id
+            function_calls.append(FunctionCall(
+                name=function_name,
+                arguments=function_arguments,
+                index=index,
+                id=id
+            ))
+
+        results = [ChatMessage(
+            ChatRole.ASSISTANT,
+            content=None,
+            tool_calls=function_calls
+        )]
+        for fn in function_calls:
+            tool = self.tools.get(fn.name)
+            if tool:
+                func = tool["func"]
+                func_args_str = ""
+                if fn.arguments:
+                    func_args_str = ", ".join([(f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}") for k, v in fn.arguments.items()])
+                try:
+                    if self.log_tool_calls:
+                        logging.info(f"Calling {fn.name}({func_args_str})...")
+                    else:
+                        logging.debug(f"Calling {fn.name}({func_args_str})...")
+                    result = await func(**fn.arguments) # type: ignore
+                    result = json.dumps(result, ensure_ascii=False)
+                except Exception as e:
+                    logging.exception(f"Error calling tool '{fn.name}({func_args_str})'")
+                    result = f"Tool error: {e}"
+
+                if self.log_tool_calls:
+                    logging.info(f"Call {fn.name}({func_args_str}): {result}")
+                else:
+                    logging.debug(f"Call {fn.name}({func_args_str}): {result}")
+            else:
+                result = f"Tool '{fn.name}' was not found."
+                logging.warning(f"Tool '{fn.name}' was not found.")
+
+            results.append(ChatMessage(
+                ChatRole.TOOL,
+                content=result,
+                tool_call_id=fn.id,
+            ))
+        return results
+
+    async def stream_request(self, verbose: bool = False):
+        response = ""
+        finish_reason = None
+        async for event in await self.create_chat_completion(stream=True):
+            if event.choices is None or len(event.choices) == 0:
+                continue
+            choice = event.choices[0]
+
+            if exists(_tool_calls := choice.delta.tool_calls):
+                self.messages += await self.get_tool_results(_tool_calls)
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            if content := choice.delta.content:
+                if verbose:
+                    print(content, end="", flush=True)
+                response += content
+                # now yields the response character by character for easier parsing
+                for char in content:
+                    yield char
+        if verbose:
+            print()
+
+        if response:
+            self.messages.append(ChatMessage(
+                role=ChatRole.ASSISTANT,
+                content=response
+            ))
+
+        if finish_reason == "tool_calls":
+            # Recursively call stream_request and yield its results
+            async for chunk in self.stream_request():
+                yield chunk
+
+    async def request(self, enable_timestamps: bool = True) -> str | None:
+        choice = (await self.create_chat_completion(
+            stream=False,
+            enable_timestamps=enable_timestamps
+        )).choices[0]
+        if choice.message.content:
+            return choice.message.content
+
+        # if tools are called, reslove them and repeat the request recursively
+        if tool_calls := choice.message.tool_calls:
+            self.messages += await self.get_tool_results(tool_calls)
+            return await self.request(enable_timestamps=enable_timestamps)
+
+    def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
+        if len(self.messages) == 0:
+            return list()
+
+        messages = self.messages.copy()
+
+        final_len = 0
+        for cutoff_index, message in enumerate(messages):
+            role = message.role
+            context = message.content or ""
+            final_len += len(role) + len(context) + 3
+            if final_len > MAX_LENGTH * 4:
+                break
+        else:
+            cutoff_index = None
+
+        if cutoff_index:
+            logging.warning("unable to fit all messages in one request.")
+            messages = messages[-cutoff_index:]
+
+        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
+        # add system as the last message to ensure it is in the model's context
+        if exists(self.system_prompt):
+            openai_messages.append(
+                ChatMessage(ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps)
+            )
+        return openai_messages
+
+    async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
+        if temporal:
+            orig_messages = self.messages.copy()
+
+        if isinstance(message, str):
+            message = ChatMessage(ChatRole.USER, message)
+        else:
+            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
+
+        assert message.role == ChatRole.USER, "Message must be from the user."
+        self.messages.append(message)
+
+        # TODO: fix the check for think tags opening
+        
+        start_think = "<think>"
+        end_think = "</think>"
+
+        response: str = ""
+        is_thinking = False
+        async for chunk in self.stream_request():
+            response += chunk
+
+            if response.endswith(start_think):
+                is_thinking = True
+            elif response.endswith(end_think):
+                is_thinking = False
+                response = THINK_PATTERN.sub("", response)
+
+            if not is_thinking and response.strip() != "":
+                yield chunk
+
+        if temporal:
+            self.messages = orig_messages # type: ignore
+
+    async def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
+        if temporal:
+            orig_messages = self.messages.copy()
+
+        if isinstance(message, str):
+            message = ChatMessage(ChatRole.USER, message)
+        else:
+            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
+        assert message.role == ChatRole.USER, "Message must be from the user."
+        self.messages.append(message)
+
+        response = await self.request(enable_timestamps=enable_timestamps)
+        if response is not None:
+            response = THINK_PATTERN.sub("", response)
+
+        if temporal:
+            self.messages = orig_messages # type: ignore
+        return response
+
+    def to_dict(self):
+        return dict(
+            messages=[msg.to_dict() for msg in self.messages]
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(
+            messages=[ChatMessage.from_dict(msg) for msg in data.get("messages") or []],
+        )

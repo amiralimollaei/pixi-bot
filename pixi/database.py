@@ -1,14 +1,17 @@
+from dataclasses import dataclass
+from glob import glob
 import asyncio
 import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass
-from glob import glob
-from typing import Optional
 
 import zstandard
 import aiofiles
+
+# constants
+
+BASE_DIR = "datasets"
 
 
 @dataclass
@@ -21,7 +24,9 @@ class DatasetEntry:
     def __hash__(self):
         return hash(self.content)
 
-    def __eq__(self, other: 'DatasetEntry'):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DatasetEntry):
+            return NotImplemented
         return self.content == other.content
 
 
@@ -32,6 +37,7 @@ class QueryMatch:
     id: int
     num_matches: int
     source: str | None = None
+
 
 class DocumentDataset:
     def __init__(self, data: dict[int, DatasetEntry] | None = None):
@@ -101,9 +107,7 @@ class DocumentDataset:
 
 
 class DirectoryDatabase:
-    BASE_DIR = "datasets"
-
-    def __init__(self, directory: str | None, dataset: DocumentDataset | None = None):
+    def __init__(self, directory: str, dataset: DocumentDataset | None = None):
         self.directory = directory
         self.dataset = dataset or DocumentDataset()
 
@@ -120,7 +124,7 @@ class DirectoryDatabase:
     async def from_directory(cls, directory: str):
         assert directory
 
-        full_dir = os.path.join(cls.BASE_DIR, directory)
+        full_dir = os.path.join(BASE_DIR, directory)
 
         if not os.path.isdir(full_dir):
             dataset = DocumentDataset()
@@ -144,7 +148,7 @@ class DirectoryDatabase:
     async def save(self):
         assert self.dataset, "dataset is not initialized, nothing to save"
 
-        full_dir = os.path.join(self.BASE_DIR, self.directory)
+        full_dir = os.path.join(BASE_DIR, self.directory)
 
         os.makedirs(full_dir, exist_ok=True)
 
@@ -183,8 +187,8 @@ if __name__ == "__main__":
 
     async def main():
         database = await DirectoryDatabase.from_directory("TechMCDocs")
-        result = await database.search("update skipper")
-        for match in result.matches:
+        matches = await database.search("update skipper")
+        for match in matches:
             print(match)
 
     asyncio.run(main())

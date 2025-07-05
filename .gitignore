@@ -184,3 +184,6 @@ start.sh
 *.csv
 *.zst
 *.zstd
+
+# addons folder
+addons/

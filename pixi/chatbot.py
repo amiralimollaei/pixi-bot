@@ -1,30 +1,32 @@
+from functools import partial
 from dataclasses import dataclass
+import hashlib
 import logging
-import os
 import json
 import time
-import hashlib
+import os
 
-from .commands import AsyncCommand, AsyncCommandManager
-from .chatting import ChatRole, ChatMessage
-from .chatclient import AsyncChatClient, AsyncFunction
+from .chatting import AsyncChatClient, ChatMessage, ChatRole
+from .commands import AsyncCommandManager
+from .typing import AsyncFunction, AsyncPredicate, Optional
 from .utils import exists
 
 # constatnt
 
 SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
 EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
-ASSISTANT_PRE = "[NOTE: I accept the guidelines of the system] [SEND: OK!] [SEND: LLLet's begin!]"
+ASSISTANT_PRE = "[NOTE: I accept the guidelines of the system, I use the SEND command] [SEND: OK!] [SEND: LLLet's begin!]"
 SAVE_PATH = "./convo-v2/userdata"
+
 
 @dataclass
 class AssistantPersona:
     name: str
-    age: int = None
-    occupation: str = None
-    memories: list[str] = None
-    appearance: str = None
-    nationality: str = None
+    age: Optional[int] = None
+    occupation: Optional[str] = None
+    memories: Optional[list[str]] = None
+    appearance: Optional[str] = None
+    nationality: Optional[str] = None
 
     def to_dict(self) -> dict:
         return dict(
@@ -39,7 +41,7 @@ class AssistantPersona:
     @classmethod
     def from_dict(cls, data: dict) -> 'AssistantPersona':
         return cls(
-            name=data.get("name"),
+            name=data["name"],
             age=data.get("age"),
             occupation=data.get("occupation"),
             memories=data.get("memories"),
@@ -57,37 +59,63 @@ class AssistantPersona:
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
 
+@dataclass
+class PredicateTool:
+    name: str
+    func: AsyncFunction
+    parameters: Optional[dict] = None
+    description: Optional[str] = None
+    predicate: Optional[AsyncPredicate] = None
+
+
+@dataclass
+class PredicateCommand:
+    name: str
+    field_name: str
+    func: AsyncFunction
+    description: str
+    predicate: Optional[AsyncPredicate] = None
+
+
 class AsyncChatbotInstance:
     def __init__(self,
                  uuid: int | str,
                  persona: AssistantPersona,
                  hash_prefix: str,
-                 messages: list[ChatMessage] | None = None,
+                 messages: Optional[list[ChatMessage]] = None,
+                 *,
+                 bot=None,
                  **client_kwargs,
                  ):
+        self.bot = bot
+        assert self.bot
+
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
 
-        self.uuid = uuid
+        self.uuid = str(uuid)
         self.persona = persona
         self.prefix = hash_prefix
+
+        self.uuid_hash = hashlib.sha256(f"{self.prefix}{self.uuid}".encode("utf-8")).hexdigest()
+        self.path = os.path.join(SAVE_PATH, self.uuid_hash + ".json")
 
         self.realtime_data = dict()
         self.is_notes_visible = False
         self.command_manager = AsyncCommandManager()
 
+        self.last_send_time = 0.0
+        self.responded = False
+
         self.client = AsyncChatClient(messages, **client_kwargs)
         if messages is not None:
-            self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE))
+            self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE, bot=self.bot))
 
-    def add_command(self, command: AsyncCommand):
-        self.command_manager.add_command(command)
+    def add_command(self, name: str, field_name: str, func: AsyncFunction, description: Optional[str] = None):
+        self.command_manager.add_command(name, field_name, func, description)
 
-    def add_command(self, name: str, field_name: str, function: AsyncFunction, descriptioon: str = None):
-        self.command_manager.add_command(name, field_name, function, descriptioon)
-
-    def add_tool(self, name: str, func: AsyncFunction, parameters: dict = None, description: str = None):
+    def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -130,8 +158,16 @@ class AsyncChatbotInstance:
     async def stream_call(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
+        if isinstance(message, str):
+            message = ChatMessage(ChatRole.USER, message)
+        else:
+            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
+
+        # this is intended to be handled by this class
+        message.bot = self.bot
+
         response = ""
-        async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal)):
+        async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal), refrence_message=message):
             response += char
 
         return response.strip() or None
@@ -139,12 +175,6 @@ class AsyncChatbotInstance:
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible
         return self.is_notes_visible
-
-    def get_uuid_hash(self) -> str:
-        return hashlib.sha256(f"{self.prefix}{self.uuid}".encode("utf-8")).hexdigest()
-
-    def get_file(self) -> str:
-        return os.path.join(SAVE_PATH, self.get_uuid_hash() + ".json")
 
     def to_dict(self):
         return dict(
@@ -155,95 +185,99 @@ class AsyncChatbotInstance:
         )
 
     def save(self):
-        # we make sure the save directory exists because we can't write to it, if it doesn't exist
         os.makedirs(SAVE_PATH, exist_ok=True)
-        with open(self.get_file(), "w", encoding="utf-8") as f:
+        with open(self.path, "w", encoding="utf-8") as f:
             f.write(json.dumps(self.to_dict(), ensure_ascii=False))
 
     def load(self):
-        fname = self.get_file()
-        if os.path.exists(fname):
+        if os.path.isfile(self.path):
             try:
-                data = json.load(open(fname, "r", encoding="utf-8"))
+                data = json.load(open(self.path, "r", encoding="utf-8"))
                 self.persona = AssistantPersona.from_dict(data.get("persona"))
                 self.hash_prefix = data.get("prefix")
                 self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
             except json.decoder.JSONDecodeError:
-                logging.warning(f"Unable to load the instance save file `{fname}`, using default values.")
+                logging.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         else:
-            logging.warning(f"Unable to find the instance save file {fname}`, using default values.")
+            logging.warning(f"Unable to find the instance save file {self.path}`, using default values.")
 
     @classmethod
     def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
         return cls(
-            uuid=data.get("uuid"),
-            persona=AssistantPersona.from_dict(data.get("persona")),
-            hash_prefix=data.get("prefix"),
+            uuid=data["uuid"],
+            persona=AssistantPersona.from_dict(data["persona"]),
+            hash_prefix=data["prefix"],
             messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])],
             **client_kwargs
         )
 
 
 class CachedAsyncChatbotFactory:
-    def __init__(self, **kwargs):
-        self.conversations: dict[str, AsyncChatbotInstance] = {}
+    def __init__(self, *, bot=None, **kwargs):
+        self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
-        self.tools = []
-        self.commands = []
+        self.tools: list[PredicateTool] = []
+        self.commands: list[PredicateCommand] = []
+        self.bot = bot
+        assert self.bot
 
-    def register_command(self, name: str, field_name: str, function: AsyncFunction, descriptioon: str = None):
-        self.commands.append(dict(
-            name=name,
-            field_name=field_name,
-            function=function,
-            descriptioon=descriptioon
-        ))
+    def register_command(self, command: PredicateCommand):
+        """
+        Register a command
 
-    def register_tool(self, name: str, func: AsyncFunction, parameters: dict = None, description: str = None):
+        commands are inline tools with only one parameter that can be used by all models even without tool
+        calling capabilities, their descriptions are dynamically added to the system prompt at runtime
+        """
+
+        self.commands.append(command)
+
+    def register_tool(self, tool: PredicateTool):
         """
         Register a tool (function) for tool calling.
-        name: tool name (string)
-        func: Callback
-        parameters: OpenAI tool/function parameters schema (dict)
-        description: description of the tool (string)
         """
 
-        self.tools.append(dict(
-            name=name,
-            func=func,
-            parameters=parameters,
-            description=description
-        ))
+        self.tools.append(tool)
 
-    def get(self, identifier: str) -> AsyncChatbotInstance:
-        convo = self.conversations.get(identifier, AsyncChatbotInstance(identifier, **self.kwargs))
-        if identifier not in self.conversations:
-            convo.load()
-            self.update(identifier, convo)
+    async def get(self, identifier: str) -> AsyncChatbotInstance:
+        __instance = self.instances.get(identifier)
+        if __instance is None:
+            __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)
+            __instance.load()
+
+            self.instances.update({identifier: __instance})
+
+            for tool in self.tools:
+                if tool.predicate is None or await tool.predicate(__instance):
+                    __instance.add_tool(
+                        name=tool.name,
+                        func=partial(tool.func, __instance),
+                        parameters=tool.parameters,
+                        description=tool.description
+                    )
+
+            for command in self.commands:
+                if command.predicate is None or await command.predicate(__instance):
+                    __instance.add_command(
+                        name=command.name,
+                        func=partial(command.func, __instance),
+                        field_name=command.field_name,
+                        description=command.description
+                    )
+
             logging.info(f"initiated a conversation with {identifier=}.")
 
-        for tool_kwargs in self.tools:
-            convo.add_tool(**tool_kwargs)
-
-        for command_kwargs in self.commands:
-            convo.add_command(**command_kwargs)
-
-        return convo
-
-    def update(self, identifier: str, conversation: AsyncChatbotInstance):
-        self.conversations.update({identifier: conversation})
+        return __instance
 
     def remove(self, identifier: str):
-        if identifier in self.conversations.keys():
-            del self.conversations[identifier]
-
-        fname = AsyncChatbotInstance(identifier, **self.kwargs).get_file()
-        if os.path.exists(fname):
-            os.remove(fname)
+        if identifier in self.instances.keys():
+            logging.info(f"removing {identifier}")
+            instance = self.instances.pop(identifier)
+            if os.path.exists(instance.path):
+                os.remove(instance.path)
 
     def save(self):
-        for identifier, conversation in self.conversations.items():
+        for identifier, conversation in self.instances.items():
             try:
                 conversation.save()
             except Exception as e:
-                logging.exception(f"Failed to save conversation with {identifier=}")
+                logging.exception(f"Failed to save conversation with {identifier=}: {e}")

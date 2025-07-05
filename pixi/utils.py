@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from enum import StrEnum
 
@@ -31,29 +30,8 @@ def load_dotenv():
         dotenv.load_dotenv()
 
 
-# https://stackoverflow.com/a/76636817
-
-
-def format_time_ago(delta: float) -> str:
-    """Return time difference as human-readable string"""
-    periods = (
-        ("year", 60 * 60 * 24 * 365),
-        ("month", 60 * 60 * 24 * 30),
-        ("week", 60 * 60 * 24 * 7),
-        ("day", 60 * 60 * 24),
-        ("hour", 60 * 60),
-        ("minute", 60),
-        ("second", 1),
-    )
-
-    for period, seconds_each in periods:
-        if delta >= seconds_each:
-            how_many = int(delta / seconds_each)
-            return f"{how_many} {period}{'s' if how_many >= 2 else ''} ago"
-
-    return "just now"  # less than a second ago
-
-def format_time_ago_extended(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
+# modified from https://stackoverflow.com/a/76636817
+def format_time_ago(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
     """Return time difference as human-readable string"""
 
     periods = (
@@ -65,7 +43,7 @@ def format_time_ago_extended(delta: float, min_count: int = 3, max_lenght: int =
         ("minute", 60),
         ("second", 1),
     )
-    
+
     fmt_list = []
     for period, seconds_each in periods:
         if delta >= seconds_each:
@@ -74,13 +52,14 @@ def format_time_ago_extended(delta: float, min_count: int = 3, max_lenght: int =
                 fmt_list.append(f"{how_many} {period}{'s' if how_many >= 2 else ''}")
                 if len(fmt_list) >= max_lenght:
                     break
-                
+
                 delta -= seconds_each * how_many
 
     if fmt_list:
         return " and ".join(fmt_list) + " ago"
 
     return "just now"  # less than a second ago
+
 
 class Ansi(StrEnum):
     END = '\33[0m'

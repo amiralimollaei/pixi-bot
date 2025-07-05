@@ -6,14 +6,17 @@ import math
 import os
 import time
 
+from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
 
-from pixi.agents import RetrievalAgent
-from pixi.apis import AsyncGiphyAPI, AsyncWikimediaAPI
-from pixi.chatbot import AssistantPersona, AsyncChatbotInstance, CachedAsyncChatbotFactory
-from pixi.chatting import ChatMessage
-from pixi.database import DirectoryDatabase
-from pixi.enums import ChatRole, Messages, Platform
-from pixi.reflection import ReflectionAPI
+from .typing import AsyncPredicate, Optional
+from .agents import RetrievalAgent
+from .apis import AsyncGiphyAPI, AsyncWikimediaAPI
+from .chatbot import AssistantPersona, PredicateCommand, PredicateTool
+from .chatting import ChatMessage
+from .database import DirectoryDatabase
+from .enums import ChatRole, Messages, Platform
+from .reflection import ReflectionAPI
+from .addon import AddonManager
 
 # constants
 
@@ -29,20 +32,22 @@ def remove_prefixes(text: str):
 
 
 class PixiClient:
-    def __init__(self,
-                 platform: Platform,
-                 *,
-                 model: str,
-                 helper_model: str,
-                 api_url: str,
-                 persona_file: str = "persona.json",
-                 database_names: list[str] | None = None,
-                 enable_tool_calls: bool = False,
-                 log_tool_calls: bool = False
-                 ):
+    def __init__(
+        self,
+        platform: Platform,
+        *,
+        model: str,
+        helper_model: str,
+        api_url: str,
+        persona_file: str = "persona.json",
+        database_names: Optional[list[str]] = None,
+        enable_tool_calls: bool = False,
+        log_tool_calls: bool = False
+    ):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
         self.chatbot_factory = CachedAsyncChatbotFactory(
+            bot=self,
             model=model,
             base_url=api_url,
             persona=self.persona,
@@ -68,6 +73,8 @@ class PixiClient:
             self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
             # self.init_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
+        self.init_chatbot_commands()
+
         match platform:
             case Platform.DISCORD:
                 self.init_discord()
@@ -75,12 +82,84 @@ class PixiClient:
             case Platform.TELEGRAM:
                 self.init_telegram()
 
+        self.addon_manager = AddonManager(self)
+        self.addon_manager.load_addons()
+
+    def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
+        if not self.enable_tool_calls:
+            logging.warning("tried to register a tool, but tool calls are disabled")
+            return
+
+        self.chatbot_factory.register_tool(PredicateTool(
+            name=name,
+            func=func,
+            parameters=parameters,
+            description=description,
+            predicate=predicate
+        ))
+
+    def register_command(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None):
+        self.chatbot_factory.register_command(PredicateCommand(
+            name=name,
+            func=func,
+            field_name=field_name,
+            description=description,
+            predicate=predicate
+        ))
+
+    async def send_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
+        assert refrence.origin is not None
+
+        delay_time = time.time() - instance.last_send_time
+        instance.last_send_time = time.time()
+
+        wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
+        await self.reflection_api.send_reply(refrence.origin, value, wait_time)
+
+    async def note_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
+        assert refrence.origin is not None
+        assert refrence.instance_id is not None
+
+        if instance.is_notes_visible:
+            await self.reflection_api.send_reply(refrence.origin, f"> note: {value}")
+
+    async def react_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
+        assert refrence.origin is not None
+        refrence_message = refrence.origin
+
+        try:
+            await self.reflection_api.add_reaction(refrence_message, value)
+        except Exception:
+            logging.exception(f"Failed to add reaction {value} to message {refrence_message.id}")
+
+    def init_chatbot_commands(self):
+        self.chatbot_factory.register_command(PredicateCommand(
+            name="send",
+            field_name="message",
+            func=self.send_command,
+            description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
+        ))
+
+        self.chatbot_factory.register_command(PredicateCommand(
+            name="note",
+            field_name="thoughts",
+            func=self.note_command,
+            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
+        ))
+
+        self.chatbot_factory.register_command(PredicateCommand(
+            name="react",
+            field_name="emoji",
+            func=self.react_command,
+            description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
+        ))
+
     async def __init_database_tools(self):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a database tool, but tool calls are disabled")
             self.database_tools_initalized.set()
             return
-        
+
         await asyncio.gather(*(
             self.init_database_tool(database_name) for database_name in self.database_names
         ))
@@ -96,10 +175,10 @@ class PixiClient:
         async def get_entry_as_str(entry_id: int):
             return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False)
 
-        async def search_database(keyword: str):
+        async def search_database(instance: AsyncChatbotInstance, keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name=f"search_{database_name}_database",
             func=search_database,
             parameters=dict(
@@ -116,7 +195,7 @@ class PixiClient:
             description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
         )
 
-        async def query_database(query: str, ids: str):
+        async def query_database(instance: AsyncChatbotInstance, query: str, ids: str):
             if ids is None:
                 return "no result, no ids specified"
             return await RetrievalAgent(
@@ -124,7 +203,7 @@ class PixiClient:
                 context=await asyncio.gather(*(get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")))
             ).retrieve(query)
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name=f"query_{database_name}_database",
             func=query_database,
             parameters=dict(
@@ -149,13 +228,13 @@ class PixiClient:
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
-        
+
         wiki_api = AsyncWikimediaAPI(url)
 
-        async def search_wiki(keyword: str):
+        async def search_wiki(instance: AsyncChatbotInstance, keyword: str):
             return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name=f"search_wiki_{wiki_name}",
             func=search_wiki,
             parameters=dict(
@@ -172,7 +251,7 @@ class PixiClient:
             description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
         )
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name=f"search_wiki_{wiki_name}",
             func=search_wiki,
             parameters=dict(
@@ -189,13 +268,13 @@ class PixiClient:
             description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
         )
 
-        async def query_wiki_content(titles: str, query: str):
+        async def query_wiki_content(instance: AsyncChatbotInstance, titles: str, query: str):
             return await RetrievalAgent(
                 model=self.helper_model,
                 context=await asyncio.gather(*(wiki_api.get_raw(t.strip()) for t in titles.split("|")))
             ).retrieve(query)
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name=f"query_wiki_content_{wiki_name}",
             func=query_wiki_content,
             parameters=dict(
@@ -222,13 +301,13 @@ class PixiClient:
         if not self.enable_tool_calls:
             logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
-        
-        async def fetch_channel_history(channel_id: str, n: str):
+
+        async def fetch_channel_history(instance: AsyncChatbotInstance, channel_id: str, n: str):
             logging.info(f"calling fetch_channel_history({channel_id=}, {n=})")
             channel = await self.client.fetch_channel(int(channel_id))
             messages = []
             # TODO: check channel type
-            async for message in channel.history(limit=int(n)):
+            async for message in channel.history(limit=int(n)):  # type: ignore
                 messages.append(dict(
                     from_user=self.reflection_api.get_sender_information(message),
                     message_text=self.reflection_api.get_message_text(message)
@@ -236,7 +315,7 @@ class PixiClient:
 
             return messages[::-1]
 
-        self.chatbot_factory.register_tool(
+        self.register_tool(
             name="fetch_channel_history",
             func=fetch_channel_history,
             parameters=dict(
@@ -258,10 +337,10 @@ class PixiClient:
         )
 
         if self.giphy_api is not None:
-            async def search_gif(query: str):
+            async def search_gif(instance: AsyncChatbotInstance, query: str):
                 logging.info(f"calling search_gif({query=})")
                 assert self.giphy_api is not None
-                resp: dict = await self.giphy_api.search(query, rating="pg") # type: ignore
+                resp: dict = await self.giphy_api.search(query, rating="pg")  # type: ignore
                 data = resp.get("data")
                 results = []
                 if data is None:
@@ -270,14 +349,13 @@ class PixiClient:
                 for gif in data:
                     if id := gif.get("id"):
                         results.append(dict(
-                            slug=gif.get("slug"),
                             title=gif.get("title"),
                             rating=gif.get("rating"),
                             url=f"https://i.giphy.com/{id}.webp"
                         ))
                 return results
-            
-            self.chatbot_factory.register_tool(
+
+            self.register_tool(
                 name="search_gif",
                 func=search_gif,
                 parameters=dict(
@@ -291,7 +369,7 @@ class PixiClient:
                     required=["query"],
                     additionalProperties=False
                 ),
-                description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's url as a distinct chat message."
+                description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's URL as a distinct chat message, the URL always starts with \"https://i.giphy/\""
             )
 
     async def notes_command(self, interaction):
@@ -300,7 +378,7 @@ class PixiClient:
             return
         try:
             identifier = self.reflection_api.get_identifier_from_message(interaction)
-            conversation = self.get_conversation(identifier)
+            conversation = await self.get_conversation(identifier)
             is_notes_visible = conversation.toggle_notes()
             notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
             await self.reflection_api.send_reply(interaction, notes_message)
@@ -312,9 +390,12 @@ class PixiClient:
         if not await self.reflection_api.is_dm_or_admin(interaction):
             await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
             return
+
         identifier = self.reflection_api.get_identifier_from_message(interaction)
-        logging.info(f"the conversation in {identifier} has been reset.")
+        instance = await self.get_conversation(identifier)  # make sure the instance is in memory before removing
         self.chatbot_factory.remove(identifier)
+        logging.info(f"the conversation in {identifier} has been reset.")
+
         await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
 
     def init_discord(self):
@@ -391,62 +472,22 @@ class PixiClient:
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
 
-    def get_conversation(self, identifier: str) -> AsyncChatbotInstance:
-        return self.chatbot_factory.get(identifier)
+    async def get_conversation(self, identifier: str) -> AsyncChatbotInstance:
+        return await self.chatbot_factory.get(identifier)
 
-    async def pixi_resp(self, chat_message: ChatMessage, message, allow_ignore: bool = True):
+    async def pixi_resp(self, chat_message: ChatMessage, allow_ignore: bool = True):
         if not self.database_tools_initalized.is_set():
             await self.__init_database_tools()
             await self.database_tools_initalized.wait()
 
-        start_typing_time = time.time()
-        responded = False
-        identifier = self.reflection_api.get_identifier_from_message(message)
-        conversation = self.get_conversation(identifier)
+        assert chat_message.origin
+        message = chat_message.origin
+
+        assert chat_message.instance_id
+        identifier = chat_message.instance_id
+
+        conversation = await self.get_conversation(identifier)
         conversation.update_realtime(self.reflection_api.get_realtime_data(message))
-
-        async def send_command(text: str):
-            nonlocal responded
-            nonlocal start_typing_time
-            response_time = time.time() - start_typing_time
-
-            delay = max(0, (0.5 + (1.8 ** math.log2(1+len(text))) / 10) - response_time)
-            await self.reflection_api.send_reply(message, text, delay)
-
-            start_typing_time = time.time()
-
-            responded = True
-
-        async def note_command(thoughts):
-            if conversation.is_notes_visible:
-                await self.reflection_api.send_reply(message, f"> {thoughts}")
-
-        async def react_command(reaction):
-            try:
-                await self.reflection_api.add_reaction(message, reaction)
-            except Exception:
-                logging.exception(f"Failed to add reaction {reaction} to message {message.id}")
-
-        conversation.add_command(
-            name="send",
-            field_name="message",
-            function=send_command,
-            descriptioon="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
-        )
-
-        conversation.add_command(
-            name="note",
-            field_name="thoughts",
-            function=note_command,
-            descriptioon="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
-        )
-
-        conversation.add_command(
-            name="react",
-            field_name="emoji",
-            function=react_command,
-            descriptioon="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
-        )
 
         messages_checkpoint = conversation.get_messages().copy()
 
@@ -455,14 +496,13 @@ class PixiClient:
             noncall_result = await conversation.stream_call(chat_message, allow_ignore=allow_ignore)
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
-                # send non-call results as a message
-                await send_command(noncall_result)
         except ReflectionAPI.Forbidden:
             logging.exception(f"Cannot send message in {identifier}")
         except Exception:
             logging.exception(f"Unknown error while responding to a message in {identifier}")
             await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
 
+        responded = True  # TODO: track the command usage and check if the message is responded to
         if responded:
             conversation.save()
             logging.debug("responded to a message and saved the conversation.")
@@ -473,17 +513,17 @@ class PixiClient:
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
 
-    async def pixi_resp_retry(self, chat_message: ChatMessage, message, num_retry: int = 3):
+    async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 3):
         # catch the error 3 times and retry, if the error continues
         # retry once more without catching the error to see the error
         for i in range(num_retry):
             try:
-                return await self.pixi_resp(chat_message, message)
+                return await self.pixi_resp(chat_message)
             except Exception as e:
                 logging.exception("There was an error in `pixi_resp`")
                 logging.warning(f"Retrying ({i}/{num_retry})")
                 continue
-        return await self.pixi_resp(chat_message, message)
+        return await self.pixi_resp(chat_message)
 
     async def on_message(self, message):
 
@@ -503,13 +543,15 @@ class PixiClient:
         message_text = remove_prefixes(message_text)
 
         convo_id = self.reflection_api.get_identifier_from_message(message)
-        convo = self.chatbot_factory.get(convo_id)
+        convo = await self.chatbot_factory.get(convo_id)
 
         attached_images = await self.reflection_api.fetch_attachment_images(message)
         attached_audio = await self.reflection_api.fetch_attachment_audio(message)
 
+        message_author = self.reflection_api.get_sender_information(message)
+
         metadata = dict(
-            from_user=self.reflection_api.get_sender_information(message)
+            from_user=message_author
         )
 
         # check if the message is a reply to a bot message
@@ -554,9 +596,17 @@ class PixiClient:
                         "message": reply_message_text
                     })
         # convert everything into `RoleMessage``
-        role_message = ChatMessage(role=ChatRole.USER, content=message_text,
-                                   metadata=metadata, images=attached_images, audio=attached_audio)
-        await self.pixi_resp_retry(role_message, message)
+        role_message = ChatMessage(
+            role=ChatRole.USER,
+            content=message_text,
+            metadata=metadata,
+            images=attached_images,
+            audio=attached_audio,
+            # these properties are intended to be used internally and are NOT reload persistant
+            instance_id=convo_id,
+            origin=message
+        )
+        await self.pixi_resp_retry(role_message)
 
     def run(self):
         match self.platform:

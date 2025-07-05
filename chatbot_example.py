@@ -1,5 +1,6 @@
 import json
-from pixi.chatbot import AssistantPersona, AsyncChatbotInstance
+from pixi.chatbot import AsyncChatbotInstance
+from pixi.chatbot import AssistantPersona
 from pixi.utils import load_dotenv
 
 
@@ -21,20 +22,20 @@ if __name__ == "__main__":
     instance.add_command(
         name="send",
         field_name="message",
-        function=psudo_send_command,
-        descriptioon="sends a message"
+        func=psudo_send_command,
+        description="sends a message"
     )
     instance.add_command(
         name="note",
         field_name="thoughts",
-        function=psudo_note_command,
-        descriptioon="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
+        func=psudo_note_command,
+        description="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
     )
     instance.add_command(
         name="yeet",
         field_name="object",
-        function=psudo_yeet_command,
-        descriptioon="yeets the object"
+        func=psudo_yeet_command,
+        description="yeets the object"
     )
     
     print(instance.command_manager.get_prompt())

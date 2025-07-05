@@ -9,7 +9,7 @@ class Platform(StrEnum):
 
 
 class ChatRole(StrEnum):
-    SYSTEM: str = "system"
-    ASSISTANT: str = "assistant"
-    USER: str = "user"
-    TOOL: str = "tool"
+    SYSTEM = "system"
+    ASSISTANT = "assistant"
+    USER = "user"
+    TOOL = "tool"

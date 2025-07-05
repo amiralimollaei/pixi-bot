@@ -1,6 +1,7 @@
 import logging
 import asyncio
 
+import aiohttp
 import discord
 
 from ..caching import ImageCache, AudioCache, UnsupportedMediaException
@@ -113,7 +114,10 @@ class ReflectionAPI:
         return rt_data
 
     async def send_status_typing(self, message: discord.Message):
-        await message.channel.typing()
+        try:
+            await message.channel.typing()
+        except aiohttp.ServerDisconnectedError:
+            logging.exception("unable to send typing status")
 
     def can_read_history(self, channel) -> bool:
         # Check if the bot can read message history in the channel
@@ -149,7 +153,7 @@ class ReflectionAPI:
                         await self.send_response(message, text)
                     else:
                         if self.can_read_history(message.channel):
-                            await self.send_response(message, text, reference=message)
+                            await self.send_response(message, text, reference=message.to_reference(fail_if_not_exists=False))
                         else:
                             await self.send_response(message, f"{message.author.mention} {text}")
                 break
@@ -234,5 +238,9 @@ class ReflectionAPI:
     async def add_reaction(self, message: discord.Message, emoji: str):
         try:
             await message.add_reaction(emoji)
+        except discord.errors.NotFound:
+            logging.exception("unable to add reaction, message not found.")
         except discord.Forbidden:
-            logging.exception("unable to add reaction to a message")
+            logging.exception("unable to add reaction, operation forbidden.")
+        except:
+            logging.exception("unknown error while adding a reaction to a message")

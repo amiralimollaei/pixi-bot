@@ -1,16 +1,16 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from .aiohttpapi import APIBase
+from .api import APIBase
 
 
 @dataclass
 class WikiMediaSearchResult:
     title: str
-    snippet: Optional[str] = None,
-    url: Optional[str] = None,
-    description: Optional[str] = None,
-    pageid: Optional[str] = None,
+    snippet: Optional[str] = None
+    url: Optional[str] = None
+    description: Optional[str] = None
+    pageid: Optional[str] = None
 
 
 class AsyncWikimediaAPI(APIBase):
@@ -18,10 +18,14 @@ class AsyncWikimediaAPI(APIBase):
         super().__init__(base=base_url, api_key=None, api_key_env_var=None)
 
     async def apiphp_request(self, **kwargs) -> dict | list:
-        return await self.request("api.php", data=kwargs | dict(format="json", formatversion=2, redirects="resolve"))
+        data = kwargs | dict(format="json", formatversion=2, redirects="resolve")
+        return await self.request(
+            "api.php",
+            data=data
+        )  # type: ignore
 
     async def indexphp_request(self, **kwargs) -> str:
-        return await self.request("index.php", data=kwargs)
+        return await self.request("index.php", data=kwargs)  # type: ignore
 
     async def search(self, srsearch: str) -> list[WikiMediaSearchResult]:
         resp = await self.apiphp_request(
@@ -41,7 +45,7 @@ class AsyncWikimediaAPI(APIBase):
         )
 
         results = []
-        for page_data in resp.get("query", {}).get("pages", []):
+        for page_data in resp.get("query", {}).get("pages", []):  # type: ignore
             title = page_data.get("title")
             snippet = page_data.get("snippet")
             extract = page_data.get("extract")
@@ -90,7 +94,7 @@ class AsyncWikimediaAPI(APIBase):
             inprop="url"
         )
 
-    async def get_page(self, page: str = None, pageid: str = None):
+    async def get_page(self, page: Optional[str] = None, pageid: Optional[str] = None):
         return await self.apiphp_request(
             action="parse",
             page=page,

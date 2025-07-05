@@ -6,7 +6,8 @@ from pixi.client import PixiClient
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
-    level=logging.INFO
+    level=logging.INFO,
+    force=True
 )
 
 # https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
@@ -111,7 +112,7 @@ if __name__ == '__main__':
         database_names=args.database_names,
         log_tool_calls=args.log_tool_calls
     )
-    
+
     processes = []
     try:
         platform = args.platform.upper()

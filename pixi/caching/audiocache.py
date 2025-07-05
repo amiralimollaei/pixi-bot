@@ -18,13 +18,12 @@ CACHE_MAX_DURATION = 30
 
 # helpers
 
-
 def get_audio_duration(filepath: str) -> float:
     """Get duration of audio file using ffmpegio."""
     import ffmpegio
     info = ffmpegio.probe.full_details(filepath, select_streams='a')
     # info['streams'] is a list of audio streams; take the first one
-    duration = float(info['streams'][0]['duration'])
+    duration = float(info['streams'][0]['duration']) # type: ignore
     return duration
 
 
@@ -57,10 +56,12 @@ class AudioCache(MediaCache):
                 overwrite=True,
                 ar=CACHE_SAMPLE_RATE,
                 ac=1,
-                format=self.format,
-                **{"b:a": f"{CACHE_KBIT_RATE}k"},
                 ss=0,
-                t=CACHE_MAX_DURATION
+                format=self.format,
+                t=CACHE_MAX_DURATION,
+                **{
+                    "b:a": f"{CACHE_KBIT_RATE}k"
+                } # type: ignore
             )
 
             tmp_out.seek(0)

@@ -3,7 +3,8 @@ import logging
 import os
 from typing import Optional
 
-from ..chatclient import AsyncChatClient
+from ..chatting import AsyncChatClient
+
 
 class RetrievalAgent:
     def __init__(self, model: Optional[str] = None, context: Optional[list[str]] = None):
@@ -28,7 +29,7 @@ class RetrievalAgent:
             "  \"source\": [\"page_title:Villagers\"]",
             "  \"confidence\": 9",
             "}",
-            ])
+        ])
         self.client.set_system(self.system_prompt)
 
     def to_dict(self) -> dict:
@@ -58,7 +59,7 @@ class RetrievalAgent:
         logging.debug(f"Adding context: {context}")
         self.context.append(context)
 
-    async def retrieve(self, query: str) -> list:
+    async def retrieve(self, query: str) -> str:
         """
         Retrieves relevant information all context and a query to the agent.
         """

@@ -1,3 +1,4 @@
+from typing import Optional
 from ..enums import Platform
 from ..caching import ImageCache, AudioCache
 
@@ -45,7 +46,7 @@ class ReflectionAPI:
     async def send_response(self, origin, text: str, ephemeral: bool = False, *args, **kwargs):
         return await self._ref.send_response(origin, text, ephemeral, *args, **kwargs)
 
-    async def send_reply(self, message, text: str, delay: int | None = None, ephemeral: bool = False):
+    async def send_reply(self, message, text: str, delay: Optional[int] = None, ephemeral: bool = False):
         return await self._ref.send_reply(message, text, delay, ephemeral)
 
     def get_sender_id(self, message) -> int:

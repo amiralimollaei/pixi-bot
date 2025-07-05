@@ -32,11 +32,10 @@ class ReflectionAPI:
 
     def get_guild_info(self, guild) -> dict:
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("get_guild_info", self.platform.title()))
-    
+
     def get_thread_info(self, thread) -> dict:
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("get_thread_info", self.platform.title()))
 
-    
     def get_realtime_data(self, message: telegram.Message) -> dict:
         return dict(
             platform="Telegram",

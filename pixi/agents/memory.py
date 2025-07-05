@@ -2,13 +2,14 @@ import json
 import os
 import time
 import hashlib
+from typing import Optional
 
-from ..chatclient import AsyncChatClient
+from ..chatting import AsyncChatClient
 from ..utils import exists
 
 
 class MemoryItem:
-    def __init__(self, content: str, timestamp: float = None):
+    def __init__(self, content: str, timestamp: Optional[float] = None):
         assert exists(content) and isinstance(content, str)
 
         self.content = content
@@ -23,7 +24,7 @@ class MemoryItem:
     @classmethod
     def from_dict(cls, data: dict) -> 'MemoryItem':
         return cls(
-            content=data.get("content"),
+            content=data["content"],
             timestamp=data.get("time")
         )
 
@@ -33,7 +34,7 @@ class MemoryItem:
 
 
 class MemoryAgent:
-    def __init__(self, model: str = "google/gemma-3-27b-it", memories: list[MemoryItem] = None):
+    def __init__(self, model: str = "google/gemma-3-27b-it", memories: Optional[list[MemoryItem]] = None):
         self.memories: list[MemoryItem] = memories or []
         self.model = model
         self.client = AsyncChatClient(model=model)
@@ -85,7 +86,7 @@ class MemoryAgent:
         print(f"Removing memory with hash: {memory_hash}")
         self.memories = [m for m in self.memories if m.hash() != memory_hash]
 
-    async def retrieve_memories(self, query: str) -> list:
+    async def retrieve_memories(self, query: str) -> str:
         """
         Retrieves relevant memories by sending all memory hashes (or indices) and a query to another agent.
         return_type: 'hash' or 'index'
@@ -99,4 +100,5 @@ class MemoryAgent:
             "\n".join([f"- {m.content}" for m in self.memories]),
         ])
         response = await self.client.ask(prompt, temporal=True, enable_timestamps=False)
+        assert response
         return response.strip()
