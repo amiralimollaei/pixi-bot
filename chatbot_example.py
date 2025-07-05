@@ -1,15 +1,23 @@
 import json
+import asyncio
+
 from pixi.chatbot import AsyncChatbotInstance
 from pixi.chatbot import AssistantPersona
 from pixi.utils import load_dotenv
 
 
+async def main():
+    while True:
+        query = input("You: ")
+        noncall_result = await instance.stream_call(query)
+        print(f"{noncall_result=}")
+
 if __name__ == "__main__":
     load_dotenv()
-    
+
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
     instance = AsyncChatbotInstance(0, persona, "test")
-    
+
     async def psudo_send_command(text):
         print("LLM: " + text)
 
@@ -18,7 +26,7 @@ if __name__ == "__main__":
 
     async def psudo_yeet_command(text):
         print("Yeet: " + text)
-    
+
     instance.add_command(
         name="send",
         field_name="message",
@@ -37,16 +45,7 @@ if __name__ == "__main__":
         func=psudo_yeet_command,
         description="yeets the object"
     )
-    
+
     print(instance.command_manager.get_prompt())
-    
-    import asyncio
-    
-    async def main():
-        while True:
-            query = input("You: ")
-            noncall_result = await instance.stream_call(query)
-            print(f"{noncall_result=}")
-    
+
     asyncio.run(main())
-    

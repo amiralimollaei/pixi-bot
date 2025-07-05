@@ -1,6 +1,6 @@
 import asyncio
-
 from glob import glob
+
 from pixi.database import DirectoryDatabase, DocumentDataset
 
 
@@ -17,12 +17,11 @@ async def main():
         )
     await DirectoryDatabase("DatasetName", dataset=dataset).save()
 
-
     # load a directory database and query from it
 
     database = await DirectoryDatabase.from_directory("DatasetName")
-    result = await database.search("quasi-connectivity")
-    for match in result.matches:
+    matches = await database.search("quasi-connectivity")
+    for match in matches:
         print(match)
 
 if __name__ == "__main__":
