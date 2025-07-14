@@ -25,7 +25,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 > the following message is provided by running `python main.py --help`
 
-```shell
+```text
 usage: main.py [-h] --platform {discord,telegram,all} [--log-level {debug,info,warning,error,critical}]
                [--model MODEL] [--helper-model HELPER_MODEL] [--api-url API_URL] [--disable-tool-calls]
                [--log-tool-calls] [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
