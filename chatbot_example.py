@@ -9,7 +9,8 @@ from pixi.utils import load_dotenv
 async def main():
     while True:
         query = input("You: ")
-        noncall_result = await instance.stream_call(query)
+        instance.add_message(query)
+        noncall_result = await instance.stream_call(refrence_message=query)
         print(f"{noncall_result=}")
 
 if __name__ == "__main__":

@@ -30,6 +30,9 @@ class ReflectionAPI:
             case _:
                 return f"chat#{chat.id}"
 
+    def get_message_channel_id(self, message: telegram.Message) -> int:
+        return message.chat.id
+    
     def get_channel_info(self, message: telegram.Message) -> dict:
         return {"type": message.chat.type, "name": message.chat.title, "id": message.chat.id}
 
@@ -57,7 +60,7 @@ class ReflectionAPI:
         except telegram.error.BadRequest:
             await origin.reply_text(text, *args, **kwargs)
 
-    async def send_reply(self, message: telegram.Message, text: str, delay: int | None = None, ephemeral: bool = False):
+    async def send_reply(self, message: telegram.Message, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True):
         chat_id = message.chat_id
 
         # delay adds realism

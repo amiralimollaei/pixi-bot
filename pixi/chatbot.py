@@ -1,3 +1,5 @@
+import asyncio
+from collections import defaultdict
 from functools import partial
 from dataclasses import dataclass
 import hashlib
@@ -5,6 +7,7 @@ import logging
 import json
 import time
 import os
+import copy
 
 from .chatting import AsyncChatClient, ChatMessage, ChatRole
 from .commands import AsyncCommandManager
@@ -112,6 +115,8 @@ class AsyncChatbotInstance:
         if messages is not None:
             self.client.add_message(ChatMessage(ChatRole.ASSISTANT, ASSISTANT_PRE, bot=self.bot))
 
+        self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+
     def add_command(self, name: str, field_name: str, func: AsyncFunction, description: Optional[str] = None):
         self.command_manager.add_command(name, field_name, func, description)
 
@@ -131,6 +136,21 @@ class AsyncChatbotInstance:
             description=description
         )
 
+    def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
+        """
+        Add a message to the conversation.
+        This is useful for initializing the conversation with existing messages.
+        """
+        if isinstance(message, str):
+            message = ChatMessage(default_role, message, bot=self.bot)
+
+        if isinstance(message, ChatMessage):
+            message.bot = self.bot  # this is intended to be handled by this class
+            self.client.add_message(message)
+            return message
+        else:
+            raise TypeError(f"expected message to be a string or a ChatMessage, but got {type(message)}.")
+
     def set_messages(self, messages: list[ChatMessage]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
         self.client.messages = messages
@@ -140,6 +160,14 @@ class AsyncChatbotInstance:
 
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
+
+    def set_rearrange_predicate(self, predicate: AsyncPredicate):
+        """
+        Set a predicate function to rearrange messages based on a specific condition.
+        This is useful for filtering messages by channel or other criteria.
+        """
+        assert callable(predicate), f"Predicate must be callable, got {predicate}."
+        self.client.set_rearrange_predicate(predicate)
 
     def get_realtime_data(self):
         data = {"Date": time.strftime("%a %d %b %Y, %I:%M%p")}
@@ -154,23 +182,35 @@ class AsyncChatbotInstance:
             realtime=self.get_realtime_data(),
             commands=self.command_manager.get_prompt()
         )
+        
+    async def concurrent_channel_stream_call(self, channel_id: str, refrence_message: ChatMessage, allow_ignore: bool = True):
+        assert channel_id, "channel_id is None"
+        
+        async def stream_call_task():
+            try:
+                await self.stream_call(refrence_message, allow_ignore)
+            except asyncio.CancelledError:
+                logging.warning(f"stream_call task was cancelled inside {refrence_message.instance_id} in channel {channel_id}")
+        
+        task = asyncio.create_task(stream_call_task())
+        self.channel_active_tasks[channel_id].append(task)
+        task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
+        # cancell extra tasks
+        while len(self.channel_active_tasks[channel_id]) > 1:
+            cancel_task = self.channel_active_tasks[channel_id][0]
+            cancel_task.cancel()
+            await cancel_task
+        return task
 
-    async def stream_call(self, message: ChatMessage | str, allow_ignore: bool = True, temporal: bool = False):
+    async def stream_call(self, refrence_message: ChatMessage, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
-        if isinstance(message, str):
-            message = ChatMessage(ChatRole.USER, message)
-        else:
-            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
-
-        # this is intended to be handled by this class
-        message.bot = self.bot
-
-        response = ""
-        async for char in self.command_manager.stream_commands(self.client.stream_ask(message, temporal=temporal), refrence_message=message):
-            response += char
-
-        return response.strip() or None
+        non_responce = "".join([char async for char in self.command_manager.stream_commands(
+            stream=self.client.stream_completion(),
+            refrence_message=refrence_message
+        )])
+     
+        return non_responce.strip() or None
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible

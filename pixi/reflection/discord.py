@@ -28,6 +28,9 @@ class ReflectionAPI:
         # If the message is in a DM or group chat, use the channel ID
         return f"channel#{channel.id}"
 
+    def get_message_channel_id(self, message: discord.Message) -> int:
+        return message.channel.id
+    
     def get_channel_info(self, message: discord.Message) -> dict:
         match message.channel.type:
             case discord.ChannelType.private:
@@ -138,7 +141,7 @@ class ReflectionAPI:
             raise TypeError(
                 f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
 
-    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int | None = None, ephemeral: bool = False):
+    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True):
         if isinstance(message, discord.Message):
             # delay adds realism
             if delay is not None and delay > 0:
@@ -151,13 +154,14 @@ class ReflectionAPI:
                 if isinstance(message, discord.Interaction):
                     await self.send_response(message, text, ephemeral=ephemeral)
                 else:
-                    if message.channel.type == discord.ChannelType.private:
+                    if (not should_reply) or (message.channel.type == discord.ChannelType.private):
                         await self.send_response(message, text)
                     else:
                         if self.can_read_history(message.channel):
                             await self.send_response(message, text, reference=message.to_reference(fail_if_not_exists=False))
                         else:
                             await self.send_response(message, f"{message.author.mention} {text}")
+                 
                 break
             except discord.Forbidden as e:
                 logging.exception(f"Forbidden")

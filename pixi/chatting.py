@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Any
 import logging
 import re
 import os
@@ -11,14 +10,14 @@ from openai import AsyncOpenAI
 from .enums import ChatRole
 from .utils import exists, format_time_ago
 from .caching import AudioCache, ImageCache
-from .typing import Optional, AsyncFunction
+from .typing import AsyncPredicate, Optional, AsyncFunction
 
 # constants
 
 DEFAULT_BASE_URL = "https://api.deepinfra.com/v1/openai"
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 
-MAX_LENGTH = 32000
+MAX_LENGTH = 8000
 THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
 
 
@@ -249,6 +248,21 @@ class ChatMessage:
                 openai_dict.update(dict(content=self.content)) # type: ignore
         return openai_dict
 
+
+# takes the last N messages in the message list that match a predicate, and moves them to the
+# end of the message list, this is to ensure the LLMs immmediate context is accurate
+async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncPredicate, n: int = 5) -> list[ChatMessage]:
+    selected_messages: list[ChatMessage] = []
+    unselected_predicate: list[ChatMessage] = []
+    for msg in messages[::-1]:
+        if await predicate(msg) and len(selected_messages) < n:
+            selected_messages.append(msg) 
+        else:
+            unselected_predicate.append(msg) 
+
+    return unselected_predicate[::-1] + selected_messages[::-1]
+    
+
 class AsyncChatClient:
     def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None, log_tool_calls: bool = False):
         if messages is not None:
@@ -265,11 +279,20 @@ class AsyncChatClient:
         assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
         self.messages = messages or []
         self.log_tool_calls = log_tool_calls
-        self.session = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")
-                                   or os.getenv("DEEPINFRA_API_KEY"), base_url=self.base_url)
         self.system_prompt = None
         self.tools: dict = {}
+        
+        self.rearrange_predicate = None
 
+    
+    # create a new session everytime to avoid issues with cancelling requests and connection errors
+    @property
+    def session(self):
+        return AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY"),
+            base_url=self.base_url
+        )
+    
     def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
         Register a tool (function) for tool calling.
@@ -290,6 +313,9 @@ class AsyncChatClient:
             )
         )
 
+    def set_rearrange_predicate(self, predicate: AsyncPredicate):
+        self.rearrange_predicate = predicate
+    
     def set_system(self, prompt: str):
         assert prompt is not None and prompt != ""
         self.system_prompt = prompt
@@ -315,7 +341,7 @@ class AsyncChatClient:
 
     async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         # If tools are registered, add them to the request
-        openai_messages = self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
+        openai_messages: list = await self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
         kwargs = dict(
             model=self.model,
             messages=openai_messages,
@@ -325,7 +351,7 @@ class AsyncChatClient:
             stream=stream,
         )
         if self.tools:
-            kwargs["tools"] = [v["schema"] for k, v in self.tools.items()]
+            kwargs["tools"] = [v["schema"] for k, v in self.tools.items()] # type: ignore
 
         return await self.session.chat.completions.create(**kwargs)  # type: ignore
 
@@ -434,7 +460,7 @@ class AsyncChatClient:
             self.messages += await self.get_tool_results(tool_calls)
             return await self.request(enable_timestamps=enable_timestamps)
 
-    def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
+    async def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
         if len(self.messages) == 0:
             return list()
 
@@ -444,7 +470,8 @@ class AsyncChatClient:
         for cutoff_index, message in enumerate(messages):
             role = message.role
             context = message.content or ""
-            final_len += len(role) + len(context) + 3
+            # TODO: better handle images and audio
+            final_len += len(role) + len(context) + 200 * len(message.audio) + 200 * len(message.images)
             if final_len > MAX_LENGTH * 4:
                 break
         else:
@@ -453,27 +480,22 @@ class AsyncChatClient:
         if cutoff_index:
             logging.warning("unable to fit all messages in one request.")
             messages = messages[-cutoff_index:]
+        
+        if self.rearrange_predicate:
+            rearrenged_messages = await get_rearranged_messages(messages, self.rearrange_predicate)
+        else:
+            rearrenged_messages = messages
 
-        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
-        # add system as the last message to ensure it is in the model's context
+        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in rearrenged_messages]        
+        # add system as one to the last message to ensure it is in the model's context
+        # but also make sure the last message is the request message
         if exists(self.system_prompt):
-            openai_messages.append(
+            openai_messages.insert(-1, 
                 ChatMessage(ChatRole.SYSTEM, self.system_prompt).to_openai_dict(timestamps=enable_timestamps)
             )
         return openai_messages
 
-    async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
-        if temporal:
-            orig_messages = self.messages.copy()
-
-        if isinstance(message, str):
-            message = ChatMessage(ChatRole.USER, message)
-        else:
-            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
-
-        assert message.role == ChatRole.USER, "Message must be from the user."
-        self.messages.append(message)
-
+    async def stream_completion(self):
         # TODO: fix the check for think tags opening
         
         start_think = "<think>"
@@ -492,6 +514,21 @@ class AsyncChatClient:
 
             if not is_thinking and response.strip() != "":
                 yield chunk
+    
+    async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
+        if temporal:
+            orig_messages = self.messages.copy()
+
+        if isinstance(message, str):
+            message = ChatMessage(ChatRole.USER, message)
+        else:
+            assert isinstance(message, ChatMessage), "Message must be a string or a RoleMessage."
+
+        assert message.role == ChatRole.USER, "Message must be from the user."
+        self.messages.append(message)
+
+        async for chunk in self.stream_completion():
+            yield chunk
 
         if temporal:
             self.messages = orig_messages # type: ignore

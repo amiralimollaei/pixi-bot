@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 from typing import Optional
 
 from .api import APIBase
@@ -43,6 +44,18 @@ class AsyncWikimediaAPI(APIBase):
             exchars=500,
             exlimit=3
         )
+        
+        # HOTFIX: sometimes the api just fails, this could be cloudflare blocking our
+        # IP address (e.g. minecraft wiki as of july 11th, 2025)
+        if isinstance(resp, str):
+            logging.warning("API FAILURE: the responce from MediaWiki API contains an invalid json object.")
+            return [WikiMediaSearchResult(
+                title="API FAILURE",
+                snippet=None,
+                description="the responce from MediaWiki API contains an invalid json object.",
+                pageid=None,
+                url=None
+            )]
 
         results = []
         for page_data in resp.get("query", {}).get("pages", []):  # type: ignore

@@ -28,6 +28,9 @@ class ReflectionAPI:
     def get_identifier_from_message(self, message) -> str:
         return self._ref.get_identifier_from_message(message)
 
+    def get_message_channel_id(self, message) -> int:
+        return self._ref.get_message_channel_id(message)
+
     def get_channel_info(self, message) -> dict:
         return self._ref.get_channel_info(message)
 
@@ -52,8 +55,9 @@ class ReflectionAPI:
     async def send_response(self, origin, text: str, ephemeral: bool = False, *args, **kwargs):
         return await self._ref.send_response(origin, text, ephemeral, *args, **kwargs)
 
-    async def send_reply(self, message, text: str, delay: Optional[int] = None, ephemeral: bool = False):
-        return await self._ref.send_reply(message, text, delay, ephemeral)
+    async def send_reply(self, message, text: str, delay: Optional[int] = None, ephemeral: bool = False, should_reply: bool = True):
+        # Hotfix: ensure the response is not too long
+        return await self._ref.send_reply(message, text[:1024], delay, ephemeral, should_reply)
 
     def get_sender_id(self, message) -> int:
         return self._ref.get_sender_id(message)

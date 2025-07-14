@@ -114,7 +114,7 @@ class PixiClient:
         instance.last_send_time = time.time()
 
         wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-        await self.reflection_api.send_reply(refrence.origin, value, wait_time)
+        await self.reflection_api.send_reply(refrence.origin, value, wait_time, should_reply = False)
 
     async def note_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
         assert refrence.origin is not None
@@ -137,7 +137,7 @@ class PixiClient:
             name="send",
             field_name="message",
             func=self.send_command,
-            description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
+            description="sends a text as a distinct chat message, you may want to mention the user(s) in order to show that you're responding to them specifically if you are talking to multiple poeple at the same time (for clarity), you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         ))
 
         self.chatbot_factory.register_command(PredicateCommand(
@@ -303,13 +303,12 @@ class PixiClient:
             return
 
         async def fetch_channel_history(instance: AsyncChatbotInstance, channel_id: str, n: str):
-            logging.info(f"calling fetch_channel_history({channel_id=}, {n=})")
             channel = await self.client.fetch_channel(int(channel_id))
             messages = []
             # TODO: check channel type
             async for message in channel.history(limit=int(n)):  # type: ignore
                 messages.append(dict(
-                    from_user=self.reflection_api.get_sender_information(message),
+                    from_user=self.reflection_api.get_sender_information(message).get("display_name", "Unknown"),
                     message_text=self.reflection_api.get_message_text(message)
                 ))
 
@@ -378,7 +377,7 @@ class PixiClient:
             return
         try:
             identifier = self.reflection_api.get_identifier_from_message(interaction)
-            conversation = await self.get_conversation(identifier)
+            conversation = await self.get_conversation_instance(identifier)
             is_notes_visible = conversation.toggle_notes()
             notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
             await self.reflection_api.send_reply(interaction, notes_message)
@@ -392,7 +391,7 @@ class PixiClient:
             return
 
         identifier = self.reflection_api.get_identifier_from_message(interaction)
-        instance = await self.get_conversation(identifier)  # make sure the instance is in memory before removing
+        instance = await self.get_conversation_instance(identifier)  # make sure the instance is in memory before removing
         self.chatbot_factory.remove(identifier)
         logging.info(f"the conversation in {identifier} has been reset.")
 
@@ -476,58 +475,88 @@ class PixiClient:
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
 
-    async def get_conversation(self, identifier: str) -> AsyncChatbotInstance:
+    async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get(identifier)
 
-    async def pixi_resp(self, chat_message: ChatMessage, allow_ignore: bool = True):
-        if not self.database_tools_initalized.is_set():
-            await self.__init_database_tools()
-            await self.database_tools_initalized.wait()
-
+    async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
         assert chat_message.origin
         message = chat_message.origin
-
-        assert chat_message.instance_id
-        identifier = chat_message.instance_id
-
-        conversation = await self.get_conversation(identifier)
-        conversation.update_realtime(self.reflection_api.get_realtime_data(message))
-
-        messages_checkpoint = conversation.get_messages().copy()
+        
+        channel_id = self.reflection_api.get_message_channel_id(message)
 
         try:
-            await self.reflection_api.send_status_typing(message)
-            noncall_result = await conversation.stream_call(chat_message, allow_ignore=allow_ignore)
+            instance.add_message(chat_message)
+            task = await instance.concurrent_channel_stream_call(
+                channel_id=str(channel_id),
+                refrence_message=chat_message,
+                allow_ignore=allow_ignore
+            )
+            while not task.done():
+                await self.reflection_api.send_status_typing(message)
+                await asyncio.sleep(3)
+            noncall_result = await task
+            #noncall_result = await instance.stream_call(refrence_message=chat_message, allow_ignore=allow_ignore)
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
         except ReflectionAPI.Forbidden:
-            logging.exception(f"Cannot send message in {identifier}")
+            logging.exception(f"Cannot send message in {instance.uuid}, permission denied.")
         except Exception:
-            logging.exception(f"Unknown error while responding to a message in {identifier}")
+            logging.exception(f"Unknown error while responding to a message in {instance.uuid}.")
             await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
 
         responded = True  # TODO: track the command usage and check if the message is responded to
-        if responded:
-            conversation.save()
-            logging.debug("responded to a message and saved the conversation.")
-        else:
-            conversation.set_messages(messages_checkpoint)
-            if not allow_ignore:
+        if not responded:
+            if allow_ignore:
                 raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
+        
+        return responded
 
     async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 3):
-        # catch the error 3 times and retry, if the error continues
-        # retry once more without catching the error to see the error
+        """
+        create a copy of all messages in the conversation instance and try to respond to the message.
+        if the response fails, it will retry up to `num_retry` times.
+        if the response is successful, it will save the conversation instance and return True.
+        if the response fails after all retries, it will return False.
+        """
+        
+        if not self.database_tools_initalized.is_set():
+            await self.__init_database_tools()
+            await self.database_tools_initalized.wait()
+        
+        async def rearrage_predicate(msg: ChatMessage):
+            msg_channel_id = msg.metadata.get("channel_id") if msg.metadata else None
+            current_channel_id = chat_message.metadata.get("channel_id") if chat_message.metadata else None
+            
+            if msg_channel_id is None or current_channel_id is None:
+                return False
+            return msg_channel_id == current_channel_id
+        
+        assert chat_message.origin
+        message = chat_message.origin
+        
+        assert chat_message.instance_id
+        identifier = chat_message.instance_id
+
+        instance = await self.get_conversation_instance(identifier)
+        instance.update_realtime(self.reflection_api.get_realtime_data(message))
+        instance.set_rearrange_predicate(rearrage_predicate)
+        
         for i in range(num_retry):
+            messages_checkpoint = instance.get_messages().copy()
             try:
-                return await self.pixi_resp(chat_message)
-            except Exception as e:
+                ok = await self.pixi_resp(instance, chat_message)
+            except Exception:
                 logging.exception("There was an error in `pixi_resp`")
+                ok = False
+            if ok:
+                instance.save()
+                logging.debug("responded to a message and saved the conversation.")
+                return True
+            else:
                 logging.warning(f"Retrying ({i}/{num_retry})")
-                continue
-        return await self.pixi_resp(chat_message)
+                instance.set_messages(messages_checkpoint)
 
     async def on_message(self, message):
 
@@ -599,6 +628,7 @@ class PixiClient:
                         "from": self.reflection_api.get_sender_information(reply_message),
                         "message": reply_message_text
                     })
+
         # convert everything into `RoleMessage``
         role_message = ChatMessage(
             role=ChatRole.USER,
