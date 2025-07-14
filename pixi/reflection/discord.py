@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from typing import IO
 
 import aiohttp
 import discord
@@ -10,8 +11,9 @@ from ..enums import Platform
 
 
 class ReflectionAPI:
-    def __init__(self):
+    def __init__(self, bot: discord.Client):
         self.platform = Platform.DISCORD
+        self.bot = bot
         logging.debug("ReflectionAPI has been initilized for DISCORD.")
 
     def get_identifier_from_message(self, message: discord.Message | discord.Interaction) -> str:
@@ -242,5 +244,32 @@ class ReflectionAPI:
             logging.exception("unable to add reaction, message not found.")
         except discord.Forbidden:
             logging.exception("unable to add reaction, operation forbidden.")
-        except:
+        except Exception:
             logging.exception("unknown error while adding a reaction to a message")
+
+    async def send_video(self, message: discord.Message, video: IO[bytes], filename: str):
+        try:
+            await message.channel.send(file=discord.File(fp=video, filename=filename))  # type: ignore
+        except discord.Forbidden:
+            logging.exception("unable to send video, operation forbidden.")
+        except discord.HTTPException as e:
+            logging.exception(f"HTTPException while sending video: {e}")
+        except Exception:
+            logging.exception("unknown error while sending a video")
+
+    async def get_user_avatar(self, user_id: int) -> ImageCache | None:
+        """
+        Fetches the avatar of a user and returns it as an ImageCache object.
+        """
+        try:
+            user = await self.bot.fetch_user(user_id)
+            if user is None or user.avatar is None:
+                raise UnsupportedMediaException("User avatar not found or unsupported media type.")
+            avatar_bytes = await user.avatar.read()
+            return ImageCache(avatar_bytes)
+        except discord.NotFound:
+            logging.error(f"User with ID {user_id} not found.")
+            return None
+        except discord.HTTPException as e:
+            logging.error(f"Failed to fetch user avatar: {e}")
+            return None

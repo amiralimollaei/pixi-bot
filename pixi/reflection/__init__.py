@@ -1,4 +1,7 @@
-from typing import Optional
+import logging
+from typing import IO, Optional
+
+import aiohttp
 from ..enums import Platform
 from ..caching import ImageCache, AudioCache
 
@@ -10,17 +13,17 @@ class ReflectionAPI:
             self.platform = platform
             self.msg = msg
 
-    def __init__(self, platform: Platform):
+    def __init__(self, platform: Platform, bot):
         assert type(platform) == Platform
         self.platform = platform
 
         match platform:
             case Platform.DISCORD:
                 from .discord import ReflectionAPI
-                self._ref = ReflectionAPI()
+                self._ref = ReflectionAPI(bot)
             case Platform.TELEGRAM:
                 from .telegram import ReflectionAPI
-                self._ref = ReflectionAPI()
+                self._ref = ReflectionAPI(bot)
 
     def get_identifier_from_message(self, message) -> str:
         return self._ref.get_identifier_from_message(message)
@@ -38,7 +41,10 @@ class ReflectionAPI:
         return self._ref.get_realtime_data(message)
 
     async def send_status_typing(self, message):
-        return await self._ref.send_status_typing(message)
+        try:
+            return await self._ref.send_status_typing(message)
+        except aiohttp.ClientError:
+            logging.exception("Connection error while sending status typing")
 
     def can_read_history(self, channel) -> bool:
         return self._ref.can_read_history(channel)
@@ -84,3 +90,9 @@ class ReflectionAPI:
 
     async def add_reaction(self, message, emoji: str):
         return await self._ref.add_reaction(message, emoji)
+
+    async def send_video(self, message, video: IO[bytes], filename: str):
+        return await self._ref.send_video(message, video, filename)
+
+    async def get_user_avatar(self, user_id: int) -> ImageCache | None:
+        return await self._ref.get_user_avatar(user_id)

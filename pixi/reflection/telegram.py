@@ -1,5 +1,7 @@
+from io import BufferedIOBase
 import logging
 import asyncio
+from typing import IO
 
 import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
@@ -9,8 +11,9 @@ from ..caching import ImageCache, AudioCache, UnsupportedMediaException
 
 
 class ReflectionAPI:
-    def __init__(self):
+    def __init__(self, bot: telegram.Bot):
         self.platform = Platform.TELEGRAM
+        self.bot = bot
         logging.debug("ReflectionAPI has been initilized for TELEGRAM.")
 
     def get_identifier_from_message(self, message: telegram.Message) -> str:
@@ -170,3 +173,27 @@ class ReflectionAPI:
 
     async def add_reaction(self, message: telegram.Message, emoji: str):
         await message.set_reaction(emoji)
+
+    async def send_video(self, message: telegram.Message, video: IO[bytes], filename: str):
+        try:
+            await message.chat.send_video(video, filename=filename)
+        except telegram.error.Forbidden:
+            logging.exception("unable to send video, operation forbidden.")
+        except telegram.error.BadRequest as e:
+            logging.exception(f"BadRequest while sending video: {e}")
+        except Exception:
+            logging.exception("unknown error while sending a video")
+
+    async def get_user_avatar(self, user_id) -> ImageCache | None:
+        try:
+            file = await self.bot.get_user_profile_photos(user_id)
+            if file.photos:
+                photo = file.photos[0][-1]  # Get the highest resolution photo
+                image_bytes = await (await photo.get_file()).download_as_bytearray()
+                return ImageCache(bytes(image_bytes))
+        except telegram.error.BadRequest as e:
+            logging.error(f"Failed to fetch user avatar: {e}")
+            return None
+        except Exception as e:
+            logging.exception(f"Unexpected error while fetching user avatar: {e}")
+            return None

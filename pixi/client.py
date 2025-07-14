@@ -54,7 +54,7 @@ class PixiClient:
             hash_prefix=platform,
             log_tool_calls=log_tool_calls,
         )
-        self.reflection_api = ReflectionAPI(platform=platform)
+        self.reflection_api = ReflectionAPI(platform=platform, bot=None)
         self.helper_model = helper_model
         self.enable_tool_calls = enable_tool_calls
 
@@ -340,7 +340,7 @@ class PixiClient:
             async def search_gif(instance: AsyncChatbotInstance, query: str):
                 logging.info(f"calling search_gif({query=})")
                 assert self.giphy_api is not None
-                resp: dict = await self.giphy_api.search(query, rating="pg")  # type: ignore
+                resp: dict = await self.giphy_api.search(query, rating="pg", limit = 10)  # type: ignore
                 data = resp.get("data")
                 results = []
                 if data is None:
@@ -423,6 +423,8 @@ class PixiClient:
 
         client = DiscordClient()
         self.client = client
+        
+        self.reflection_api = ReflectionAPI(platform=self.platform, bot=client)
 
         @client.event
         async def on_message(*args, **kwargs):
@@ -465,6 +467,8 @@ class PixiClient:
 
         application = Application.builder().token(self.token).build()
         self.application = application
+        
+        self.reflection_api = ReflectionAPI(platform=self.platform, bot=application.bot)
 
         application.add_handler(CommandHandler('start', start))
         application.add_handler(CommandHandler('reset', reset))
