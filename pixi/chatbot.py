@@ -229,7 +229,7 @@ class AsyncChatbotInstance:
         with open(self.path, "w", encoding="utf-8") as f:
             f.write(json.dumps(self.to_dict(), ensure_ascii=False))
 
-    def load(self):
+    def load(self, not_found_ok: bool = False):
         if os.path.isfile(self.path):
             try:
                 data = json.load(open(self.path, "r", encoding="utf-8"))
@@ -239,7 +239,10 @@ class AsyncChatbotInstance:
             except json.decoder.JSONDecodeError:
                 logging.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         else:
-            logging.warning(f"Unable to find the instance save file {self.path}`, using default values.")
+            if not_found_ok:
+                logging.info(f"Unable to find the instance save file {self.path}`, using default values.")
+            else:
+                logging.warning(f"Unable to find the instance save file {self.path}`, using default values.")
 
     @classmethod
     def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
@@ -282,7 +285,7 @@ class CachedAsyncChatbotFactory:
         __instance = self.instances.get(identifier)
         if __instance is None:
             __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)
-            __instance.load()
+            __instance.load(not_found_ok=True)
 
             self.instances.update({identifier: __instance})
 
