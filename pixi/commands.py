@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from typing import AsyncIterator, Generator
 
-from .typing import AsyncFunction, Optional, Iterator, AsyncGenerator
+from .typing import AsyncFunction, Optional, Iterator, Generator, AsyncIterator, AsyncGenerator
 from .chatting import ChatMessage
 
 
@@ -13,7 +12,7 @@ class AsyncCommand:
     description: Optional[str] = None
 
     # TODO: implement callbacks for when we enter the command (after the command name) and when
-    # we leave the command (before executing the command but right after the command is completed)
+    # we leave the command (right after the command is completed btu before executing the command)
     enter_callback: Optional[AsyncFunction] = None
     leave_callback: Optional[AsyncFunction] = None
 

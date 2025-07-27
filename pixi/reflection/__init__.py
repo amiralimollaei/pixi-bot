@@ -1,7 +1,9 @@
 import logging
-from typing import IO, Optional
+from typing import IO
 
 import aiohttp
+
+from ..typing import Optional
 from ..enums import Platform
 from ..caching import ImageCache, AudioCache
 

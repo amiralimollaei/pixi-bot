@@ -10,7 +10,7 @@ from openai import AsyncOpenAI, APIError
 from .enums import ChatRole
 from .utils import exists, format_time_ago
 from .caching import AudioCache, ImageCache
-from .typing import AsyncPredicate, Optional, AsyncFunction
+from .typing import AsyncPredicate, AsyncFunction, Optional
 
 # constants
 
