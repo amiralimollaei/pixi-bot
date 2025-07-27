@@ -354,7 +354,6 @@ class PixiClient:
 
         if self.giphy_api is not None:
             async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str):
-                logging.info(f"calling search_gif({query=})")
                 assert self.giphy_api is not None
                 resp: dict = await self.giphy_api.search(query, rating="pg", limit = 10)  # type: ignore
                 data = resp.get("data")
