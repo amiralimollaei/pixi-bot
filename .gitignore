@@ -179,6 +179,7 @@ convo-v2/
 # test files
 test.py
 start.sh
+last-request.json
 
 # database files
 *.csv

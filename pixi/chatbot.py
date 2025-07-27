@@ -183,14 +183,14 @@ class AsyncChatbotInstance:
             commands=self.command_manager.get_prompt()
         )
         
-    async def concurrent_channel_stream_call(self, channel_id: str, refrence_message: ChatMessage, allow_ignore: bool = True):
+    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage, allow_ignore: bool = True):
         assert channel_id, "channel_id is None"
         
         async def stream_call_task():
             try:
-                await self.stream_call(refrence_message, allow_ignore)
+                await self.stream_call(reference_message, allow_ignore)
             except asyncio.CancelledError:
-                logging.warning(f"stream_call task was cancelled inside {refrence_message.instance_id} in channel {channel_id}")
+                logging.warning(f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}")
         
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
@@ -202,12 +202,12 @@ class AsyncChatbotInstance:
             await cancel_task
         return task
 
-    async def stream_call(self, refrence_message: ChatMessage, allow_ignore: bool = True):
+    async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
         non_responce = "".join([char async for char in self.command_manager.stream_commands(
             stream=self.client.stream_completion(),
-            refrence_message=refrence_message
+            reference_message=reference_message
         )])
      
         return non_responce.strip() or None

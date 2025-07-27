@@ -1,4 +1,3 @@
-from io import BufferedIOBase
 import logging
 import asyncio
 from typing import IO
@@ -32,7 +31,7 @@ class ReflectionAPI:
 
     def get_message_channel_id(self, message: telegram.Message) -> int:
         return message.chat.id
-    
+
     def get_channel_info(self, message: telegram.Message) -> dict:
         return {"type": message.chat.type, "name": message.chat.title, "id": message.chat.id}
 
@@ -177,15 +176,39 @@ class ReflectionAPI:
     async def add_reaction(self, message: telegram.Message, emoji: str):
         await message.set_reaction(emoji)
 
-    async def send_video(self, message: telegram.Message, video: IO[bytes], filename: str):
-        try:
-            await message.chat.send_video(video, filename=filename)
-        except telegram.error.Forbidden:
-            logging.exception("unable to send video, operation forbidden.")
-        except telegram.error.BadRequest as e:
-            logging.exception(f"BadRequest while sending video: {e}")
-        except Exception:
-            logging.exception("unknown error while sending a video")
+    async def send_video(self, message: telegram.Message, video: IO[bytes], filename: str, caption: str | None = None):
+        for i in range(3):
+            try:
+                return await message.chat.send_video(video, filename=filename, caption=caption)
+            except telegram.error.Forbidden:
+                logging.exception("unable to send video, operation forbidden.")
+                return
+            except telegram.error.BadRequest as e:
+                logging.exception(f"BadRequest while sending video: {e}")
+                return
+            except telegram.error.TimedOut as e:
+                logging.exception(f"Timed out while sending video: {e}, retrying {i+1}/{3}")
+
+    async def send_file(self, message: telegram.Message, filepath: str, filename: str, caption: str | None = None):
+        for i in range(3):
+            try:
+                with open(filepath, "rb") as f:
+                    await message.chat.send_document(
+                        document=f,
+                        filename=filename,
+                        caption=caption,
+                        read_timeout=30,
+                        write_timeout=600,
+                    )
+            except telegram.error.TimedOut as e:
+                logging.error(f"Timed out while sending file: {e}, retrying {i+1}/{3}")
+            except telegram.error.BadRequest as e:
+                logging.exception(f"BadRequest error while sending file: {e}")
+                break
+            except Exception as e:
+                logging.exception(f"Unexpected error while sending file: {e}")
+            else:
+                break
 
     async def get_user_avatar(self, user_id) -> ImageCache | None:
         try:

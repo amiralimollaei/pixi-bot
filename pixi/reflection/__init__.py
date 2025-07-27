@@ -95,8 +95,11 @@ class ReflectionAPI:
     async def add_reaction(self, message, emoji: str):
         return await self._ref.add_reaction(message, emoji)
 
-    async def send_video(self, message, video: IO[bytes], filename: str):
-        return await self._ref.send_video(message, video, filename)
+    async def send_video(self, message, video: IO[bytes], filename: str, caption: str | None = None):
+        return await self._ref.send_video(message, video, filename, caption)
+    
+    async def send_file(self, message, filepath: str, filename: str, caption: str | None = None):
+        return await self._ref.send_file(message, filepath, filename, caption)
 
     async def get_user_avatar(self, user_id: int) -> ImageCache | None:
         return await self._ref.get_user_avatar(user_id)

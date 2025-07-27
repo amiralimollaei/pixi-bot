@@ -251,9 +251,9 @@ class ReflectionAPI:
         except Exception:
             logging.exception("unknown error while adding a reaction to a message")
 
-    async def send_video(self, message: discord.Message, video: IO[bytes], filename: str):
+    async def send_video(self, message: discord.Message, video: IO[bytes], filename: str, caption: str | None = None):
         try:
-            await message.channel.send(file=discord.File(fp=video, filename=filename))  # type: ignore
+            await message.channel.send(file=discord.File(fp=video, filename=filename, caption = caption))  # type: ignore
         except discord.Forbidden:
             logging.exception("unable to send video, operation forbidden.")
         except discord.HTTPException as e:
@@ -261,6 +261,20 @@ class ReflectionAPI:
         except Exception:
             logging.exception("unknown error while sending a video")
 
+    async def send_file(self, message: discord.Message, filepath: str, filename: str, caption: str | None = None):
+        try:
+            with open(filepath, "rb") as f:
+                await message.channel.send(
+                    content=caption,
+                    file=discord.File(fp=f, filename=filename)
+                )
+        except discord.Forbidden:
+            logging.exception("unable to send file, operation forbidden.")
+        except discord.HTTPException as e:
+            logging.exception(f"HTTPException while sending file: {e}")
+        except Exception:
+            logging.exception("unknown error while sending a file")
+    
     async def get_user_avatar(self, user_id: int) -> ImageCache | None:
         """
         Fetches the avatar of a user and returns it as an ImageCache object.

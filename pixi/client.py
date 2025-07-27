@@ -107,30 +107,50 @@ class PixiClient:
             predicate=predicate
         ))
 
-    async def send_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
-        assert refrence.origin is not None
+    async def register_slash_command(self, name: str, function, description: str | None = None):
+        match self.platform:
+            case Platform.DISCORD:
+                import discord
+                
+                # Slash command: /reset
+                @self.client.tree.command(name=name, description=description)
+                async def slash_command(interaction: discord.Interaction):
+                    await function(interaction)
+
+            case Platform.TELEGRAM:
+                import telegram
+                from telegram.ext import ContextTypes, CommandHandler
+                
+                async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+                    message = update.message
+                    await function(message)
+
+                self.application.add_handler(CommandHandler(name, slash_command))
+
+    async def send_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        assert reference.origin is not None
 
         delay_time = time.time() - instance.last_send_time
         instance.last_send_time = time.time()
 
         wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-        await self.reflection_api.send_reply(refrence.origin, value, wait_time, should_reply = False)
+        await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply = False)
 
-    async def note_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
-        assert refrence.origin is not None
-        assert refrence.instance_id is not None
+    async def note_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        assert reference.origin is not None
+        assert reference.instance_id is not None
 
         if instance.is_notes_visible:
-            await self.reflection_api.send_reply(refrence.origin, f"> note: {value}")
+            await self.reflection_api.send_reply(reference.origin, f"> note: {value}")
 
-    async def react_command(self, instance: AsyncChatbotInstance, refrence: ChatMessage, value: str):
-        assert refrence.origin is not None
-        refrence_message = refrence.origin
+    async def react_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        assert reference.origin is not None
+        reference_message = reference.origin
 
         try:
-            await self.reflection_api.add_reaction(refrence_message, value)
+            await self.reflection_api.add_reaction(reference_message, value)
         except Exception:
-            logging.exception(f"Failed to add reaction {value} to message {refrence_message.id}")
+            logging.exception(f"Failed to add reaction {value} to message {reference_message.id}")
 
     def init_chatbot_commands(self):
         self.chatbot_factory.register_command(PredicateCommand(
@@ -175,7 +195,7 @@ class PixiClient:
         async def get_entry_as_str(entry_id: int):
             return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False)
 
-        async def search_database(instance: AsyncChatbotInstance, keyword: str):
+        async def search_database(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
 
         self.register_tool(
@@ -195,7 +215,7 @@ class PixiClient:
             description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
         )
 
-        async def query_database(instance: AsyncChatbotInstance, query: str, ids: str):
+        async def query_database(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, ids: str):
             if ids is None:
                 return "no result, no ids specified"
             return await RetrievalAgent(
@@ -231,7 +251,7 @@ class PixiClient:
 
         wiki_api = AsyncWikimediaAPI(url)
 
-        async def search_wiki(instance: AsyncChatbotInstance, keyword: str):
+        async def search_wiki(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
             return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
 
         self.register_tool(
@@ -251,24 +271,7 @@ class PixiClient:
             description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
         )
 
-        self.register_tool(
-            name=f"search_wiki_{wiki_name}",
-            func=search_wiki,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    keyword=dict(
-                        type="string",
-                        description=f"The search keyword to find matches in the wiki text from the {wiki_name} wiki",
-                    ),
-                ),
-                required=["keyword"],
-                additionalProperties=False
-            ),
-            description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
-        )
-
-        async def query_wiki_content(instance: AsyncChatbotInstance, titles: str, query: str):
+        async def query_wiki_content(instance: AsyncChatbotInstance, reference: ChatMessage, titles: str, query: str):
             return await RetrievalAgent(
                 model=self.helper_model,
                 context=await asyncio.gather(*(wiki_api.get_raw(t.strip()) for t in titles.split("|")))
@@ -302,7 +305,7 @@ class PixiClient:
             logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
 
-        async def fetch_channel_history(instance: AsyncChatbotInstance, channel_id: str, n: str):
+        async def fetch_channel_history(instance: AsyncChatbotInstance, reference: ChatMessage, channel_id: str, n: str):
             channel = await self.client.fetch_channel(int(channel_id))
             messages = []
             # TODO: check channel type
@@ -336,7 +339,7 @@ class PixiClient:
         )
 
         if self.giphy_api is not None:
-            async def search_gif(instance: AsyncChatbotInstance, query: str):
+            async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str):
                 logging.info(f"calling search_gif({query=})")
                 assert self.giphy_api is not None
                 resp: dict = await self.giphy_api.search(query, rating="pg", limit = 10)  # type: ignore
@@ -435,7 +438,7 @@ class PixiClient:
             await self.reset_command(interaction)
 
         # Slash command: /notes
-        @client.tree.command(name="notes", description="Toggle notes visibility.")
+        @client.tree.command(name="notes", description="See pixi's thoughts")
         async def notes_command(interaction: discord.Interaction):
             await self.notes_command(interaction)
 
@@ -464,7 +467,7 @@ class PixiClient:
             message = update.message
             await self.notes_command(message)
 
-        application = Application.builder().token(self.token).build()
+        application = Application.builder().token(self.token).read_timeout(30).write_timeout(30).build()
         self.application = application
         
         self.reflection_api = ReflectionAPI(platform=self.platform, bot=application.bot)
@@ -474,6 +477,7 @@ class PixiClient:
         application.add_handler(CommandHandler('notes', notes))
         application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
         application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
+        application.add_handler(MessageHandler(filters.AUDIO, callback=on_message))
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get(identifier)
@@ -488,14 +492,14 @@ class PixiClient:
             instance.add_message(chat_message)
             task = await instance.concurrent_channel_stream_call(
                 channel_id=str(channel_id),
-                refrence_message=chat_message,
+                reference_message=chat_message,
                 allow_ignore=allow_ignore
             )
             while not task.done():
                 await self.reflection_api.send_status_typing(message)
                 await asyncio.sleep(3)
             noncall_result = await task
-            #noncall_result = await instance.stream_call(refrence_message=chat_message, allow_ignore=allow_ignore)
+            #noncall_result = await instance.stream_call(reference_message=chat_message, allow_ignore=allow_ignore)
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
         except ReflectionAPI.Forbidden:
@@ -629,7 +633,7 @@ class PixiClient:
                         "message": reply_message_text
                     })
 
-        # convert everything into `RoleMessage``
+        # convert everything into `ChatMessage``
         role_message = ChatMessage(
             role=ChatRole.USER,
             content=message_text,
