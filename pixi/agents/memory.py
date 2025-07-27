@@ -2,10 +2,11 @@ import json
 import os
 import time
 import hashlib
-from typing import Optional
 
-from ..chatting import AsyncChatClient
+from .base import AgentBase
+
 from ..utils import exists
+from ..typing import Optional
 
 
 class MemoryItem:
@@ -33,11 +34,11 @@ class MemoryItem:
         return hashlib.sha256(f"{self.content}|{self.time}".encode("utf-8")).hexdigest()
 
 
-class MemoryAgent:
-    def __init__(self, model: str = "google/gemma-3-27b-it", memories: Optional[list[MemoryItem]] = None):
+class MemoryAgent(AgentBase):
+    def __init__(self, memories: Optional[list[MemoryItem]] = None, **agent_kwargs):
+        super().__init__(**agent_kwargs)
+
         self.memories: list[MemoryItem] = memories or []
-        self.model = model
-        self.client = AsyncChatClient(model=model)
         self.system_prompt = "\n".join([
             "*You are a memory retrieval agent**",
             ""
@@ -62,21 +63,6 @@ class MemoryAgent:
     def from_dict(cls, data: dict) -> 'MemoryAgent':
         memories = [MemoryItem.from_dict(m) for m in data.get("memories", [])]
         return cls(memories=memories)
-
-    def save_as(self, file: str):
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, ensure_ascii=False)
-
-    @classmethod
-    def from_file(cls, file: str) -> 'MemoryAgent':
-        if os.path.isfile(file):
-            with open(file, "rb") as f:
-                data = json.load(f)
-            return cls.from_dict(data)
-        else:
-            inst = cls()
-            inst.save_as(file)
-            return inst
 
     def add_memory(self, memory: str):
         print(f"Adding memory: {memory}")

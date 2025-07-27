@@ -1,16 +1,17 @@
 import json
 import logging
 import os
-from typing import Optional
 
-from ..chatting import AsyncChatClient
+from .base import AgentBase
+
+from ..typing import Optional
 
 
-class RetrievalAgent:
-    def __init__(self, model: Optional[str] = None, context: Optional[list[str]] = None):
+class RetrievalAgent(AgentBase):
+    def __init__(self, context: Optional[list[str]] = None, **agent_kwargs):
+        super().__init__(**agent_kwargs)
+
         self.context = context or []
-        self.model = model
-        self.client = AsyncChatClient(model=model)
         self.system_prompt = "\n".join([
             "## You are a context retrieval agent",
             ""
@@ -39,21 +40,6 @@ class RetrievalAgent:
     def from_dict(cls, data: dict) -> 'RetrievalAgent':
         context = data.get("context", [])
         return cls(context=context)
-
-    def save_as(self, file: str):
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, ensure_ascii=False)
-
-    @classmethod
-    def from_file(cls, file: str) -> 'RetrievalAgent':
-        if os.path.isfile(file):
-            with open(file, "rb") as f:
-                data = json.load(f)
-            return cls.from_dict(data)
-        else:
-            inst = cls()
-            inst.save_as(file)
-            return inst
 
     def add_context(self, context: str):
         logging.debug(f"Adding context: {context}")

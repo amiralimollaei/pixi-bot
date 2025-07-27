@@ -6,10 +6,9 @@ import math
 import os
 import time
 
-from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
-
 from .typing import AsyncPredicate, Optional
-from .agents import RetrievalAgent
+from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
+from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncGiphyAPI, AsyncWikimediaAPI
 from .chatbot import AssistantPersona, PredicateCommand, PredicateTool
 from .chatting import ChatMessage
@@ -46,6 +45,7 @@ class PixiClient:
     ):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
+        self.api_url = api_url
         self.chatbot_factory = CachedAsyncChatbotFactory(
             bot=self,
             model=model,
@@ -107,6 +107,9 @@ class PixiClient:
             predicate=predicate
         ))
 
+    def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs):
+        return agent(model=self.helper_model, base_url=self.api_url, **agent_kwargs)
+    
     async def register_slash_command(self, name: str, function, description: str | None = None):
         match self.platform:
             case Platform.DISCORD:
@@ -193,7 +196,8 @@ class PixiClient:
         database_api = await DirectoryDatabase.from_directory(database_name)
 
         async def get_entry_as_str(entry_id: int):
-            return json.dumps(asdict(await database_api.get_entry(entry_id)), ensure_ascii=False)
+            dataset_entry = await database_api.get_entry(entry_id)
+            return json.dumps(asdict(dataset_entry), ensure_ascii=False)
 
         async def search_database(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
@@ -217,11 +221,15 @@ class PixiClient:
 
         async def query_database(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, ids: str):
             if ids is None:
-                return "no result, no ids specified"
-            return await RetrievalAgent(
-                model=self.helper_model,
-                context=await asyncio.gather(*(get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")))
-            ).retrieve(query)
+                return "no result: no id specified"
+
+            agent: RetrievalAgent = self.create_agent_instance(
+                agent=RetrievalAgent,
+                context=await asyncio.gather(*[
+                    get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
+                ])
+            )
+            return await agent.retrieve(query)
 
         self.register_tool(
             name=f"query_{database_name}_database",
@@ -272,10 +280,16 @@ class PixiClient:
         )
 
         async def query_wiki_content(instance: AsyncChatbotInstance, reference: ChatMessage, titles: str, query: str):
-            return await RetrievalAgent(
-                model=self.helper_model,
-                context=await asyncio.gather(*(wiki_api.get_raw(t.strip()) for t in titles.split("|")))
-            ).retrieve(query)
+            if titles.split("|") is None:
+                return "no result: no page specified"
+
+            agent: RetrievalAgent = self.create_agent_instance(
+                agent=RetrievalAgent,
+                context=await asyncio.gather(*[
+                    wiki_api.get_raw(t.strip()) for t in titles.split("|")
+                ])
+            )
+            return await agent.retrieve(query)
 
         self.register_tool(
             name=f"query_wiki_content_{wiki_name}",
