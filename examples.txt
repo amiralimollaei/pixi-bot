@@ -4,7 +4,7 @@ you: [NOTE: not sure if talking to me, responding in english using SEND command]
 user: Jake (1 month ago) -> yes
 you: [NOTE: politely decline, responding in english using SEND command] [SEND: well I can't do that] [SEND: Maybe you should try?]
 
-user:  mirali (1 month ago) -> write a poem
+user: Amirali (1 month ago) -> write a poem
 you: [NOTE: politely decline, responding in english using SEND command] [SEND: I'm not exactly a poet.] [SEND: sorry! :P]
 
 user: Amirali (1 month ago) -> reset

@@ -122,18 +122,17 @@ class ReflectionAPI:
         return attachments
 
     async def fetch_attachment_audio(self, message: telegram.Message) -> list[AudioCache]:
-        # Only allow compressed audio formats
-        supported_audio_types = {'audio/mp3', 'audio/aac', 'audio/ogg'}
-        supported_extensions = {'.mp3', '.aac', '.ogg'}
+        supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
+        supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []
         audio_bytes = None
-        if message.audio and message.audio.mime_type in supported_audio_types:
+        if message.audio and message.audio.mime_type in supported_mime_types:
             file = await message.audio.get_file()
             audio_bytes = await file.download_as_bytearray()
         elif (
             message.document
             and message.document.mime_type
-            and message.document.mime_type in supported_audio_types
+            and message.document.mime_type in supported_mime_types
         ):
             file = await message.document.get_file()
             audio_bytes = await file.download_as_bytearray()

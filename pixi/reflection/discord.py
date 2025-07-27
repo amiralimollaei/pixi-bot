@@ -201,9 +201,8 @@ class ReflectionAPI:
         return attachments
 
     async def fetch_attachment_audio(self, message: discord.Message) -> list[AudioCache]:
-        # Only allow compressed audio formats
-        supported_mime_types = {'audio/mp3', 'audio/mpeg', 'audio/aac', 'audio/ogg'}
-        supported_extensions = {'.mp3', '.aac', '.ogg'}
+        supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
+        supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []
         for attachment in message.attachments:
             mime = attachment.content_type
