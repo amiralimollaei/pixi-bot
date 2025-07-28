@@ -81,6 +81,18 @@ class PixiClient:
 
             case Platform.TELEGRAM:
                 self.init_telegram()
+        
+        self.register_slash_command(
+            name="reset",
+            function=self.reset_command,
+            description="Reset the conversation."
+        )
+        
+        self.register_slash_command(
+            name="notes",
+            function=self.notes_command,
+            description="See pixi's thoughts"
+        )
 
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
@@ -110,12 +122,11 @@ class PixiClient:
     def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs):
         return agent(model=self.helper_model, base_url=self.api_url, **agent_kwargs)
     
-    async def register_slash_command(self, name: str, function, description: str | None = None):
+    def register_slash_command(self, name: str, function, description: str | None = None):
         match self.platform:
             case Platform.DISCORD:
                 import discord
-                
-                # Slash command: /reset
+
                 @self.client.tree.command(name=name, description=description)
                 async def slash_command(interaction: discord.Interaction):
                     await function(interaction)
@@ -440,20 +451,10 @@ class PixiClient:
         self.client = client
         
         self.reflection_api = ReflectionAPI(platform=self.platform, bot=client)
-
+        
         @client.event
-        async def on_message(*args, **kwargs):
-            return await self.on_message(*args, **kwargs)
-
-        # Slash command: /reset
-        @client.tree.command(name="reset", description="Reset the conversation.")
-        async def reset_command(interaction: discord.Interaction):
-            await self.reset_command(interaction)
-
-        # Slash command: /notes
-        @client.tree.command(name="notes", description="See pixi's thoughts")
-        async def notes_command(interaction: discord.Interaction):
-            await self.notes_command(interaction)
+        async def on_message(message):
+            return await self.on_message(message)
 
     def init_telegram(self):
         import telegram
@@ -464,33 +465,23 @@ class PixiClient:
             logging.warning("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
             return
 
-        async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            message = update.message
-            return await self.on_message(message)
-
-        async def reset(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            message = update.message
-            await self.reset_command(message)
-
-        async def start(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            message = update.message
-            await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
-
-        async def notes(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            message = update.message
-            await self.notes_command(message)
-
         application = Application.builder().token(self.token).read_timeout(30).write_timeout(30).build()
         self.application = application
         
         self.reflection_api = ReflectionAPI(platform=self.platform, bot=application.bot)
 
-        application.add_handler(CommandHandler('start', start))
-        application.add_handler(CommandHandler('reset', reset))
-        application.add_handler(CommandHandler('notes', notes))
-        application.add_handler(MessageHandler(filters.TEXT, callback=on_message))
-        application.add_handler(MessageHandler(filters.PHOTO, callback=on_message))
-        application.add_handler(MessageHandler(filters.AUDIO, callback=on_message))
+        async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+            message = update.message
+            if message is not None:
+                return await self.on_message(message)
+
+        async def start_command(update: telegram.Update):
+            message = update.message
+            await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
+
+        self.register_slash_command(name="start", function=start_command)
+
+        application.add_handler(MessageHandler(filters.ALL, callback=on_message))
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get(identifier)
