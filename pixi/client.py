@@ -96,6 +96,19 @@ class PixiClient:
 
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
+        
+        # for some reason handlers in telegram are order dependent, meaning we should add MessageHandler
+        # after all slash commands are registered or else the slash commands will not work.
+        if platform == Platform.TELEGRAM:
+            import telegram
+            from telegram.ext import ContextTypes, MessageHandler, filters
+            
+            async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+                message = update.message
+                if message is not None:
+                    return await self.on_message(message)
+
+            self.application.add_handler(MessageHandler(filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL, callback=on_message))
 
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
@@ -470,18 +483,10 @@ class PixiClient:
         
         self.reflection_api = ReflectionAPI(platform=self.platform, bot=application.bot)
 
-        async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-            message = update.message
-            if message is not None:
-                return await self.on_message(message)
-
-        async def start_command(update: telegram.Update):
-            message = update.message
+        async def start_command(message: telegram.Message):
             await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
 
         self.register_slash_command(name="start", function=start_command)
-
-        application.add_handler(MessageHandler(filters.ALL, callback=on_message))
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get(identifier)
