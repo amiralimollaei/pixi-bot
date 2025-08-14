@@ -25,7 +25,8 @@ def run(
     api_url: str,
     database_names: list[str] | None = None,
     enable_tool_calls=True,
-    log_tool_calls=False
+    log_tool_calls=False,
+    allowed_places: list[str] | None = None,
 ):
     # create an instance of the bot and run it
     client = PixiClient(
@@ -35,7 +36,8 @@ def run(
         api_url=api_url,
         database_names=database_names,
         enable_tool_calls=enable_tool_calls,
-        log_tool_calls=log_tool_calls
+        log_tool_calls=log_tool_calls,
+        allowed_places=allowed_places,
     )
     client.run()
 
@@ -53,7 +55,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--platform", "-p",
         type=str,
-        choices=[p.name.lower() for p in Platform] + ["all"],
+        choices=[p.name.lower() for p in Platform],
         required=True,
         help="Platform to run the bot on."
     )
@@ -71,7 +73,7 @@ if __name__ == '__main__':
         help="Model to use for the bot. Default is 'google/gemini-2.5-pro`."
     )
     parser.add_argument(
-        "--helper-model",
+        "--helper-model", "-hm",
         type=str,
         default="google/gemini-2.5-flash",
         help="Model to use for agentic tools. Default is 'google/gemini-2.5-flash`."
@@ -99,6 +101,13 @@ if __name__ == '__main__':
         default=None,
         help="add the name of databases to use (space-separated)."
     )
+    parser.add_argument(
+        "--allowed-places",
+        type=str,
+        nargs="+",
+        default=None,
+        help="add the name of places that the bot is allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
+    )
     args = parser.parse_args()
 
     # Set logging level
@@ -109,23 +118,10 @@ if __name__ == '__main__':
         helper_model=args.helper_model,
         api_url=args.api_url,
         enable_tool_calls=not args.disable_tool_calls,
+        log_tool_calls=args.log_tool_calls,
         database_names=args.database_names,
-        log_tool_calls=args.log_tool_calls
+        allowed_places=args.allowed_places,
     )
 
-    processes = []
-    try:
-        platform = args.platform.upper()
-        if platform == "ALL":
-            for plat in Platform:
-                poc = multiprocessing.Process(target=run, kwargs=dict(platform=plat, **client_args))
-                poc.start()
-                processes.append(poc)
-            for poc in processes:
-                poc.join()
-        else:
-            run(platform=Platform[platform], **client_args)
-    except KeyboardInterrupt:
-        logging.info("Shutting down the bot.")
-        for process in processes:
-            process.join()
+    platform = args.platform.upper()
+    run(platform=Platform[platform], **client_args)

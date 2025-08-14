@@ -41,7 +41,8 @@ class PixiClient:
         persona_file: str = "persona.json",
         database_names: Optional[list[str]] = None,
         enable_tool_calls: bool = False,
-        log_tool_calls: bool = False
+        log_tool_calls: bool = False,
+        allowed_places: Optional[list[str]] = None
     ):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
@@ -57,6 +58,8 @@ class PixiClient:
         self.reflection_api = ReflectionAPI(platform=platform, bot=None)
         self.helper_model = helper_model
         self.enable_tool_calls = enable_tool_calls
+        
+        self.allowed_places = allowed_places or []
 
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
@@ -142,6 +145,12 @@ class PixiClient:
 
                 @self.client.tree.command(name=name, description=description)
                 async def slash_command(interaction: discord.Interaction):
+                    convo_id = self.reflection_api.get_identifier_from_message(interaction)
+                    print(convo_id)
+                    if not self.is_identifier_allowed(convo_id):
+                        logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
+                        await self.reflection_api.send_reply(interaction, "This command is not allowed in this place.", ephemeral=True)
+                        return
                     await function(interaction)
 
             case Platform.TELEGRAM:
@@ -150,6 +159,12 @@ class PixiClient:
                 
                 async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
                     message = update.message
+                    convo_id = self.reflection_api.get_identifier_from_message(message)
+                    print(convo_id)
+                    if not self.is_identifier_allowed(convo_id):
+                        logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
+                        await self.reflection_api.send_reply(message, "This command is not allowed in this place.", ephemeral=True)
+                        return
                     await function(message)
 
                 self.application.add_handler(CommandHandler(name, slash_command))
@@ -571,8 +586,14 @@ class PixiClient:
                 logging.warning(f"Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
 
+    def is_identifier_allowed(self, identifier: str) -> bool:
+        """
+        Check if the identifier is in the allowed places.
+        If allowed places are not set, return True.
+        """
+        return not self.allowed_places or identifier in self.allowed_places
+    
     async def on_message(self, message):
-
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return
@@ -581,14 +602,20 @@ class PixiClient:
 
         # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
+        is_prefixed = message_text.lower().startswith(tuple(COMMAND_PREFIXES))
         is_inside_dm = self.reflection_api.is_inside_dm(message)
+        convo_id = self.reflection_api.get_identifier_from_message(message)
 
-        if not (is_inside_dm or bot_mentioned or message_text.lower().startswith(tuple(COMMAND_PREFIXES))):
+        if not (is_inside_dm or bot_mentioned or is_prefixed):
             return
 
-        message_text = remove_prefixes(message_text)
+        if not self.is_identifier_allowed(convo_id):
+            logging.warning(f"ignoring message in {convo_id} because it is not in the allowed places.")
+            return
 
-        convo_id = self.reflection_api.get_identifier_from_message(message)
+        if is_prefixed:
+            message_text = remove_prefixes(message_text)
+       
         convo = await self.chatbot_factory.get(convo_id)
 
         attached_images = await self.reflection_api.fetch_attachment_images(message)
