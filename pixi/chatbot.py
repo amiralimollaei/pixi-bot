@@ -242,8 +242,7 @@ class AsyncChatbotInstance:
             if not_found_ok:
                 logging.info(f"Unable to find the instance save file {self.path}`, using default values.")
             else:
-                logging.warning(f"Unable to find the instance save file {self.path}`, using default values.")
-
+                raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
     @classmethod
     def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
         return cls(
@@ -256,12 +255,12 @@ class AsyncChatbotInstance:
 
 
 class CachedAsyncChatbotFactory:
-    def __init__(self, *, bot=None, **kwargs):
+    def __init__(self, *, parent=None, **kwargs):
         self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
         self.tools: list[PredicateTool] = []
         self.commands: list[PredicateCommand] = []
-        self.bot = bot
+        self.bot = parent
         assert self.bot
 
     def register_command(self, command: PredicateCommand):
@@ -281,7 +280,20 @@ class CachedAsyncChatbotFactory:
 
         self.tools.append(tool)
 
-    async def get(self, identifier: str) -> AsyncChatbotInstance:
+    async def get(self, identifier: str) -> AsyncChatbotInstance | None:
+        cached_instance = self.instances.get(identifier)
+        if cached_instance:
+            return cached_instance
+        __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)
+        try:
+            __instance.load(not_found_ok=False)
+            # cache the instance
+            self.instances.update({identifier: __instance})
+            return __instance
+        except FileNotFoundError:
+            return None
+    
+    async def get_or_create(self, identifier: str) -> AsyncChatbotInstance:
         __instance = self.instances.get(identifier)
         if __instance is None:
             __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)

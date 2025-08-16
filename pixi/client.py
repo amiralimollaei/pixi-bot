@@ -6,6 +6,7 @@ import math
 import os
 import time
 
+from .server import FlaskServer
 from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
 from .agents import AgentBase, RetrievalAgent
@@ -48,7 +49,7 @@ class PixiClient:
         self.persona = AssistantPersona.from_json(persona_file)
         self.api_url = api_url
         self.chatbot_factory = CachedAsyncChatbotFactory(
-            bot=self,
+            parent=self,
             model=model,
             base_url=api_url,
             persona=self.persona,
@@ -63,6 +64,8 @@ class PixiClient:
 
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
+        
+        self.flask_client = FlaskServer(self)
 
         try:
             self.giphy_api = AsyncGiphyAPI()
@@ -504,7 +507,7 @@ class PixiClient:
         self.register_slash_command(name="start", function=start_command)
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
-        return await self.chatbot_factory.get(identifier)
+        return await self.chatbot_factory.get_or_create(identifier)
 
     async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
         assert chat_message.origin
@@ -616,7 +619,7 @@ class PixiClient:
         if is_prefixed:
             message_text = remove_prefixes(message_text)
        
-        convo = await self.chatbot_factory.get(convo_id)
+        convo = await self.chatbot_factory.get_or_create(convo_id)
 
         attached_images = await self.reflection_api.fetch_attachment_images(message)
         attached_audio = await self.reflection_api.fetch_attachment_audio(message)
@@ -689,14 +692,3 @@ class PixiClient:
                 self.client.run(self.token, log_handler=None)
             case Platform.TELEGRAM:
                 self.application.run_polling()
-
-    async def run_async(self):
-        match self.platform:
-            case Platform.DISCORD:
-                assert self.token
-                await self.client.start(self.token)
-            case Platform.TELEGRAM:
-                await self.application.initialize()
-                await self.application.start()
-                assert self.application.updater
-                await self.application.updater.start_polling()

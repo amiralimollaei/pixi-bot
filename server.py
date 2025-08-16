@@ -1,9 +1,7 @@
 import logging
 
-
-from pixi.enums import Platform
 from pixi.utils import Ansi
-from pixi.client import PixiClient
+from pixi.server import FlaskServer
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
@@ -18,7 +16,6 @@ httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.WARNING)
 
 def run(
-    platform: Platform,
     *,
     model: str,
     helper_model: str,
@@ -26,19 +23,16 @@ def run(
     database_names: list[str] | None = None,
     enable_tool_calls=True,
     log_tool_calls=False,
-    allowed_places: list[str] | None = None,
 ):
-    client = PixiClient(
-        platform=platform,
+    server = FlaskServer(
         model=model,
         helper_model=helper_model,
         api_url=api_url,
         database_names=database_names,
         enable_tool_calls=enable_tool_calls,
         log_tool_calls=log_tool_calls,
-        allowed_places=allowed_places,
     )
-    client.run()
+    server.run(debug=True)
 
 
 if __name__ == '__main__':
@@ -50,13 +44,6 @@ if __name__ == '__main__':
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="Run the Pixi bot, a multi-platform AI chatbot.")
-    parser.add_argument(
-        "--platform", "-p",
-        type=str,
-        choices=[p.name.lower() for p in Platform],
-        required=True,
-        help="Platform to run the bot on."
-    )
     parser.add_argument(
         "--log-level", "-l",
         type=str,
@@ -99,13 +86,6 @@ if __name__ == '__main__':
         default=None,
         help="add the name of databases to use (space-separated)."
     )
-    parser.add_argument(
-        "--allowed-places",
-        type=str,
-        nargs="+",
-        default=None,
-        help="add the name of places that the bot is allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
-    )
     args = parser.parse_args()
 
     # Set logging level
@@ -118,8 +98,6 @@ if __name__ == '__main__':
         enable_tool_calls=not args.disable_tool_calls,
         log_tool_calls=args.log_tool_calls,
         database_names=args.database_names,
-        allowed_places=args.allowed_places,
     )
 
-    platform = args.platform.upper()
-    run(platform=Platform[platform], **client_args)
+    run(**client_args)
