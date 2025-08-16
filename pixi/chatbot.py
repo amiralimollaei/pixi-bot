@@ -97,6 +97,8 @@ class AsyncChatbotInstance:
         assert exists(persona) and isinstance(persona, AssistantPersona), f"Invalid persona \"{persona}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
 
+        self.scheduled_messages = []
+        
         self.uuid = str(uuid)
         self.persona = persona
         self.prefix = hash_prefix
@@ -201,7 +203,7 @@ class AsyncChatbotInstance:
             cancel_task.cancel()
             await cancel_task
         return task
-
+    
     async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 

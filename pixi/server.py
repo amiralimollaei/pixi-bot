@@ -90,8 +90,29 @@ class FlaskServer(Flask):
         #self.addon_manager = AddonManager(self)
         #self.addon_manager.load_addons()
         
+        self.chatbot_factory.register_command(PredicateCommand(
+            name="send",
+            field_name="message",
+            func=self.send_command,
+            description="send a distinct chat message",
+        ))
+        
+        self.chatbot_factory.register_command(PredicateCommand(
+            name="note",
+            field_name="thoughts",
+            func=self.note_command,
+            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
+        ))
+        
         self.__register_instance_apis()
 
+    async def send_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        instance.scheduled_messages.append(value)
+    
+    async def note_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        # ignore notes command for now
+        pass
+    
     def __register_instance_apis(self):
         async def get_instance(instance_id: str):
             if instance_id is None:
@@ -156,20 +177,30 @@ class FlaskServer(Flask):
 
         self.__register_api("instance/add_message", add_message_instance, method="POST")
         
-        async def request_response_instance(instance_id: str):
+        async def ask_instance(instance_id: str, message: str, temporal: bool = False):
             if instance_id is None:
                 return APIResponse(
                     success=False,
                     error="instance_id is required"
                 ).to_dict(), 400
             instance = await self.chatbot_factory.get_or_create(instance_id)
-            assert instance is not None
+            reference_message = ChatMessage(role=ChatRole.USER, content=message)
+            instance.add_message(reference_message)
+            await instance.stream_call(reference_message)
+            instance.save()
+            resp = instance.scheduled_messages
+            instance.scheduled_messages = []
+            #if instance is None:
+            #    return APIResponse(
+            #        success=False,
+            #        error="instance not found"
+            #    ).to_dict(), 404
             return APIResponse(
                 success=True,
-                data=await instance.client.request()
+                data=resp
             ).to_dict(), 200
 
-        self.__register_api("instance/request_response", request_response_instance, method="GET")
+        self.__register_api("instance/ask", ask_instance, method="GET")
     
     async def __init_database_tools(self):
         if not self.enable_tool_calls:
