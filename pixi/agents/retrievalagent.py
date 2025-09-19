@@ -26,10 +26,11 @@ class RetrievalAgent(AgentBase):
             "example output:",
             "```json",
             "{",
-            "  \"relevant\": [\"Villagers can be cured from zombie villagers by using a splash potion of weakness and a golden apple.\"],",
             "  \"source\": [\"page_title:Villagers\"]",
+            "  \"relevant\": [\"Villagers can be cured from zombie villagers by using a splash potion of weakness and a golden apple.\"],",
             "  \"confidence\": 9",
             "}",
+            "```"
         ])
         self.client.set_system(self.system_prompt)
 

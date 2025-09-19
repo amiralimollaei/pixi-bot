@@ -275,6 +275,8 @@ class AsyncChatClient:
                 assert isinstance(
                     m, ChatMessage), f"expected messages to be of type `list[ChatMessage]` or be None, but at least one element in the list is not of type `ChatMessage`, got `{messages}`"
         self.base_url = base_url or DEFAULT_BASE_URL
+        self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY")
+        assert exists(self.api_key), "API key must be set in the environment variable OPENAI_API_KEY or DEEPINFRA_API_KEY."
         assert exists(self.base_url), f"base_url must be set, but got {self.base_url}"
         assert isinstance(self.base_url, str), f"base_url must be a string, but got {self.base_url}"
         self.model = model or DEFAULT_MODEL
@@ -287,12 +289,11 @@ class AsyncChatClient:
 
         self.rearrange_predicate = None
 
-    # create a new session everytime to avoid issues with cancelling requests and connection errors
-
+    # Hotfix: create a new session every time to avoid issues with cancelling requests and connection errors
     @property
     def session(self):
         return AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY"),
+            api_key=self.api_key,
             base_url=self.base_url
         )
 
@@ -462,7 +463,6 @@ class AsyncChatClient:
                     yield chunk
         except APIError as e:
             logging.error(f"APIError: {e.body}")
-            exit(1)
             raise e
 
     async def request(self, enable_timestamps: bool = True, reference_message: ChatMessage | None = None) -> str | None:

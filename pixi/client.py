@@ -6,10 +6,11 @@ import math
 import os
 import time
 
+#from .server import FlaskServer
 from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
 from .agents import AgentBase, RetrievalAgent
-from .apis import AsyncGiphyAPI, AsyncWikimediaAPI
+from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .chatbot import AssistantPersona, PredicateCommand, PredicateTool
 from .chatting import ChatMessage
 from .database import DirectoryDatabase
@@ -20,6 +21,7 @@ from .addon import AddonManager
 # constants
 
 COMMAND_PREFIXES = ["!pixi", "!pix", "!p"]
+COMMAND_KEYWORDS = ["pixi", "پیکسی"]
 
 
 # helper functions
@@ -42,13 +44,15 @@ class PixiClient:
         database_names: Optional[list[str]] = None,
         enable_tool_calls: bool = False,
         log_tool_calls: bool = False,
-        allowed_places: Optional[list[str]] = None
+        allowed_places: Optional[list[str]] = None,
+        accept_images: bool = True,
+        accept_audio: bool = True,
     ):
         self.platform = platform
         self.persona = AssistantPersona.from_json(persona_file)
         self.api_url = api_url
         self.chatbot_factory = CachedAsyncChatbotFactory(
-            bot=self,
+            parent=self,
             model=model,
             base_url=api_url,
             persona=self.persona,
@@ -60,20 +64,31 @@ class PixiClient:
         self.enable_tool_calls = enable_tool_calls
         
         self.allowed_places = allowed_places or []
+        
+        self.accept_images = accept_images
+        self.accept_audio = accept_audio
 
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
+        
+        #self.flask_client = FlaskServer(self)
 
+        self.gif_api = None
+        
         try:
-            self.giphy_api = AsyncGiphyAPI()
+            self.gif_api = AsyncTenorAPI()
         except KeyError:
-            logging.warning("GIPHY_API_KEY is not set, GIF features will not be available.")
-            self.giphy_api = None
+            logging.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
+        
+        #try:
+        #    self.gif_api = AsyncGiphyAPI()
+        #except KeyError:
+        #    logging.warning("GIPHY_API_KEY is not set, GIPHY API features will not be available.")
 
         # TODO: add configurable wikis
         if self.enable_tool_calls:
             self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
-            self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
+            # self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
             # self.init_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
         self.init_chatbot_commands()
@@ -170,6 +185,9 @@ class PixiClient:
                 self.application.add_handler(CommandHandler(name, slash_command))
 
     async def send_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        if not value:
+            return
+        
         assert reference.origin is not None
 
         delay_time = time.time() - instance.last_send_time
@@ -391,22 +409,17 @@ class PixiClient:
             description="Fetches the last `n` message from a text channel"
         )
 
-        if self.giphy_api is not None:
-            async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str):
-                assert self.giphy_api is not None
-                resp: dict = await self.giphy_api.search(query, rating="pg", limit = 10)  # type: ignore
-                data = resp.get("data")
+        if self.gif_api is not None:
+            async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, locale: str):
+                assert self.gif_api is not None
+                resp: dict = await self.gif_api.search(query, locale = locale, limit = 10)  # type: ignore
                 results = []
-                if data is None:
-                    logging.warning(f"No GIFs found for query: {query}")
-                    return []
-                for gif in data:
-                    if id := gif.get("id"):
-                        results.append(dict(
-                            title=gif.get("title"),
-                            rating=gif.get("rating"),
-                            url=f"https://i.giphy.com/{id}.webp"
-                        ))
+                for gif_content in resp.get("results", []):
+                    results.append(dict(
+                        content_description = gif_content.get("content_description", ""),
+                        content_rating = gif_content.get("content_rating", ""),
+                        url = gif_content.get("media", [])[0].get("gif", {}).get("url", "")
+                    ))
                 return results
 
             self.register_tool(
@@ -417,13 +430,17 @@ class PixiClient:
                     properties={
                         "query": {
                             "type": "string",
-                            "description": "The search query.",
+                            "description": "The search string.",
+                        },
+                        "locale": {
+                            "type": "string",
+                            "description": "specify default language to interpret search string; xx is ISO 639-1 language code, _YY (optional) is 2-letter ISO 3166-1 country code",
                         },
                     },
-                    required=["query"],
+                    required=["query", "locale"],
                     additionalProperties=False
                 ),
-                description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's URL as a distinct chat message, the URL always starts with \"https://i.giphy/\""
+                description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's URL as a distinct chat message."
             )
 
     async def notes_command(self, interaction):
@@ -446,7 +463,7 @@ class PixiClient:
             return
 
         identifier = self.reflection_api.get_identifier_from_message(interaction)
-        instance = await self.get_conversation_instance(identifier)  # make sure the instance is in memory before removing
+        
         self.chatbot_factory.remove(identifier)
         logging.info(f"the conversation in {identifier} has been reset.")
 
@@ -504,7 +521,7 @@ class PixiClient:
         self.register_slash_command(name="start", function=start_command)
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
-        return await self.chatbot_factory.get(identifier)
+        return await self.chatbot_factory.get_or_create(identifier)
 
     async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
         assert chat_message.origin
@@ -527,9 +544,9 @@ class PixiClient:
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
         except ReflectionAPI.Forbidden:
-            logging.exception(f"Cannot send message in {instance.uuid}, permission denied.")
+            logging.exception(f"Cannot send message in {instance.id}, permission denied.")
         except Exception:
-            logging.exception(f"Unknown error while responding to a message in {instance.uuid}.")
+            logging.exception(f"Unknown error while responding to a message in {instance.id}.")
             await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
 
         responded = True  # TODO: track the command usage and check if the message is responded to
@@ -602,11 +619,16 @@ class PixiClient:
 
         # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
+        is_keyword_present = False
+        for keyword in COMMAND_KEYWORDS:
+            if keyword in message_text.lower():
+                is_keyword_present = True
+                break
         is_prefixed = message_text.lower().startswith(tuple(COMMAND_PREFIXES))
         is_inside_dm = self.reflection_api.is_inside_dm(message)
         convo_id = self.reflection_api.get_identifier_from_message(message)
 
-        if not (is_inside_dm or bot_mentioned or is_prefixed):
+        if not (is_inside_dm or bot_mentioned or is_prefixed or is_keyword_present):
             return
 
         if not self.is_identifier_allowed(convo_id):
@@ -616,10 +638,14 @@ class PixiClient:
         if is_prefixed:
             message_text = remove_prefixes(message_text)
        
-        convo = await self.chatbot_factory.get(convo_id)
+        convo = await self.chatbot_factory.get_or_create(convo_id)
 
-        attached_images = await self.reflection_api.fetch_attachment_images(message)
-        attached_audio = await self.reflection_api.fetch_attachment_audio(message)
+        attached_images = None
+        if self.accept_images:
+            attached_images = await self.reflection_api.fetch_attachment_images(message)
+        attached_audio = None
+        if self.accept_audio:
+            attached_audio = await self.reflection_api.fetch_attachment_audio(message)
 
         message_author = self.reflection_api.get_sender_information(message)
 
@@ -689,14 +715,3 @@ class PixiClient:
                 self.client.run(self.token, log_handler=None)
             case Platform.TELEGRAM:
                 self.application.run_polling()
-
-    async def run_async(self):
-        match self.platform:
-            case Platform.DISCORD:
-                assert self.token
-                await self.client.start(self.token)
-            case Platform.TELEGRAM:
-                await self.application.initialize()
-                await self.application.start()
-                assert self.application.updater
-                await self.application.updater.start_polling()

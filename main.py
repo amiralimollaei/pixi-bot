@@ -1,5 +1,6 @@
 import logging
 
+
 from pixi.enums import Platform
 from pixi.utils import Ansi
 from pixi.client import PixiClient
@@ -16,7 +17,6 @@ httpx_logger = logging.getLogger("httpx")
 # Set the logging level to WARNING to ignore INFO and DEBUG logs
 httpx_logger.setLevel(logging.WARNING)
 
-
 def run(
     platform: Platform,
     *,
@@ -27,8 +27,9 @@ def run(
     enable_tool_calls=True,
     log_tool_calls=False,
     allowed_places: list[str] | None = None,
+    accept_images=True,
+    accept_audio=True,
 ):
-    # create an instance of the bot and run it
     client = PixiClient(
         platform=platform,
         model=model,
@@ -38,6 +39,8 @@ def run(
         enable_tool_calls=enable_tool_calls,
         log_tool_calls=log_tool_calls,
         allowed_places=allowed_places,
+        accept_images=accept_images,
+        accept_audio=accept_audio,
     )
     client.run()
 
@@ -46,7 +49,6 @@ if __name__ == '__main__':
     from pixi.utils import load_dotenv
 
     import argparse
-    import multiprocessing
 
     # load environment variables
     load_dotenv()
@@ -90,6 +92,16 @@ if __name__ == '__main__':
         help="Disable tool calls"
     )
     parser.add_argument(
+        "--disable-images",
+        action="store_true",
+        help="Disable accepting images"
+    )
+    parser.add_argument(
+        "--disable-audio",
+        action="store_true",
+        help="Disable accepting audio"
+    )
+    parser.add_argument(
         "--log-tool-calls",
         action="store_true",
         help="Enable logging for tool calls (enabled by default when running with logging level DEBUG)"
@@ -118,6 +130,8 @@ if __name__ == '__main__':
         helper_model=args.helper_model,
         api_url=args.api_url,
         enable_tool_calls=not args.disable_tool_calls,
+        accept_images=not args.disable_images,
+        accept_audio=not args.disable_audio,
         log_tool_calls=args.log_tool_calls,
         database_names=args.database_names,
         allowed_places=args.allowed_places,

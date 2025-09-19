@@ -175,6 +175,7 @@ cython_debug/
 
 # bot save files
 convo-v2/
+storage/
 
 # test files
 test.py

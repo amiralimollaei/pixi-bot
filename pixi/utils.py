@@ -1,6 +1,44 @@
 import logging
+import asyncio
 from enum import StrEnum
+from typing import Generator, Any, Awaitable, Coroutine, TypeVar
 
+_T_co = TypeVar("_T_co", covariant=True)  # Any type covariant containers.
+_AwaitableLike = Generator[Any, None, _T_co] | Awaitable[_T_co]
+_CoroutineLike = Generator[Any, None, _T_co] | Coroutine[Any, Any, _T_co]
+
+class CoroutineQueueExecutor:
+    def __init__(self, max_queue_size: int = 1000):
+        self.max_queue_size = max_queue_size
+        self.tasks: list[asyncio._CoroutineLike] = []
+        self.execute_lock = asyncio.Lock()
+        self.execute_task = None
+    
+    async def __execute_queue(self):
+        await self.execute_lock.acquire()
+        while len(self.tasks) > 0:
+            await self.tasks[0]
+            del self.tasks[0]
+        self.execute_lock.release()
+    
+    async def add_to_queue(self, t: _CoroutineLike):
+        self.tasks.append(t)
+        # if execute_lock is not acquired, we are not executing anything
+        # in that case we should start executing the tasks
+        if not self.execute_lock.locked():
+            self.execute_task = asyncio.ensure_future(self.__execute_queue())
+
+    async def __aenter__(self):
+        self.execute_task = None
+        await self.execute_lock.release()
+        
+        if len(self.tasks) > 0:
+            logging.warning(f"Corotine never avaited: {self.tasks}")
+        
+        self.tasks = []
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await asyncio.wait_for(self.execute_task, timeout=30)
 
 # helpers
 

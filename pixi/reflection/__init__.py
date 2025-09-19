@@ -61,6 +61,9 @@ class ReflectionAPI:
         # Hotfix: ensure the response is not too long
         return await self._ref.send_reply(message, text[:1024], delay, ephemeral, should_reply)
 
+    async def edit_message(self, message, text):
+        return await self._ref.edit_message(message, text)
+    
     def get_sender_id(self, message) -> int:
         return self._ref.get_sender_id(message)
 

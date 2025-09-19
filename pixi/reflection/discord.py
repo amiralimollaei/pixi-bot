@@ -132,16 +132,15 @@ class ReflectionAPI:
                 return False
         return True
 
-    async def send_response(self, origin: discord.Message | discord.Interaction, text: str, ephemeral: bool = False, *args, **kwargs):
+    async def send_response(self, origin: discord.Message | discord.Interaction, text: str, ephemeral: bool = False, *args, **kwargs) -> discord.Message | discord.InteractionMessage:
         if isinstance(origin, discord.Message):
-            await origin.channel.send(text, *args, **kwargs)
+            return await origin.channel.send(text, *args, **kwargs)
         elif isinstance(origin, discord.Interaction):
-            await origin.response.send_message(text, *args, ephemeral=ephemeral, **kwargs)
+            return (await origin.response.send_message(text, *args, ephemeral=ephemeral, **kwargs)).resource
         else:
-            raise TypeError(
-                f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
+            raise TypeError(f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
 
-    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True):
+    async def send_reply(self, message: discord.Message | discord.Interaction, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True) -> discord.Message | discord.InteractionMessage:
         if isinstance(message, discord.Message):
             # delay adds realism
             if delay is not None and delay > 0:
@@ -152,17 +151,15 @@ class ReflectionAPI:
         for i in range(num_retries):
             try:
                 if isinstance(message, discord.Interaction):
-                    await self.send_response(message, text, ephemeral=ephemeral)
+                    return await self.send_response(message, text, ephemeral=ephemeral)
                 else:
                     if (not should_reply) or (message.channel.type == discord.ChannelType.private):
-                        await self.send_response(message, text)
+                        return await self.send_response(message, text)
                     else:
                         if self.can_read_history(message.channel):
-                            await self.send_response(message, text, reference=message.to_reference(fail_if_not_exists=False))
+                            return await self.send_response(message, text, reference=message.to_reference(fail_if_not_exists=False))
                         else:
-                            await self.send_response(message, f"{message.author.mention} {text}")
-                 
-                break
+                            return await self.send_response(message, f"{message.author.mention} {text}")
             except discord.Forbidden as e:
                 logging.exception(f"Forbidden")
                 channel_id = message.channel.id if message.channel else None
@@ -172,6 +169,9 @@ class ReflectionAPI:
         else:
             channel_id = message.channel.id if message.channel else None
             raise RuntimeError(f"There was an unexpected error while send a message in channel ({channel_id=})")
+
+    async def edit_message(self, message: discord.Message | discord.Interaction, text: str):
+        await message.edit(content = text)
 
     def get_sender_id(self, message: discord.Message):
         return message.author.id
