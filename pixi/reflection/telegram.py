@@ -53,13 +53,14 @@ class ReflectionAPI:
     def can_read_history(self, channel) -> bool:
         return True
 
-    async def send_response(self, origin: telegram.Message, text: str, ephemeral: bool = False, *args, **kwargs):
+    async def send_response(self, origin: telegram.Message, text: str, ephemeral: bool = False, *args, **kwargs) -> telegram.Message:
         try:
-            await origin.reply_markdown_v2(text, *args, **kwargs)
+            return await origin.reply_markdown_v2(text, *args, **kwargs)
         except telegram.error.BadRequest:
-            await origin.reply_text(text, *args, **kwargs)
+            # BadRequest happens when the markdown is malformed, so send as text
+            return await origin.reply_text(text, *args, **kwargs)
 
-    async def send_reply(self, message: telegram.Message, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True):
+    async def send_reply(self, message: telegram.Message, text: str, delay: int | None = None, ephemeral: bool = False, should_reply: bool = True) -> telegram.Message:
         chat_id = message.chat_id
 
         # delay adds realism
@@ -72,8 +73,7 @@ class ReflectionAPI:
         num_retries = 5
         for i in range(num_retries):
             try:
-                await self.send_response(message, text)
-                break
+                return await self.send_response(message, text)
             except telegram.error.TimedOut as e:
                 logging.warning(f"Timed out while sending message: {e}, retrying ({i}/{num_retries})")
             except telegram.error.Forbidden:
@@ -82,6 +82,9 @@ class ReflectionAPI:
         else:
             raise RuntimeError(f"There was an unexpected error while send a message in chat {chat_id}")
 
+    async def edit_message(self, message: telegram.Message, text: str):
+        await message.edit_text(text)
+    
     def get_sender_id(self, message: telegram.Message):
         assert message.from_user is not None, "from_user is None"
         return message.from_user.id

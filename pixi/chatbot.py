@@ -1,13 +1,12 @@
 import asyncio
 from collections import defaultdict
 from functools import partial
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import logging
 import json
 import time
 import os
-import copy
 
 from .chatting import AsyncChatClient, ChatMessage, ChatRole
 from .commands import AsyncCommandManager
@@ -19,38 +18,26 @@ from .utils import exists
 SYSTEM_PROMPT = open("system.md", "r", encoding="UTF-8").read()
 EXAMPLES = open("examples.txt", "r", encoding="UTF-8").read()
 ASSISTANT_PRE = "[NOTE: I accept the guidelines of the system, I use the SEND command] [SEND: OK!] [SEND: LLLet's begin!]"
-SAVE_PATH = "./convo-v2/userdata"
+SAVE_PATH = "./storage/userdata"
 
 
 @dataclass
 class AssistantPersona:
     name: str
     age: Optional[int] = None
-    occupation: Optional[str] = None
-    memories: Optional[list[str]] = None
+    location: Optional[str] = None
     appearance: Optional[str] = None
-    nationality: Optional[str] = None
+    background: Optional[str] = None
+    likes: Optional[str] = None
+    dislikes: Optional[str] = None
+    online: Optional[str] = None
 
     def to_dict(self) -> dict:
-        return dict(
-            name=self.name,
-            age=self.age,
-            occupation=self.occupation,
-            memories=self.memories,
-            appearance=self.appearance,
-            nationality=self.nationality,
-        )
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'AssistantPersona':
-        return cls(
-            name=data["name"],
-            age=data.get("age"),
-            occupation=data.get("occupation"),
-            memories=data.get("memories"),
-            appearance=data.get("appearance"),
-            nationality=data.get("nationality"),
-        )
+        return cls(**data)
 
     @classmethod
     def from_json(cls, file: str) -> 'AssistantPersona':
@@ -79,6 +66,10 @@ class PredicateCommand:
     description: str
     predicate: Optional[AsyncPredicate] = None
 
+def get_instance_save_path(id: str, hash_prefix: str):
+    uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
+    path = os.path.join(SAVE_PATH, f"{hash_prefix}_{uuid_hash}.json")
+    return path
 
 class AsyncChatbotInstance:
     def __init__(self,
@@ -98,13 +89,12 @@ class AsyncChatbotInstance:
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
 
         self.scheduled_messages = []
-        
-        self.uuid = str(uuid)
+
+        self.id = str(uuid)
         self.persona = persona
         self.prefix = hash_prefix
 
-        self.uuid_hash = hashlib.sha256(f"{self.prefix}{self.uuid}".encode("utf-8")).hexdigest()
-        self.path = os.path.join(SAVE_PATH, self.uuid_hash + ".json")
+        self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
 
         self.realtime_data = dict()
         self.is_notes_visible = False
@@ -172,9 +162,7 @@ class AsyncChatbotInstance:
         self.client.set_rearrange_predicate(predicate)
 
     def get_realtime_data(self):
-        data = {"Date": time.strftime("%a %d %b %Y, %I:%M%p")}
-        data.update(self.realtime_data)
-        return json.dumps(data, ensure_ascii=False)
+        return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
     def get_system_prompt(self, allow_ignore: bool = True):
         return SYSTEM_PROMPT.format(
@@ -184,16 +172,17 @@ class AsyncChatbotInstance:
             realtime=self.get_realtime_data(),
             commands=self.command_manager.get_prompt()
         )
-        
+
     async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage, allow_ignore: bool = True):
         assert channel_id, "channel_id is None"
-        
+
         async def stream_call_task():
             try:
                 await self.stream_call(reference_message, allow_ignore)
             except asyncio.CancelledError:
-                logging.warning(f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}")
-        
+                logging.warning(
+                    f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}")
+
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
         task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
@@ -203,7 +192,7 @@ class AsyncChatbotInstance:
             cancel_task.cancel()
             await cancel_task
         return task
-    
+
     async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
         self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
@@ -211,7 +200,7 @@ class AsyncChatbotInstance:
             stream=self.client.stream_completion(),
             reference_message=reference_message
         )])
-     
+
         return non_responce.strip() or None
 
     def toggle_notes(self):
@@ -220,7 +209,7 @@ class AsyncChatbotInstance:
 
     def to_dict(self):
         return dict(
-            uuid=self.uuid,
+            uuid=self.id,
             prefix=self.prefix,
             persona=self.persona.to_dict(),
             messages=[msg.to_dict() for msg in self.client.messages],
@@ -245,6 +234,7 @@ class AsyncChatbotInstance:
                 logging.info(f"Unable to find the instance save file {self.path}`, using default values.")
             else:
                 raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
+
     @classmethod
     def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
         return cls(
@@ -257,9 +247,10 @@ class AsyncChatbotInstance:
 
 
 class CachedAsyncChatbotFactory:
-    def __init__(self, *, parent=None, **kwargs):
+    def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
         self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
+        self.hash_prefix = hash_prefix
         self.tools: list[PredicateTool] = []
         self.commands: list[PredicateCommand] = []
         self.bot = parent
@@ -282,55 +273,64 @@ class CachedAsyncChatbotFactory:
 
         self.tools.append(tool)
 
+    async def new_instance(self, identifier: str) -> AsyncChatbotInstance:
+        instance = AsyncChatbotInstance(identifier, **self.kwargs, hash_prefix=self.hash_prefix, bot=self.bot)
+
+        for tool in self.tools:
+            if tool.predicate is None or await tool.predicate(instance):
+                instance.add_tool(
+                    name=tool.name,
+                    func=partial(tool.func, instance),
+                    parameters=tool.parameters,
+                    description=tool.description
+                )
+
+        for command in self.commands:
+            if command.predicate is None or await command.predicate(instance):
+                instance.add_command(
+                    name=command.name,
+                    func=partial(command.func, instance),
+                    field_name=command.field_name,
+                    description=command.description
+                )
+
+        return instance
+    
+    def cache_instance(self, instance: AsyncChatbotInstance):
+        self.instances.update({instance.id: instance})
+    
     async def get(self, identifier: str) -> AsyncChatbotInstance | None:
         cached_instance = self.instances.get(identifier)
         if cached_instance:
             return cached_instance
-        __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)
+        instance = await self.new_instance(identifier)
         try:
-            __instance.load(not_found_ok=False)
+            instance.load(not_found_ok=False)
             # cache the instance
-            self.instances.update({identifier: __instance})
-            return __instance
+            self.cache_instance(instance)
+            return instance
         except FileNotFoundError:
             return None
-    
+
     async def get_or_create(self, identifier: str) -> AsyncChatbotInstance:
-        __instance = self.instances.get(identifier)
-        if __instance is None:
-            __instance = AsyncChatbotInstance(identifier, **self.kwargs, bot=self.bot)
-            __instance.load(not_found_ok=True)
-
-            self.instances.update({identifier: __instance})
-
-            for tool in self.tools:
-                if tool.predicate is None or await tool.predicate(__instance):
-                    __instance.add_tool(
-                        name=tool.name,
-                        func=partial(tool.func, __instance),
-                        parameters=tool.parameters,
-                        description=tool.description
-                    )
-
-            for command in self.commands:
-                if command.predicate is None or await command.predicate(__instance):
-                    __instance.add_command(
-                        name=command.name,
-                        func=partial(command.func, __instance),
-                        field_name=command.field_name,
-                        description=command.description
-                    )
+        instance = self.instances.get(identifier)
+        if instance is None:
+            instance = await self.new_instance(identifier)
+            instance.load(not_found_ok=True)
+            # cache the instance
+            self.cache_instance(instance)
 
             logging.info(f"initiated a conversation with {identifier=}.")
 
-        return __instance
+        return instance
 
     def remove(self, identifier: str):
+        logging.info(f"removing {identifier}")
+        save_path = get_instance_save_path(id=identifier, hash_prefix=self.hash_prefix)
+        if os.path.exists(save_path):
+            os.remove(save_path)
         if identifier in self.instances.keys():
-            logging.info(f"removing {identifier}")
-            instance = self.instances.pop(identifier)
-            if os.path.exists(instance.path):
-                os.remove(instance.path)
+            del self.instances[identifier]
 
     def save(self):
         for identifier, conversation in self.instances.items():

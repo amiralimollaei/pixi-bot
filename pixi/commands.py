@@ -1,5 +1,9 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 from dataclasses import dataclass
 
+from .utils import CoroutineQueueExecutor
 from .typing import AsyncFunction, Optional, Iterator, Generator, AsyncIterator, AsyncGenerator
 from .chatting import ChatMessage
 
@@ -30,12 +34,13 @@ class AsyncCommand:
 class AsyncCommandManager:
     def __init__(self):
         self.commands: dict[str, AsyncCommand] = dict()
+        self.executor = CoroutineQueueExecutor()
 
     def _add_command(self, command: AsyncCommand):
         assert command is not None
         self.commands.update({command.name.lower(): command})
 
-    def add_command(self, name: str, field_name: str, function: AsyncFunction, description: str | None = None):
+    def add_command(self, name: str, field_name: str, function: AsyncFunction, description: Optional[str] = None):
         assert name is not None
         assert function is not None
         assert field_name is not None
@@ -48,8 +53,8 @@ class AsyncCommandManager:
 
     def get_prompt(self):
         return "\n".join(["- "+func.get_syntax() for name, func in self.commands.items()])
-    
-    async def execute_command(self, command_str: str, reference_message: ChatMessage | None = None):
+
+    async def execute_command(self, command_str: str, reference_message: Optional[ChatMessage] = None):
         command_content = command_str[1:-1]
         seperator_idx = None
         if ":" in command_str:
@@ -67,12 +72,12 @@ class AsyncCommandManager:
             raise NotImplementedError(f"The command `{command_name}` is not implemented.")
 
         return await maybe_command_fn(reference_message, command_data)
-    
+
     async def stream_commands(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, reference_message: ChatMessage):
         """
         Consumes commands and runs them automatically
         """
-        inside_command = 0 # counts the number of "[" characters minus the number of "]" characters
+        inside_command = 0  # counts the number of "[" characters minus the number of "]" characters
         command_str = ""
 
         async def process(char):
@@ -84,7 +89,7 @@ class AsyncCommandManager:
             # the opening of the command
             if char == "[":
                 inside_command += 1
-            
+
             if inside_command != 0:
                 command_str += char
             else:
@@ -92,14 +97,14 @@ class AsyncCommandManager:
 
             # the closing of the command
             if char == "]":
-                inside_command -= 1 
+                inside_command -= 1
 
                 # if the command is fully captured
                 if inside_command == 0:
-                    await self.execute_command(
+                    await self.executor.add_to_queue(self.execute_command(
                         command_str=command_str,
                         reference_message=reference_message
-                    )
+                    ))
                     command_str = ""
 
             return result
@@ -115,4 +120,5 @@ class AsyncCommandManager:
                 if result:
                     yield result
         else:
-            raise TypeError(f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")
+            raise TypeError(
+                f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")

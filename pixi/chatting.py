@@ -463,7 +463,6 @@ class AsyncChatClient:
                     yield chunk
         except APIError as e:
             logging.error(f"APIError: {e.body}")
-            exit(1)
             raise e
 
     async def request(self, enable_timestamps: bool = True, reference_message: ChatMessage | None = None) -> str | None:
