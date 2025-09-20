@@ -1,5 +1,4 @@
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+import logging
 
 from dataclasses import dataclass
 
@@ -34,7 +33,6 @@ class AsyncCommand:
 class AsyncCommandManager:
     def __init__(self):
         self.commands: dict[str, AsyncCommand] = dict()
-        self.executor = CoroutineQueueExecutor()
 
     def _add_command(self, command: AsyncCommand):
         assert command is not None
@@ -69,7 +67,8 @@ class AsyncCommandManager:
 
         maybe_command_fn = self.commands.get(command_name.lower())
         if maybe_command_fn is None:
-            raise NotImplementedError(f"The command `{command_name}` is not implemented.")
+            logging.error(f"The command `{command_name}` is not implemented.")
+            return
 
         return await maybe_command_fn(reference_message, command_data)
 
@@ -79,46 +78,48 @@ class AsyncCommandManager:
         """
         inside_command = 0  # counts the number of "[" characters minus the number of "]" characters
         command_str = ""
+        
+        async with CoroutineQueueExecutor() as queue:
+            async def process(char):
+                nonlocal inside_command
+                nonlocal command_str
 
-        async def process(char):
-            nonlocal inside_command
-            nonlocal command_str
+                result = None
 
-            result = None
+                # the opening of the command
+                if char == "[":
+                    inside_command += 1
 
-            # the opening of the command
-            if char == "[":
-                inside_command += 1
+                if inside_command != 0:
+                    command_str += char
+                else:
+                    result = char
 
-            if inside_command != 0:
-                command_str += char
+                # the closing of the command
+                if char == "]":
+                    inside_command -= 1
+
+                    # if the command is fully captured
+                    if inside_command == 0:
+                        # run command without blocking the stream
+                        await queue.add_to_queue(self.execute_command(
+                            command_str=command_str,
+                            reference_message=reference_message
+                        ))
+                        command_str = ""
+
+                return result
+
+            if isinstance(stream, (Iterator, Generator)):
+                for char in stream:
+                    result = await process(char)
+                    if result:
+                        yield result
+            elif isinstance(stream, (AsyncIterator, AsyncGenerator)):
+                async for char in stream:
+                    result = await process(char)
+                    if result:
+                        yield result
             else:
-                result = char
-
-            # the closing of the command
-            if char == "]":
-                inside_command -= 1
-
-                # if the command is fully captured
-                if inside_command == 0:
-                    await self.executor.add_to_queue(self.execute_command(
-                        command_str=command_str,
-                        reference_message=reference_message
-                    ))
-                    command_str = ""
-
-            return result
-
-        if isinstance(stream, (Iterator, Generator)):
-            for char in stream:
-                result = await process(char)
-                if result:
-                    yield result
-        elif isinstance(stream, (AsyncIterator, AsyncGenerator)):
-            async for char in stream:
-                result = await process(char)
-                if result:
-                    yield result
-        else:
-            raise TypeError(
-                f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")
+                raise TypeError(
+                    f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")

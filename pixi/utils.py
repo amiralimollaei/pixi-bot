@@ -26,19 +26,23 @@ class CoroutineQueueExecutor:
         # if execute_lock is not acquired, we are not executing anything
         # in that case we should start executing the tasks
         if not self.execute_lock.locked():
-            self.execute_task = asyncio.ensure_future(self.__execute_queue())
+            self.execute_task = asyncio.create_task(self.__execute_queue())
 
     async def __aenter__(self):
         self.execute_task = None
-        await self.execute_lock.release()
+        if self.execute_lock.locked():
+            await self.execute_lock.release()
         
         if len(self.tasks) > 0:
             logging.warning(f"Corotine never avaited: {self.tasks}")
         
         self.tasks = []
+        
+        return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        await asyncio.wait_for(self.execute_task, timeout=30)
+        if self.execute_task:
+            await self.execute_task
 
 # helpers
 

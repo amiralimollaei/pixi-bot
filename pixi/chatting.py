@@ -349,8 +349,10 @@ class AsyncChatClient:
             model=self.model,
             messages=openai_messages,
             temperature=0.7,
-            # max_tokens=MAX_LENGTH,
             top_p=0.9,
+            max_tokens=256,
+            #parallel_tool_calls=True,
+            #reasoning_effort="high",
             stream=stream,
         )
         # If tools are registered, add them to the request
@@ -421,7 +423,7 @@ class AsyncChatClient:
             ))
         return results
 
-    async def stream_request(self, verbose: bool = False, reference_message: ChatMessage | None = None):
+    async def stream_request(self, verbose: bool = True, reference_message: ChatMessage | None = None):
         # reference_message is the last user message in which we are responding to, it contains
         # information about the current channel and holds and instance of  the original message
         # object we instantiated the ChatMessage object from
