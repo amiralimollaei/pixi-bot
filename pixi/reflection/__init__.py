@@ -1,5 +1,5 @@
 import logging
-from typing import IO
+from typing import IO, Callable
 
 import aiohttp
 
@@ -9,23 +9,28 @@ from ..caching import ImageCache, AudioCache
 
 
 class ReflectionAPI:
-    class Forbidden(Exception):
-        def __init__(self, msg: str, platform: Platform, *args):
-            super().__init__(*args)
-            self.platform = platform
-            self.msg = msg
-
-    def __init__(self, platform: Platform, bot):
+    def __init__(self, platform: Platform):
         assert type(platform) == Platform
         self.platform = platform
 
+        logging.info(f"initializing ReflectionAPI for {self.platform}...")
         match platform:
             case Platform.DISCORD:
-                from .discord import ReflectionAPI
-                self._ref = ReflectionAPI(bot)
+                from .discord import DiscordReflectionAPI
+                self._ref = DiscordReflectionAPI()
             case Platform.TELEGRAM:
-                from .telegram import ReflectionAPI
-                self._ref = ReflectionAPI(bot)
+                from .telegram import TelegramReflectionAPI
+                self._ref = TelegramReflectionAPI()
+        logging.info(f"ReflectionAPI has been initilized for {self.platform}.")
+
+    def run(self):
+        return self._ref.run()
+
+    def register_on_message_event(self, function: Callable):
+        return self._ref.register_on_message_event(function)
+
+    def register_slash_command(self, name: str, function: Callable, description: str | None = None):
+        return self._ref.register_slash_command(name, function, description)
 
     def get_identifier_from_message(self, message) -> str:
         return self._ref.get_identifier_from_message(message)
@@ -63,7 +68,7 @@ class ReflectionAPI:
 
     async def edit_message(self, message, text):
         return await self._ref.edit_message(message, text)
-    
+
     def get_sender_id(self, message) -> int:
         return self._ref.get_sender_id(message)
 
@@ -102,9 +107,12 @@ class ReflectionAPI:
 
     async def send_video(self, message, video: IO[bytes], filename: str, caption: str | None = None):
         return await self._ref.send_video(message, video, filename, caption)
-    
+
     async def send_file(self, message, filepath: str, filename: str, caption: str | None = None):
         return await self._ref.send_file(message, filepath, filename, caption)
 
     async def get_user_avatar(self, user_id: int) -> ImageCache | None:
         return await self._ref.get_user_avatar(user_id)
+
+    async def fetch_channel_history(self, message, n: int = 10):
+        return await self._ref.fetch_channel_history(message, n)

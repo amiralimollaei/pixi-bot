@@ -3,10 +3,8 @@ import asyncio
 import json
 import logging
 import math
-import os
 import time
 
-#from .server import FlaskServer
 from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
 from .agents import AgentBase, RetrievalAgent
@@ -59,30 +57,29 @@ class PixiClient:
             hash_prefix=platform,
             log_tool_calls=log_tool_calls,
         )
-        self.reflection_api = ReflectionAPI(platform=platform, bot=None)
         self.helper_model = helper_model
         self.enable_tool_calls = enable_tool_calls
-        
+
         self.allowed_places = allowed_places or []
-        
+
         self.accept_images = accept_images
         self.accept_audio = accept_audio
 
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
-        
-        #self.flask_client = FlaskServer(self)
+
+        self.reflection_api = ReflectionAPI(platform=platform)
 
         self.gif_api = None
-        
+
         try:
             self.gif_api = AsyncTenorAPI()
         except KeyError:
             logging.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
-        
-        #try:
+
+        # try:
         #    self.gif_api = AsyncGiphyAPI()
-        #except KeyError:
+        # except KeyError:
         #    logging.warning("GIPHY_API_KEY is not set, GIPHY API features will not be available.")
 
         # TODO: add configurable wikis
@@ -93,19 +90,20 @@ class PixiClient:
 
         self.init_chatbot_commands()
 
-        match platform:
-            case Platform.DISCORD:
-                self.init_discord()
+        if platform == Platform.DISCORD and self.enable_tool_calls:
+            self.init_discord_specific_tools()
 
-            case Platform.TELEGRAM:
-                self.init_telegram()
-        
+        if platform == Platform.TELEGRAM:
+            # for some reason handlers in telegram are order dependent, meaning we should add MessageHandler
+            # after all slash commands are registered or else the slash commands will not work.
+            self.register_telegram_start_command()
+
         self.register_slash_command(
             name="reset",
             function=self.reset_command,
             description="Reset the conversation."
         )
-        
+
         self.register_slash_command(
             name="notes",
             function=self.notes_command,
@@ -115,18 +113,7 @@ class PixiClient:
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
         
-        # for some reason handlers in telegram are order dependent, meaning we should add MessageHandler
-        # after all slash commands are registered or else the slash commands will not work.
-        if platform == Platform.TELEGRAM:
-            import telegram
-            from telegram.ext import ContextTypes, MessageHandler, filters
-            
-            async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-                message = update.message
-                if message is not None:
-                    return await self.on_message(message)
-
-            self.application.add_handler(MessageHandler(filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL, callback=on_message))
+        self.reflection_api.register_on_message_event(self.on_message)
 
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
@@ -150,51 +137,30 @@ class PixiClient:
             predicate=predicate
         ))
 
-    def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs):
+    def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs) -> AgentBase:
         return agent(model=self.helper_model, base_url=self.api_url, **agent_kwargs)
-    
+
     def register_slash_command(self, name: str, function, description: str | None = None):
-        match self.platform:
-            case Platform.DISCORD:
-                import discord
-
-                @self.client.tree.command(name=name, description=description)
-                async def slash_command(interaction: discord.Interaction):
-                    convo_id = self.reflection_api.get_identifier_from_message(interaction)
-                    print(convo_id)
-                    if not self.is_identifier_allowed(convo_id):
-                        logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
-                        await self.reflection_api.send_reply(interaction, "This command is not allowed in this place.", ephemeral=True)
-                        return
-                    await function(interaction)
-
-            case Platform.TELEGRAM:
-                import telegram
-                from telegram.ext import ContextTypes, CommandHandler
-                
-                async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
-                    message = update.message
-                    convo_id = self.reflection_api.get_identifier_from_message(message)
-                    print(convo_id)
-                    if not self.is_identifier_allowed(convo_id):
-                        logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
-                        await self.reflection_api.send_reply(message, "This command is not allowed in this place.", ephemeral=True)
-                        return
-                    await function(message)
-
-                self.application.add_handler(CommandHandler(name, slash_command))
+        async def checked_function(interaction):
+            convo_id = self.reflection_api.get_identifier_from_message(interaction)
+            if not self.is_identifier_allowed(convo_id):
+                logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
+                await self.reflection_api.send_reply(interaction, "This command is not allowed in this place.", ephemeral=True)
+                return
+            await function(interaction)
+        self.reflection_api.register_slash_command(name, checked_function, description)
 
     async def send_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
         if not value:
             return
-        
+
         assert reference.origin is not None
 
         delay_time = time.time() - instance.last_send_time
         instance.last_send_time = time.time()
 
         wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-        await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply = False)
+        await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply=False)
 
     async def note_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
         assert reference.origin is not None
@@ -217,7 +183,7 @@ class PixiClient:
             name="send",
             field_name="message",
             func=self.send_command,
-            description="sends a text as a distinct chat message, you may want to mention the user(s) in order to show that you're responding to them specifically if you are talking to multiple poeple at the same time (for clarity), you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
+            description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         ))
 
         self.chatbot_factory.register_command(PredicateCommand(
@@ -280,13 +246,13 @@ class PixiClient:
             if ids is None:
                 return "no result: no id specified"
 
-            agent: RetrievalAgent = self.create_agent_instance(
+            agent = self.create_agent_instance(
                 agent=RetrievalAgent,
                 context=await asyncio.gather(*[
                     get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
-            )
-            return await agent.retrieve(query)
+            ) 
+            return await agent.execute_query(query)
 
         self.register_tool(
             name=f"query_{database_name}_database",
@@ -340,13 +306,13 @@ class PixiClient:
             if titles.split("|") is None:
                 return "no result: no page specified"
 
-            agent: RetrievalAgent = self.create_agent_instance(
+            agent = self.create_agent_instance(
                 agent=RetrievalAgent,
                 context=await asyncio.gather(*[
                     wiki_api.get_raw(t.strip()) for t in titles.split("|")
                 ])
-            )
-            return await agent.retrieve(query)
+            )  # pyright: ignore[reportAssignmentType]
+            return await agent.execute_query(query)
 
         self.register_tool(
             name=f"query_wiki_content_{wiki_name}",
@@ -371,22 +337,13 @@ class PixiClient:
                 times to find the information you're looking for."
         )
 
-    def init_discord_tools(self):
+    def init_discord_specific_tools(self):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
 
-        async def fetch_channel_history(instance: AsyncChatbotInstance, reference: ChatMessage, channel_id: str, n: str):
-            channel = await self.client.fetch_channel(int(channel_id))
-            messages = []
-            # TODO: check channel type
-            async for message in channel.history(limit=int(n)):  # type: ignore
-                messages.append(dict(
-                    from_user=self.reflection_api.get_sender_information(message).get("display_name", "Unknown"),
-                    message_text=self.reflection_api.get_message_text(message)
-                ))
-
-            return messages[::-1]
+        async def fetch_channel_history(instance: AsyncChatbotInstance, reference: ChatMessage, channel_id: str, n: int):
+            return await self.reflection_api.fetch_channel_history(int(channel_id), n=n)
 
         self.register_tool(
             name="fetch_channel_history",
@@ -412,13 +369,13 @@ class PixiClient:
         if self.gif_api is not None:
             async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, locale: str):
                 assert self.gif_api is not None
-                resp: dict = await self.gif_api.search(query, locale = locale, limit = 10)  # type: ignore
+                resp: dict = await self.gif_api.search(query, locale=locale, limit=10)  # type: ignore
                 results = []
                 for gif_content in resp.get("results", []):
                     results.append(dict(
-                        content_description = gif_content.get("content_description", ""),
-                        content_rating = gif_content.get("content_rating", ""),
-                        url = gif_content.get("media", [])[0].get("gif", {}).get("url", "")
+                        content_description=gif_content.get("content_description", ""),
+                        content_rating=gif_content.get("content_rating", ""),
+                        url=gif_content.get("media", [])[0].get("gif", {}).get("url", "")
                     ))
                 return results
 
@@ -463,59 +420,14 @@ class PixiClient:
             return
 
         identifier = self.reflection_api.get_identifier_from_message(interaction)
-        
+
         self.chatbot_factory.remove(identifier)
         logging.info(f"the conversation in {identifier} has been reset.")
 
         await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
 
-    def init_discord(self):
-        import discord
-        from discord import app_commands
-
-        if self.enable_tool_calls:
-            self.init_discord_tools()
-
-        self.token = os.getenv("DISCORD_BOT_TOKEN")
-        if self.token is None:
-            logging.warning("DISCORD_BOT_TOKEN environment variable is not set, unable to initialize discord bot.")
-            return
-
-        class DiscordClient(discord.Client):
-            def __init__(self, *args, **kwargs):
-                intents = discord.Intents.default()
-                intents.message_content = True
-                intents.members = True
-                super().__init__(intents=intents, *args, **kwargs)
-                self.tree = app_commands.CommandTree(self)
-
-            async def setup_hook(self):
-                await self.tree.sync()
-
-        client = DiscordClient()
-        self.client = client
-        
-        self.reflection_api = ReflectionAPI(platform=self.platform, bot=client)
-        
-        @client.event
-        async def on_message(message):
-            return await self.on_message(message)
-
-    def init_telegram(self):
-        import telegram
-        from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
-
-        self.token = os.getenv("TELEGRAM_BOT_TOKEN")
-        if self.token is None:
-            logging.warning("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
-            return
-
-        application = Application.builder().token(self.token).read_timeout(30).write_timeout(30).build()
-        self.application = application
-        
-        self.reflection_api = ReflectionAPI(platform=self.platform, bot=application.bot)
-
-        async def start_command(message: telegram.Message):
+    def register_telegram_start_command(self):
+        async def start_command(message):
             await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
 
         self.register_slash_command(name="start", function=start_command)
@@ -526,7 +438,7 @@ class PixiClient:
     async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
         assert chat_message.origin
         message = chat_message.origin
-        
+
         channel_id = self.reflection_api.get_message_channel_id(message)
 
         try:
@@ -540,11 +452,9 @@ class PixiClient:
                 await self.reflection_api.send_status_typing(message)
                 await asyncio.sleep(3)
             noncall_result = await task
-            #noncall_result = await instance.stream_call(reference_message=chat_message, allow_ignore=allow_ignore)
+            # noncall_result = await instance.stream_call(reference_message=chat_message, allow_ignore=allow_ignore)
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
-        except ReflectionAPI.Forbidden:
-            logging.exception(f"Cannot send message in {instance.id}, permission denied.")
         except Exception:
             logging.exception(f"Unknown error while responding to a message in {instance.id}.")
             await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
@@ -555,7 +465,7 @@ class PixiClient:
                 raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
-        
+
         return responded
 
     async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 3):
@@ -565,31 +475,31 @@ class PixiClient:
         if the response is successful, it will save the conversation instance and return True.
         if the response fails after all retries, it will return False.
         """
-        
+
         if not self.database_tools_initalized.is_set():
             await self.__init_database_tools()
             await self.database_tools_initalized.wait()
-        
+
         async def rearrage_predicate(msg: ChatMessage):
             msg_channel_id = msg.metadata.get("channel_id") if msg.metadata else None
             current_channel_id = chat_message.metadata.get("channel_id") if chat_message.metadata else None
-            
+
             if msg_channel_id is None or current_channel_id is None:
                 return False
             return msg_channel_id == current_channel_id
-        
+
         assert chat_message.origin
         message = chat_message.origin
-        
+
         assert chat_message.instance_id
         identifier = chat_message.instance_id
 
         instance = await self.get_conversation_instance(identifier)
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
-        
+
+        messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
-            messages_checkpoint = instance.get_messages().copy()
             try:
                 ok = await self.pixi_resp(instance, chat_message)
             except Exception:
@@ -609,7 +519,7 @@ class PixiClient:
         If allowed places are not set, return True.
         """
         return not self.allowed_places or identifier in self.allowed_places
-    
+
     async def on_message(self, message):
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
@@ -637,7 +547,7 @@ class PixiClient:
 
         if is_prefixed:
             message_text = remove_prefixes(message_text)
-       
+
         convo = await self.chatbot_factory.get_or_create(convo_id)
 
         attached_images = None
@@ -709,9 +619,4 @@ class PixiClient:
         await self.pixi_resp_retry(role_message)
 
     def run(self):
-        match self.platform:
-            case Platform.DISCORD:
-                assert self.token
-                self.client.run(self.token, log_handler=None)
-            case Platform.TELEGRAM:
-                self.application.run_polling()
+        self.reflection_api.run()

@@ -1,12 +1,11 @@
 from dataclasses import dataclass
 from glob import glob
-import asyncio
 import hashlib
 import json
 import os
 import re
-
 import zstandard
+
 import aiofiles
 
 # constants
@@ -33,23 +32,28 @@ class DatasetEntry:
 @dataclass
 class QueryMatch:
     title: str
-    snippet: str
     id: int
     num_matches: int
+    match_score: float
     source: str | None = None
+
+    def __hash__(self) -> int:
+        return hash((self.title, self.id, self.num_matches, self.match_score, self.source))
 
 
 class DocumentDataset:
     def __init__(self, data: dict[int, DatasetEntry] | None = None):
-        if data is not None:
-            assert isinstance(data, dict), f"expected data to be of type `set` but got `{data}`"
-            for i, e in enumerate(data.values()):
-                assert isinstance(
-                    e, DatasetEntry), f"expetced all elements to be of type `DatasetEntry` but got `{e}` or type `{type(e)}`"
+        if data:
+            assert isinstance(data, dict), f"expected data to be of type `dict` but got `{data}`"
+            for e in data.values():
+                if isinstance(e, DatasetEntry):
+                    continue
+                raise TypeError(f"expetced all elements to be of type `DatasetEntry` but got `{type(e)}`")
         self.data = data or dict()
 
     def add_entry(self, title: str, text: str, source: str | None = None):
-        if text == None:
+        text = text.strip(" \n\r\t")
+        if not text:
             return
 
         entry = DatasetEntry(
@@ -64,46 +68,52 @@ class DocumentDataset:
     def get(self, id: int):
         return self.data.get(id)
 
-    async def search(self,
-                     query: str,
-                     skip_match: list[str] = [
-                         "a", "an", "so", "is", "we", "us", "and", "the",
-                         "they", "that", "this", "these", "those"
-                     ]
-                     ) -> list[QueryMatch]:
-        matches = []
-        _query = re.split(r"[^\w]", query.lower())
+    async def search(self, query: str, best_n: int = 10) -> list[QueryMatch]:
+        """
+        Searches through self.data for entries matching the query terms.
+
+        This search is case-insensitive and ignores punctuation.
+        It generates snippets of text around each match.
+        """
+
+        # 1. Pre-process the query for efficiency.
+        #    - Split into words, lowercase, and convert to a set for O(1) lookups.
+        query_words = set(re.split(r"[^\w]+", query.lower()))
+        search_terms = query_words
+
+        if not search_terms:
+            return []
+
+        all_matches: set[QueryMatch] = set()
+
+        # 2. Iterate through each entry in the dataset.
         for entry in self.data.values():
-            _entry = re.split(r"([^\w])", entry.content)
-            comparision = []
-            for e in _entry:
-                is_matched = False
-                e_clean = re.sub(r"[^\w]", "", e).lower()
-                if len(e) > 1 and e_clean in _query:
-                    if e_clean not in skip_match:
-                        is_matched = True
+            if not entry.content:
+                continue
 
-                comparision.append((e, is_matched))
-            comparision = [(e, len(e) > 1 and re.sub(r"[^\w]", "", e).lower() in _query) for e in _entry]
-            num_matches = 0
-            snippet = []
-            for i in range(len(comparision)):
-                _e, matched = comparision[i]
-                if matched:
-                    comparision[i] = (f"<match>{_e}</match>", matched)
-                    snippet.append("".join(map(lambda x: x[0], comparision[max(i-10, 0):i+10])))
-                    num_matches += 1
+            # 3. Tokenize entry content while preserving delimiters (for reconstruction).
+            content_parts = re.split(r"([^\w])", entry.content)
 
-            if num_matches != 0:
-                matches.append(QueryMatch(
-                    title=entry.title,
-                    snippet="\n".join(snippet),
-                    id=entry.id,
-                    num_matches=num_matches,
-                    source=entry.source
-                ))
+            # 4. Identify which parts are matches. This avoids repeated regex and lookups.
+            match_flags = [
+                len(part) > 1 and re.sub(r"[^\w]", "", part).lower() in search_terms
+                for part in content_parts
+            ]
 
-        return sorted(matches, key=lambda x: x.num_matches, reverse=True)
+            num_matches = sum(match_flags)
+            if num_matches == 0:
+                continue
+
+            all_matches.add(QueryMatch(
+                title=entry.title,
+                id=entry.id,
+                source=entry.source,
+                num_matches=num_matches,
+                match_score=(num_matches/len(content_parts)) * 100,
+            ))
+
+        # 6. Sort results by relevance (num_matches) once at the end and return the best matches.
+        return sorted(all_matches, key=lambda m: m.num_matches, reverse=True)[:best_n]
 
 
 class DirectoryDatabase:
@@ -111,8 +121,8 @@ class DirectoryDatabase:
         self.directory = directory
         self.dataset = dataset or DocumentDataset()
 
-    async def search(self, query: str) -> list[QueryMatch]:
-        return await self.dataset.search(query=query)
+    async def search(self, query: str, best_n: int = 10) -> list[QueryMatch]:
+        return await self.dataset.search(query=query, best_n=best_n)
 
     async def get_entry(self, id: int) -> DatasetEntry:
         entry = self.dataset.get(id=id)
@@ -145,6 +155,12 @@ class DirectoryDatabase:
         dataset = DocumentDataset(data)
         return cls(directory=directory, dataset=dataset)
 
+    def clear(self):
+        full_dir = os.path.join(BASE_DIR, self.directory)
+        for file in glob(os.path.join(full_dir, "*.zst")):
+            if os.path.isfile(file):
+                os.remove(file)
+
     async def save(self):
         assert self.dataset, "dataset is not initialized, nothing to save"
 
@@ -153,9 +169,7 @@ class DirectoryDatabase:
         os.makedirs(full_dir, exist_ok=True)
 
         for entry in self.dataset.data.values():
-            entry_hash = hashlib.sha256(
-                (entry.content + entry.title + str(entry.source) + str(entry.id)).encode("utf-8")
-            ).hexdigest()
+            entry_hash = self.get_entry_hash(entry).hexdigest()
             filepath = os.path.join(full_dir, f"{entry_hash}.zst")
             async with aiofiles.open(filepath, mode='wb') as f:
                 json_data = json.dumps(dict(
@@ -166,29 +180,7 @@ class DirectoryDatabase:
                 ), ensure_ascii=False)
                 await f.write(zstandard.compress(json_data.encode("utf-8")))
 
-
-if __name__ == "__main__":
-    save = False
-
-    if save:
-        dataset = DocumentDataset()
-
-        for file in glob("./pages-master/**/*.md"):
-            content = open(file, "r", encoding="utf-8").read()
-            dataset.add_entry(
-                title=f"TechMCDocs ({file})",
-                text=content,
-                source="TechMCDocs"
-            )
-
-        print(asyncio.run(dataset.search("experience")))
-
-        asyncio.run(DirectoryDatabase("TechMCDocs", dataset=dataset).save())
-
-    async def main():
-        database = await DirectoryDatabase.from_directory("TechMCDocs")
-        matches = await database.search("update skipper")
-        for match in matches:
-            print(match)
-
-    asyncio.run(main())
+    def get_entry_hash(self, entry: DatasetEntry):
+        return hashlib.sha256(
+            (entry.content + entry.title + str(entry.source) + str(entry.id)).encode("utf-8")
+        )

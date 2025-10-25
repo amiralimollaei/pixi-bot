@@ -1,13 +1,15 @@
 import json
 import logging
-import os
+from typing import Optional
 
 from .base import AgentBase
 
-from ..typing import Optional
-
 
 class RetrievalAgent(AgentBase):
+    """
+    Retrieves relevant information from context and a query to the agent.
+    """
+
     def __init__(self, context: Optional[list[str]] = None, **agent_kwargs):
         super().__init__(**agent_kwargs)
 
@@ -35,23 +37,22 @@ class RetrievalAgent(AgentBase):
         self.client.set_system(self.system_prompt)
 
     def to_dict(self) -> dict:
-        return dict(context=self.context)
+        return super().to_dict() | dict(
+            context=self.context
+        )
 
     @classmethod
     def from_dict(cls, data: dict) -> 'RetrievalAgent':
-        context = data.get("context", [])
-        return cls(context=context)
+        instance = cls.from_dict(data)
+        instance.context = data.get("context", [])
+        return instance
 
     def add_context(self, context: str):
         logging.debug(f"Adding context: {context}")
         self.context.append(context)
 
-    async def retrieve(self, query: str) -> str:
-        """
-        Retrieves relevant information all context and a query to the agent.
-        """
+    def format_query(self, query: str) -> str:
         logging.debug(f"Retrieving information for query: {query}")
-
         prompt = "\n".join([
             "Context:",
             "```json",
@@ -60,7 +61,4 @@ class RetrievalAgent(AgentBase):
             ""
             f"Query: \"{query}\"",
         ])
-        response = ""
-        async for char in self.client.stream_ask(prompt, temporal=True):
-            response += char
-        return response.strip()
+        return prompt

@@ -1,21 +1,57 @@
 import logging
 import asyncio
-from typing import IO
+import os
+from typing import IO, Callable
 
 import aiohttp
+
 import discord
+from discord import app_commands
 
 from ..caching import ImageCache, AudioCache, UnsupportedMediaException
 
 from ..enums import Platform
 
 
-class ReflectionAPI:
-    def __init__(self, bot: discord.Client):
+class DiscordReflectionAPI:
+    def __init__(self):
         self.platform = Platform.DISCORD
-        self.bot = bot
-        logging.debug("ReflectionAPI has been initilized for DISCORD.")
 
+        self.token = os.getenv("DISCORD_BOT_TOKEN")
+        if self.token is None:
+            logging.warning("DISCORD_BOT_TOKEN environment variable is not set, unable to initialize discord bot.")
+            return
+
+        class DiscordClient(discord.Client):
+            def __init__(self, *args, **kwargs):
+                intents = discord.Intents.default()
+                intents.message_content = True
+                intents.members = True
+                super().__init__(intents=intents, *args, **kwargs)
+                self.tree = app_commands.CommandTree(self)
+
+            async def setup_hook(self):
+                await self.tree.sync()
+
+        self.bot = DiscordClient()
+    
+    def run(self):
+        assert self.token
+        self.bot.run(self.token, log_handler=None)
+
+    def register_on_message_event(self, function: Callable):
+        @self.bot.event
+        async def on_message(message):
+            if asyncio.iscoroutinefunction(function):
+                return await function(message)
+            else:
+                return function(message)
+    
+    def register_slash_command(self, name: str, function: Callable, description: str | None = None):
+        @self.bot.tree.command(name=name, description=description) # pyright: ignore[reportArgumentType]
+        async def slash_command(interaction: discord.Interaction):
+            await function(interaction)
+    
     def get_identifier_from_message(self, message: discord.Message | discord.Interaction) -> str:
         channel = message.channel
         assert channel is not None, "chanel is None"
@@ -54,37 +90,33 @@ class ReflectionAPI:
                 "is_nsfw": cat.nsfw,
                 "stage_channels": [{
                     "name": c.name,
-                    "id": c.id,
+                    "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
                     "connected_listeners": {
                         "count": len(c.listeners),
                         "members": [m.display_name for m in c.listeners]
                     },
-                    "channel_url": c.jump_url
                 } for c in cat.stage_channels],
                 "voice_channels": [{
                     "name": c.name,
-                    "id": c.id,
+                    "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
                     "connected_members": {
                         "count": len(c.members),
                         "members": [m.display_name for m in c.members]
                     },
-                    "channel_url": c.jump_url
                 } for c in cat.voice_channels],
                 "text_channels": [{
                     "name": c.name,
-                    "id": c.id,
+                    "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
-                    "channel_url": c.jump_url
                 } for c in cat.text_channels],
             } for cat in guild.categories],
             "members": [{
                 "display_name": m.display_name,
                 "mention_string": m.mention,
-                "id": m.id,
                 "roles": [
                     {
                         "name": r.name,
@@ -136,7 +168,7 @@ class ReflectionAPI:
         if isinstance(origin, discord.Message):
             return await origin.channel.send(text, *args, **kwargs)
         elif isinstance(origin, discord.Interaction):
-            return (await origin.response.send_message(text, *args, ephemeral=ephemeral, **kwargs)).resource
+            return (await origin.response.send_message(text, *args, ephemeral=ephemeral, **kwargs)).resource # pyright: ignore[reportReturnType]
         else:
             raise TypeError(f"expected `origin` to be an instance of discord.Message or discord.Interaction, but got {type(origin)}")
 
@@ -170,7 +202,7 @@ class ReflectionAPI:
             channel_id = message.channel.id if message.channel else None
             raise RuntimeError(f"There was an unexpected error while send a message in channel ({channel_id=})")
 
-    async def edit_message(self, message: discord.Message | discord.Interaction, text: str):
+    async def edit_message(self, message: discord.Message | discord.InteractionMessage, text: str):
         await message.edit(content = text)
 
     def get_sender_id(self, message: discord.Message):
@@ -290,3 +322,15 @@ class ReflectionAPI:
         except discord.HTTPException as e:
             logging.error(f"Failed to fetch user avatar: {e}")
             return None
+
+    async def fetch_channel_history(self, channel_id: int, n: int = 10):
+        channel = await self.bot.fetch_channel(channel_id)
+        messages = []
+        # TODO: check channel type
+        async for message in channel.history(limit=int(n)):  # type: ignore
+            messages.append(dict(
+                from_user=self.get_sender_information(message).get("display_name", "Unknown"),
+                message_text=self.get_message_text(message)
+            ))
+
+        return messages[::-1]

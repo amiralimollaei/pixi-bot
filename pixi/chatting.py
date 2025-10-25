@@ -8,7 +8,7 @@ import time
 from openai import AsyncOpenAI, APIError
 
 from .enums import ChatRole
-from .utils import exists, format_time_ago
+from .utils import CoroutineQueueExecutor, exists, format_time_ago
 from .caching import AudioCache, ImageCache
 from .typing import AsyncPredicate, AsyncFunction, Optional
 
@@ -17,8 +17,7 @@ from .typing import AsyncPredicate, AsyncFunction, Optional
 DEFAULT_BASE_URL = "https://api.deepinfra.com/v1/openai"
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 
-MAX_LENGTH = 8000
-THINK_PATTERN = re.compile(r"[`\s]*[\[\<]*think[\>\]]*([\s\S]*?)[\[\<]*\/think[\>\]]*[`\s]*")
+MAX_CONTEXT_LENGTH = 8000
 
 
 @dataclass
@@ -53,6 +52,22 @@ class FunctionCall:
             index=data["index"],
             id=data["id"],
             arguments=data.get("arguments"),
+        )
+
+
+@dataclass
+class PartialFunctionCall:
+    name: str
+    index: int
+    id: str
+    arguments: Optional[str] = None
+
+    def to_function_call(self) -> FunctionCall:
+        return FunctionCall(
+            name=self.name,
+            index=self.index,
+            id=self.id,
+            arguments=json.loads(self.arguments) if self.arguments else {}
         )
 
 
@@ -267,7 +282,14 @@ async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncP
 
 
 class AsyncChatClient:
-    def __init__(self, messages: Optional[list[ChatMessage]] = None, model: Optional[str] = None, base_url: Optional[str] = None, log_tool_calls: bool = False):
+    def __init__(
+        self,
+        messages: Optional[list[ChatMessage]] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+        log_tool_calls: bool = False,
+        enforce_system_header: bool = False,
+    ):
         if messages is not None:
             assert isinstance(
                 messages, list), f"expected messages to be of type `list[ChatMessage]` or be None, but got `{messages}`"
@@ -284,6 +306,7 @@ class AsyncChatClient:
         assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
         self.messages = messages or []
         self.log_tool_calls = log_tool_calls
+        self.enforce_system_header = enforce_system_header
         self.system_prompt = None
         self.tools: dict = {}
 
@@ -350,9 +373,9 @@ class AsyncChatClient:
             messages=openai_messages,
             temperature=0.7,
             top_p=0.9,
-            max_tokens=256,
-            #parallel_tool_calls=True,
-            #reasoning_effort="high",
+            max_tokens=1024,
+            parallel_tool_calls=True,
+            # reasoning_effort="high",
             stream=stream,
         )
         # If tools are registered, add them to the request
@@ -365,24 +388,88 @@ class AsyncChatClient:
 
         return await self.session.chat.completions.create(**kwargs)  # type: ignore
 
-    async def get_tool_results(self, tool_calls: list, reference_message: ChatMessage):
+    async def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
+        if len(self.messages) == 0:
+            return list()
+
+        messages = self.enforce_approximate_context_limit(self.messages.copy())
+
+        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
+        # add system prompt before to the last user message message to ensure it is in the
+        # model's context but also don't disrupt the conversation or tool calling
+        if exists(self.system_prompt):
+            system_message = ChatMessage(
+                role=ChatRole.SYSTEM,
+                content=self.system_prompt
+            ).to_openai_dict(timestamps=enable_timestamps)
+
+            insert_index = 0
+            # some models only support system message as the very first message
+            if not self.enforce_system_header:
+                for i, message in enumerate(messages):
+                    if message.role == ChatRole.USER:
+                        insert_index = i
+            openai_messages.insert(insert_index, system_message)
+        return openai_messages
+
+    def enforce_approximate_context_limit(self, messages: list[ChatMessage]):
+        system_prompt_size = len(self.system_prompt) if self.system_prompt else 0
+        request_size = system_prompt_size
+        for cutoff_index, message in enumerate(messages):
+            role = message.role
+            context = message.content or ""
+            # TODO: better handle images and audio
+            request_size += len(role) + len(context) + 1024 * len(message.audio) + 1024 * len(message.images)
+            # approximate size of the message in tokens, assuming 4 characters per token
+            if request_size > MAX_CONTEXT_LENGTH * 4:
+                break
+        else:
+            cutoff_index = None
+
+        if cutoff_index:
+            if cutoff_index == 0:
+                logging.warning("No messages fit in the request, cutting off the first message.")
+                message_cut = messages[0]
+                assert message_cut.content, "Message content must not be empty, this is a bug."
+                message_cut.content = "(This message was cut off due to length limitations)\n\n" + \
+                    message_cut.content[:request_size-system_prompt_size -
+                                        200]  # cut off the message to fit in the request
+            logging.warning("unable to fit all messages in one request.")
+            messages = messages[-(cutoff_index-1):]
+        return messages
+
+    async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>"):
+        lookbehind_buffer: str = ""
+        max_buffer_size = max(len(start_think_tag), len(end_think_tag))
+
+        is_thinking = False
+
+        async for char in self.stream_request():
+            lookbehind_buffer += char
+
+            # make sure buffer doesn't grow indefinitely if none of the tags are found
+            if len(lookbehind_buffer) > max_buffer_size:
+                char_to_yield = lookbehind_buffer[0]
+                lookbehind_buffer = lookbehind_buffer[1:]
+                if not is_thinking:
+                    yield char_to_yield
+
+            # check for tags
+            if lookbehind_buffer.endswith(start_think_tag):
+                is_thinking = True
+                lookbehind_buffer = ""
+            elif lookbehind_buffer.endswith(end_think_tag) and is_thinking:
+                is_thinking = False
+                lookbehind_buffer = ""
+
+        if not is_thinking and lookbehind_buffer:
+            for c in lookbehind_buffer:
+                yield c
+
+    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessage):
         """
         Execute tool calls and return results
         """
-
-        function_calls: list[FunctionCall] = []
-        for tool_call in tool_calls:
-            function = tool_call.function
-            function_name = function.name
-            function_arguments = json.loads(function.arguments)
-            index = tool_call.index
-            id = tool_call.id
-            function_calls.append(FunctionCall(
-                name=function_name,
-                arguments=function_arguments,
-                index=index,
-                id=id
-            ))
 
         results = [ChatMessage(
             ChatRole.ASSISTANT,
@@ -395,8 +482,10 @@ class AsyncChatClient:
                 func = tool["func"]
                 func_args_str = ""
                 if fn.arguments:
-                    func_args_str = ", ".join([(f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
-                                              for k, v in fn.arguments.items()])
+                    func_args_str = ", ".join([
+                        (f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
+                        for k, v in fn.arguments.items()
+                    ])
                 try:
                     if self.log_tool_calls:
                         logging.info(f"Calling {fn.name}({func_args_str})...")
@@ -423,13 +512,25 @@ class AsyncChatClient:
             ))
         return results
 
-    async def stream_request(self, verbose: bool = True, reference_message: ChatMessage | None = None):
+    async def stream_request(
+        self,
+        verbose: bool = logging.getLevelName(logging.root.level).lower() == "debug",
+        reference_message: ChatMessage | None = None
+    ):
         # reference_message is the last user message in which we are responding to, it contains
-        # information about the current channel and holds and instance of  the original message
-        # object we instantiated the ChatMessage object from
+        # information about the current channel and holds special metadata
         reference_message = reference_message or self.messages[-1]
         assert reference_message.role == ChatRole.USER, f"`reference_message` must be a USER message, but got a message with the role of \"{reference_message.role}\"."
-        try:
+
+        async def execute_tool_task(function_call):
+            self.messages += await self.get_tool_results(
+                [function_call],
+                reference_message=reference_message
+            )
+
+        async with CoroutineQueueExecutor() as tool_call_queue:
+            partial_function_calls:  dict[int, PartialFunctionCall] = dict()
+            last_function_call_index = None
             response = ""
             finish_reason = None
             async for event in await self.create_chat_completion(stream=True):
@@ -438,7 +539,40 @@ class AsyncChatClient:
                 choice = event.choices[0]
 
                 if exists(_tool_calls := choice.delta.tool_calls):
-                    self.messages += await self.get_tool_results(_tool_calls, reference_message=reference_message)
+                    for tool_call in _tool_calls:
+                        function = tool_call.function
+                        function_index = tool_call.index
+                        function_id = tool_call.id
+                        function_name = function.name
+                        function_arguments = function.arguments
+                        if prev_function_call := partial_function_calls.get(function_index):
+                            if function_arguments:
+                                new_function_arguments = (prev_function_call.arguments or "") + function_arguments
+                            else:
+                                new_function_arguments = prev_function_call.arguments
+                            partial_function_calls[function_index] = PartialFunctionCall(
+                                name=prev_function_call.name,
+                                arguments=new_function_arguments,
+                                index=function_index,
+                                id=prev_function_call.id
+                            )
+                        else:
+                            if verbose:
+                                print(f"Function: {function_name}", end="")
+                            partial_function_calls[function_index] = PartialFunctionCall(
+                                name=function_name,
+                                arguments=function_arguments,
+                                index=function_index,
+                                id=function_id
+                            )
+                        # if the model is producing a new function call, we can assume the function call is finished generating
+                        if last_function_call_index is not None and function_index != last_function_call_index:
+                            function_call = partial_function_calls.pop(function_index).to_function_call()
+                            # runs the tool call without blocking and in correct order
+                            await tool_call_queue.add_to_queue(execute_tool_task(function_call))
+                        last_function_call_index = function_index
+                        if verbose:
+                            print(function_arguments, end="")
 
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
@@ -450,105 +584,30 @@ class AsyncChatClient:
                     # now yields the response character by character for easier parsing
                     for char in content:
                         yield char
+
+                if verbose and hasattr(choice.delta, "reasoning_content") and (reasoning_content := choice.delta.reasoning_content):
+                    print(reasoning_content, end="", flush=True)
+
             if verbose:
                 print()
 
-            if response:
-                self.messages.append(ChatMessage(
-                    role=ChatRole.ASSISTANT,
-                    content=response
-                ))
+        function_calls = [f.to_function_call() for f in partial_function_calls.values()]
+        del partial_function_calls
+        if function_calls:
+            self.messages += await self.get_tool_results(
+                function_calls,
+                reference_message=reference_message
+            )
 
-            if finish_reason == "tool_calls":
-                # Recursively call stream_request and yield its results
-                async for chunk in self.stream_request(reference_message=reference_message):
-                    yield chunk
-        except APIError as e:
-            logging.error(f"APIError: {e.body}")
-            raise e
+        if response:
+            self.messages.append(ChatMessage(
+                role=ChatRole.ASSISTANT,
+                content=response
+            ))
 
-    async def request(self, enable_timestamps: bool = True, reference_message: ChatMessage | None = None) -> str | None:
-        # reference_message is the last user message in which we are responding to, it contains
-        # information about the current channel and holds and instance of  the original message
-        # object we instantiated the ChatMessage object from
-        reference_message = reference_message or self.messages[-1]
-        assert reference_message.role == ChatRole.USER, f"`reference_message` must be a USER message, but got a message with the role of \"{reference_message.role}\"."
-
-        choice = (await self.create_chat_completion(
-            stream=False,
-            enable_timestamps=enable_timestamps
-        )).choices[0]
-        if choice.message.content:
-            return choice.message.content
-
-        # if tools are called, reslove them and repeat the request recursively
-        if tool_calls := choice.message.tool_calls:
-            self.messages += await self.get_tool_results(tool_calls, reference_message=reference_message)
-            return await self.request(enable_timestamps=enable_timestamps, reference_message=reference_message)
-
-    async def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
-        if len(self.messages) == 0:
-            return list()
-
-        messages = self.messages.copy()
-
-        system_prompt_size = len(self.system_prompt) if self.system_prompt else 0
-        request_size = system_prompt_size
-        for cutoff_index, message in enumerate(messages):
-            role = message.role
-            context = message.content or ""
-            # TODO: better handle images and audio
-            request_size += len(role) + len(context) + 200 * len(message.audio) + 200 * len(message.images)
-            # approximate size of the message in tokens, assuming 4 characters per token
-            if request_size > MAX_LENGTH * 4:
-                break
-        else:
-            cutoff_index = None
-
-        if cutoff_index:
-            if cutoff_index == 0:
-                logging.warning("No messages fit in the request, cutting off the first message.")
-                message_cut = messages[0]
-                assert message_cut.content, "Message content must not be empty, this is a bug."
-                message_cut.content = "(This message was cut off due to length limitations)\n\n" + \
-                    message_cut.content[:request_size-system_prompt_size -
-                                        200]  # cut off the message to fit in the request
-            logging.warning("unable to fit all messages in one request.")
-            messages = messages[-(cutoff_index-1):]
-
-        if self.rearrange_predicate:
-            rearrenged_messages = await get_rearranged_messages(messages, self.rearrange_predicate)
-        else:
-            rearrenged_messages = messages
-
-        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in rearrenged_messages]
-        # add system as one to the last message to ensure it is in the model's context
-        # but also make sure the last message is the request message
-        if exists(self.system_prompt):
-            openai_messages.insert(-1,
-                                   ChatMessage(ChatRole.SYSTEM, self.system_prompt).to_openai_dict(
-                                       timestamps=enable_timestamps)
-                                   )
-        return openai_messages
-
-    async def stream_completion(self):
-        # TODO: fix the check for think tags opening
-
-        start_think = "<think>"
-        end_think = "</think>"
-
-        response: str = ""
-        is_thinking = False
-        async for chunk in self.stream_request():
-            response += chunk
-
-            if response.endswith(start_think):
-                is_thinking = True
-            elif response.endswith(end_think):
-                is_thinking = False
-                response = THINK_PATTERN.sub("", response)
-
-            if not is_thinking and response.strip() != "":
+        if finish_reason == "tool_calls":
+            # Recursively call stream_request and yield its results
+            async for chunk in self.stream_request(reference_message=reference_message):
                 yield chunk
 
     async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
@@ -568,25 +627,6 @@ class AsyncChatClient:
 
         if temporal:
             self.messages = orig_messages  # type: ignore
-
-    async def ask(self, message: str | ChatMessage, temporal: bool = False, enable_timestamps: bool = True):
-        if temporal:
-            orig_messages = self.messages.copy()
-
-        if isinstance(message, str):
-            message = ChatMessage(ChatRole.USER, message)
-        else:
-            assert isinstance(message, ChatMessage), "Message must be a string or a ChatMessage."
-        assert message.role == ChatRole.USER, "Message must be from the user."
-        self.messages.append(message)
-
-        response = await self.request(enable_timestamps=enable_timestamps)
-        if response is not None:
-            response = THINK_PATTERN.sub("", response)
-
-        if temporal:
-            self.messages = orig_messages  # type: ignore
-        return response
 
     def to_dict(self):
         return dict(

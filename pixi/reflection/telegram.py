@@ -1,19 +1,58 @@
 import logging
 import asyncio
-from typing import IO
+import os
+from typing import IO, Callable
 
 import telegram
 from telegram.constants import ChatType, ChatAction, ChatMemberStatus
+from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 from ..enums import Platform, Messages
 from ..caching import ImageCache, AudioCache, UnsupportedMediaException
 
 
-class ReflectionAPI:
-    def __init__(self, bot: telegram.Bot):
+class TelegramReflectionAPI:
+    def __init__(self):
         self.platform = Platform.TELEGRAM
-        self.bot = bot
-        logging.debug("ReflectionAPI has been initilized for TELEGRAM.")
+
+        self.token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if self.token is None:
+            logging.warning("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
+            return
+
+        application = Application.builder() \
+            .token(self.token) \
+            .read_timeout(30) \
+            .write_timeout(30) \
+            .build()
+        self.application = application
+
+    def run(self):
+        self.application.run_polling()
+    
+    def register_on_message_event(self, function: Callable):
+        async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+            message = update.message
+            if message is not None:
+                if asyncio.iscoroutinefunction(function):
+                    return await function(message)
+                else:
+                    return function(message)
+
+        self.application.add_handler(MessageHandler(
+            filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL,
+            callback=on_message
+        ))
+
+    def register_slash_command(self, name: str, function: Callable, description: str | None = None):
+        async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+            message = update.message
+            if message is not None:
+                if asyncio.iscoroutinefunction(function):
+                    return await function(message)
+                else:
+                    return function(message)
+        self.application.add_handler(CommandHandler(name, slash_command))
 
     def get_identifier_from_message(self, message: telegram.Message) -> str:
         chat = message.chat
@@ -84,7 +123,7 @@ class ReflectionAPI:
 
     async def edit_message(self, message: telegram.Message, text: str):
         await message.edit_text(text)
-    
+
     def get_sender_id(self, message: telegram.Message):
         assert message.from_user is not None, "from_user is None"
         return message.from_user.id
@@ -214,7 +253,7 @@ class ReflectionAPI:
 
     async def get_user_avatar(self, user_id) -> ImageCache | None:
         try:
-            file = await self.bot.get_user_profile_photos(user_id)
+            file = await self.application.bot.get_user_profile_photos(user_id)
             if file.photos:
                 photo = file.photos[0][-1]  # Get the highest resolution photo
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
@@ -225,3 +264,6 @@ class ReflectionAPI:
         except Exception as e:
             logging.exception(f"Unexpected error while fetching user avatar: {e}")
             return None
+    
+    async def fetch_channel_history(self, message, n: int = 10):
+        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_channel_history", self.platform))
