@@ -62,13 +62,10 @@ uv sync --all-extras
 - Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
 - Optionally set `GIPHY_API_KEY` for GIF search features
 
-### Run The Bot
+### Runninig The Bot
 
-- for running the discord bot run `pixi-cli -p discord [options]`
-
-### Run Telegram Bot
-
-- for running the telegram bot run `pixi-cli -p telegram [options]`
+- discord: `pixi-cli -p discord [options]`
+- telegram: `pixi-cli -p telegram [options]`
 
 > NOTE: if you've installed this project using UV you should run `uv run pixi-cli` instead of just `pixi-cli`
 > or run `source ./venv/bin/activate` before running the above commands
