@@ -26,7 +26,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - zstandard>=0.25.0
 - pillow>=12.0.0 (optional, for image caching)
 - ffmpegio>=0.11.1 (optional, for audio caching)
-- UV (optional, for setting up requirements automatically)
+- UV (optional, for setting up the requirements automatically in a venv)
 
 ## Getting Started
 
@@ -69,6 +69,9 @@ uv sync --all-extras
 ### Run Telegram Bot
 
 - for running the telegram bot run `pixi-cli -p telegram [options]`
+
+> NOTE: if you've installed this project using UV you should run `uv run pixi-cli` instead of just `pixi-cli`
+> or run `source ./venv/bin/activate` before running the above commands
 
 ## CLI Usage
 
