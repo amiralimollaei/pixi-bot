@@ -1,27 +1,30 @@
-import logging
 import asyncio
 from enum import StrEnum
-from typing import Generator, Any, Awaitable, Coroutine, TypeVar
+import importlib.resources
+import logging
+import os
+from types import CoroutineType
+from typing import IO
 
-_T_co = TypeVar("_T_co", covariant=True)  # Any type covariant containers.
-_AwaitableLike = Generator[Any, None, _T_co] | Awaitable[_T_co]
-_CoroutineLike = Generator[Any, None, _T_co] | Coroutine[Any, Any, _T_co]
+MODULE_PATH = importlib.resources.files(__package__)
+RESOURCES_PATH = str(MODULE_PATH / "resources")
+
 
 class CoroutineQueueExecutor:
     def __init__(self, max_queue_size: int = 1000):
         self.max_queue_size = max_queue_size
-        self.tasks: list[asyncio._CoroutineLike] = []
+        self.tasks: list[CoroutineType] = []
         self.execute_lock = asyncio.Lock()
         self.execute_task = None
-    
+
     async def __execute_queue(self):
         await self.execute_lock.acquire()
         while len(self.tasks) > 0:
             await self.tasks[0]
             del self.tasks[0]
         self.execute_lock.release()
-    
-    async def add_to_queue(self, t: _CoroutineLike):
+
+    async def add_to_queue(self, t: CoroutineType):
         self.tasks.append(t)
         # if execute_lock is not acquired, we are not executing anything
         # in that case we should start executing the tasks
@@ -31,13 +34,13 @@ class CoroutineQueueExecutor:
     async def __aenter__(self):
         self.execute_task = None
         if self.execute_lock.locked():
-            await self.execute_lock.release()
-        
+            self.execute_lock.release()
+
         if len(self.tasks) > 0:
             logging.warning(f"Corotine never avaited: {self.tasks}")
-        
+
         self.tasks = []
-        
+
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
@@ -45,6 +48,7 @@ class CoroutineQueueExecutor:
             await self.execute_task
 
 # helpers
+
 
 def exists(value, allow_empty_string=False):
     if value is None:
@@ -65,9 +69,9 @@ def exists(value, allow_empty_string=False):
 def load_dotenv():
     # load environment variables
     try:
-        import dotenv
+        import dotenv  # pyright: ignore[reportMissingImports]
     except ImportError:
-        logging.warning("dotenv is not installed, install using `pip install dotenv`")
+        logging.warning("dotenv is not installed, install it using `pip install dotenv`")
     else:
         dotenv.load_dotenv()
 
@@ -147,3 +151,9 @@ class Ansi(StrEnum):
     VIOLETBG2 = '\33[105m'
     BEIGEBG2 = '\33[106m'
     WHITEBG2 = '\33[107m'
+
+def get_resource_path(resource_folder: str | None, filename) -> str:
+    return os.path.join(resource_folder or RESOURCES_PATH, filename)
+
+def open_resource(resource_folder: str | None, filename: str, mode: str) -> IO:
+    return open(os.path.join(resource_folder or RESOURCES_PATH, filename), mode=mode, encoding="utf-8")

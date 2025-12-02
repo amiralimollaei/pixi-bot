@@ -8,16 +8,15 @@ from pixi.utils import load_dotenv
 
 async def main():
     while True:
-        query = input("You: ")
-        instance.add_message(query)
-        noncall_result = await instance.stream_call(refrence_message=query)
+        reference_message = instance.add_message(input("You: "))
+        noncall_result = await instance.stream_call(reference_message=reference_message)
         print(f"{noncall_result=}")
 
 if __name__ == "__main__":
     load_dotenv()
 
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    instance = AsyncChatbotInstance(0, persona, "test")
+    instance = AsyncChatbotInstance(0, "test")
 
     async def psudo_send_command(text):
         print("LLM: " + text)

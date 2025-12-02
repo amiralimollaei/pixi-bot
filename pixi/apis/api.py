@@ -2,12 +2,12 @@ import json
 import os
 from typing import Optional
 
-import aiohttp
+import httpx
 
 
 class APIBase:
     """
-    Base class for asynchronous API clients using aiohttp.
+    Base class for asynchronous API clients using httpx.
     This class provides a method to make GET requests to an API endpoint with optional parameters and an API key.
     It requires a base URL for the API and optionally an API key that can be provided either directly or through an environment variable.
 
@@ -40,13 +40,12 @@ class APIBase:
         else:
             data = data | api_key_data
         params = {k: v for k, v in data.items() if v is not None}
-        async with aiohttp.ClientSession(self.base) as session:
-            async with session.get(url, params=params) as resp:
-                content = await resp.read()
-                content = content.strip(b"\n").strip(b" ")
-                if content.startswith(b"{") and content.endswith(b"}"):
-                    return json.loads(content)
-                elif content.startswith(b"[") and content.endswith(b"]"):
-                    return json.loads(content)
-                else:
-                    return content.decode("utf-8")
+        async with httpx.AsyncClient() as session:
+            resp = await session.get(url, params=params)
+            content = resp.read().strip(b"\n").strip(b" ")
+            if content.startswith(b"{") and content.endswith(b"}"):
+                return json.loads(content)
+            elif content.startswith(b"[") and content.endswith(b"]"):
+                return json.loads(content)
+            else:
+                return content.decode("utf-8")

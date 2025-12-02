@@ -3,12 +3,10 @@ import asyncio
 import os
 from typing import IO, Callable
 
-import aiohttp
-
 import discord
 from discord import app_commands
 
-from ..caching import ImageCache, AudioCache, UnsupportedMediaException
+from ..caching.base import MediaCache, UnsupportedMediaException
 
 from ..enums import Platform
 
@@ -19,8 +17,7 @@ class DiscordReflectionAPI:
 
         self.token = os.getenv("DISCORD_BOT_TOKEN")
         if self.token is None:
-            logging.warning("DISCORD_BOT_TOKEN environment variable is not set, unable to initialize discord bot.")
-            return
+            raise RuntimeError("DISCORD_BOT_TOKEN environment variable is not set, unable to initialize discord bot.")
 
         class DiscordClient(discord.Client):
             def __init__(self, *args, **kwargs):
@@ -153,7 +150,7 @@ class DiscordReflectionAPI:
     async def send_status_typing(self, message: discord.Message):
         try:
             await message.channel.typing()
-        except aiohttp.ServerDisconnectedError:
+        except ConnectionError:
             logging.exception("unable to send typing status")
 
     def can_read_history(self, channel) -> bool:
@@ -224,7 +221,9 @@ class DiscordReflectionAPI:
         assert bot_user is not None, "bot_user is None"
         return message.author.id == bot_user.id
 
-    async def fetch_attachment_images(self, message: discord.Message) -> list[ImageCache]:
+    async def fetch_attachment_images(self, message: discord.Message) -> list[MediaCache]:
+        from ..caching import ImageCache
+        
         supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
         for attachment in message.attachments:
@@ -232,7 +231,9 @@ class DiscordReflectionAPI:
                 attachments.append(ImageCache(await attachment.read()))
         return attachments
 
-    async def fetch_attachment_audio(self, message: discord.Message) -> list[AudioCache]:
+    async def fetch_attachment_audio(self, message: discord.Message) -> list[MediaCache]:
+        from ..caching import AudioCache
+        
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
         supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []
@@ -306,10 +307,12 @@ class DiscordReflectionAPI:
         except Exception:
             logging.exception("unknown error while sending a file")
     
-    async def get_user_avatar(self, user_id: int) -> ImageCache | None:
+    async def get_user_avatar(self, user_id: int) -> MediaCache | None:
         """
         Fetches the avatar of a user and returns it as an ImageCache object.
         """
+        from ..caching import ImageCache
+        
         try:
             user = await self.bot.fetch_user(user_id)
             if user is None or user.avatar is None:

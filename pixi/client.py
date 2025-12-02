@@ -9,9 +9,8 @@ from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
 from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
-from .chatbot import AssistantPersona, PredicateCommand, PredicateTool
+from .chatbot import PredicateCommand, PredicateTool
 from .chatting import ChatMessage
-from .database import DirectoryDatabase
 from .enums import ChatRole, Messages, Platform
 from .reflection import ReflectionAPI
 from .addon import AddonManager
@@ -38,7 +37,6 @@ class PixiClient:
         model: str,
         helper_model: str,
         api_url: str,
-        persona_file: str = "persona.json",
         database_names: Optional[list[str]] = None,
         enable_tool_calls: bool = False,
         log_tool_calls: bool = False,
@@ -47,13 +45,11 @@ class PixiClient:
         accept_audio: bool = True,
     ):
         self.platform = platform
-        self.persona = AssistantPersona.from_json(persona_file)
         self.api_url = api_url
         self.chatbot_factory = CachedAsyncChatbotFactory(
             parent=self,
             model=model,
             base_url=api_url,
-            persona=self.persona,
             hash_prefix=platform,
             log_tool_calls=log_tool_calls,
         )
@@ -63,12 +59,26 @@ class PixiClient:
         self.allowed_places = allowed_places or []
 
         self.accept_images = accept_images
+        if self.accept_images:
+            try:
+                from .caching import ImageCache
+            except Exception:
+                logging.warning("tried to accept images, but image caching features are not available")
+                self.accept_images = False
         self.accept_audio = accept_audio
+        if self.accept_audio:
+            try:
+                from .caching import AudioCache
+            except Exception:
+                logging.warning("tried to accept audio, but audio caching features are not available")
+                self.accept_audio = False
 
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
 
         self.reflection_api = ReflectionAPI(platform=platform)
+        
+        self.__register_builtin_commands()
 
         self.gif_api = None
 
@@ -84,40 +94,24 @@ class PixiClient:
 
         # TODO: add configurable wikis
         if self.enable_tool_calls:
-            self.init_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
+            self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
             # self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
             # self.init_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
-        self.init_chatbot_commands()
 
         if platform == Platform.DISCORD and self.enable_tool_calls:
-            self.init_discord_specific_tools()
-
-        if platform == Platform.TELEGRAM:
-            # for some reason handlers in telegram are order dependent, meaning we should add MessageHandler
-            # after all slash commands are registered or else the slash commands will not work.
-            self.register_telegram_start_command()
-
-        self.register_slash_command(
-            name="reset",
-            function=self.reset_command,
-            description="Reset the conversation."
-        )
-
-        self.register_slash_command(
-            name="notes",
-            function=self.notes_command,
-            description="See pixi's thoughts"
-        )
+            self.__register_discord_specific_tools()
+            
+        self.__register_builtin_slash_commands()
 
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
-        
+
         self.reflection_api.register_on_message_event(self.on_message)
 
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
-            logging.warning("tried to register a tool, but tool calls are disabled")
+            logging.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
         self.chatbot_factory.register_tool(PredicateTool(
@@ -145,76 +139,78 @@ class PixiClient:
             convo_id = self.reflection_api.get_identifier_from_message(interaction)
             if not self.is_identifier_allowed(convo_id):
                 logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
-                await self.reflection_api.send_reply(interaction, "This command is not allowed in this place.", ephemeral=True)
+                await self.reflection_api.send_reply(interaction, "This command is not allowed here.", ephemeral=True)
                 return
             await function(interaction)
         self.reflection_api.register_slash_command(name, checked_function, description)
 
-    async def send_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-        if not value:
-            return
+    def __register_builtin_commands(self):
+        async def send_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+            if not value:
+                return
 
-        assert reference.origin is not None
+            assert reference.origin is not None
 
-        delay_time = time.time() - instance.last_send_time
-        instance.last_send_time = time.time()
+            delay_time = time.time() - instance.last_send_time
+            instance.last_send_time = time.time()
 
-        wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-        await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply=False)
+            wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
+            await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply=False)
 
-    async def note_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-        assert reference.origin is not None
-        assert reference.instance_id is not None
-
-        if instance.is_notes_visible:
-            await self.reflection_api.send_reply(reference.origin, f"> note: {value}")
-
-    async def react_command(self, instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-        assert reference.origin is not None
-        reference_message = reference.origin
-
-        try:
-            await self.reflection_api.add_reaction(reference_message, value)
-        except Exception:
-            logging.exception(f"Failed to add reaction {value} to message {reference_message.id}")
-
-    def init_chatbot_commands(self):
-        self.chatbot_factory.register_command(PredicateCommand(
+        self.register_command(
             name="send",
             field_name="message",
-            func=self.send_command,
+            func=send_command,
             description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
-        ))
+        )
 
-        self.chatbot_factory.register_command(PredicateCommand(
+        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+            assert reference.origin is not None
+            assert reference.instance_id is not None
+
+            if instance.is_notes_visible:
+                await self.reflection_api.send_reply(reference.origin, f"> thoughts: {value}")
+
+        self.register_command(
             name="note",
             field_name="thoughts",
-            func=self.note_command,
+            func=note_command,
             description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
-        ))
+        )
 
-        self.chatbot_factory.register_command(PredicateCommand(
+        async def react_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+            assert reference.origin is not None
+            reference_message = reference.origin
+
+            try:
+                await self.reflection_api.add_reaction(reference_message, value)
+            except Exception:
+                logging.exception(f"Failed to add reaction {value} to message {reference_message.id}")
+
+        self.register_command(
             name="react",
             field_name="emoji",
-            func=self.react_command,
+            func=react_command,
             description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
-        ))
+        )
 
-    async def __init_database_tools(self):
+    async def __register_database_tools(self):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a database tool, but tool calls are disabled")
             self.database_tools_initalized.set()
             return
 
         await asyncio.gather(*(
-            self.init_database_tool(database_name) for database_name in self.database_names
+            self.register_database_tool(database_name) for database_name in self.database_names
         ))
         self.database_tools_initalized.set()
 
-    async def init_database_tool(self, database_name: str):
+    async def register_database_tool(self, database_name: str):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a database tool, but tool calls are disabled")
             return
+        
+        from .database import DirectoryDatabase
 
         database_api = await DirectoryDatabase.from_directory(database_name)
 
@@ -251,7 +247,7 @@ class PixiClient:
                 context=await asyncio.gather(*[
                     get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
-            ) 
+            )
             return await agent.execute_query(query)
 
         self.register_tool(
@@ -275,7 +271,7 @@ class PixiClient:
             description=f"runs an LLM agent to fetch and query the contents of the {database_name} database using the entry ids for finding relevent entries and a more detailed query for finding relevent information, note that this will not return all the information that the page contains, you might need to use this command multiple times to get all the information out of the database entry."
         )
 
-    def init_mediawiki_tools(self, url: str, wiki_name: str):
+    def register_mediawiki_tools(self, url: str, wiki_name: str):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
@@ -337,7 +333,7 @@ class PixiClient:
                 times to find the information you're looking for."
         )
 
-    def init_discord_specific_tools(self):
+    def __register_discord_specific_tools(self):
         if not self.enable_tool_calls:
             logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
@@ -400,37 +396,53 @@ class PixiClient:
                 description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's URL as a distinct chat message."
             )
 
-    async def notes_command(self, interaction):
-        if not await self.reflection_api.is_dm_or_admin(interaction):
-            await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
-            return
-        try:
+    def __register_builtin_slash_commands(self):
+        async def notes_slash_command(interaction):
+            if not await self.reflection_api.is_dm_or_admin(interaction):
+                await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+                return
+            try:
+                identifier = self.reflection_api.get_identifier_from_message(interaction)
+                conversation = await self.get_conversation_instance(identifier)
+                is_notes_visible = conversation.toggle_notes()
+                notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
+                await self.reflection_api.send_reply(interaction, notes_message)
+            except Exception:
+                logging.exception(f"Failed to toggle notes")
+                await self.reflection_api.send_reply(interaction, "Failed to toggle notes.")
+
+        async def reset_slash_command(interaction):
+            if not await self.reflection_api.is_dm_or_admin(interaction):
+                await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+                return
+
             identifier = self.reflection_api.get_identifier_from_message(interaction)
-            conversation = await self.get_conversation_instance(identifier)
-            is_notes_visible = conversation.toggle_notes()
-            notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
-            await self.reflection_api.send_reply(interaction, notes_message)
-        except Exception:
-            logging.exception(f"Failed to toggle notes")
-            await self.reflection_api.send_reply(interaction, "Failed to toggle notes.")
 
-    async def reset_command(self, interaction):
-        if not await self.reflection_api.is_dm_or_admin(interaction):
-            await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
-            return
+            self.chatbot_factory.remove(identifier)
+            logging.info(f"the conversation in {identifier} has been reset.")
 
-        identifier = self.reflection_api.get_identifier_from_message(interaction)
+            await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
+        
+        if self.platform == Platform.TELEGRAM:
+            # for some reason event handlers in telegram are order dependent, meaning we should
+            # run register_on_message_event after all slash commands are registered or else the
+            # slash commands will not work.
+            async def start_command(message):
+                await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
 
-        self.chatbot_factory.remove(identifier)
-        logging.info(f"the conversation in {identifier} has been reset.")
+            self.register_slash_command(name="start", function=start_command)
+            
+        self.register_slash_command(
+            name="reset",
+            function=reset_slash_command,
+            description="Reset the conversation."
+        )
 
-        await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
-
-    def register_telegram_start_command(self):
-        async def start_command(message):
-            await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
-
-        self.register_slash_command(name="start", function=start_command)
+        self.register_slash_command(
+            name="notes",
+            function=notes_slash_command,
+            description="See pixi's thoughts"
+        )        
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get_or_create(identifier)
@@ -443,6 +455,15 @@ class PixiClient:
 
         try:
             instance.add_message(chat_message)
+            # concurrent_channel_stream_call handles overlapping requests automatically
+            # killing tasks that are not done and restarting the request every time untill
+            # one task finishes before the next request
+            #
+            # this way we can handle situations where the user is sending messages too quickly
+            # with less tokens, but may increase response time, and killing tasks may result in
+            # lost progress and http errors.
+            #
+            # TODO: find a solution to the above
             task = await instance.concurrent_channel_stream_call(
                 channel_id=str(channel_id),
                 reference_message=chat_message,
@@ -452,7 +473,6 @@ class PixiClient:
                 await self.reflection_api.send_status_typing(message)
                 await asyncio.sleep(3)
             noncall_result = await task
-            # noncall_result = await instance.stream_call(reference_message=chat_message, allow_ignore=allow_ignore)
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
         except Exception:
@@ -461,7 +481,7 @@ class PixiClient:
 
         responded = True  # TODO: track the command usage and check if the message is responded to
         if not responded:
-            if allow_ignore:
+            if not allow_ignore:
                 raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
             else:
                 logging.warning("there was no response to the message while ignoring a message is allowed.")
@@ -477,7 +497,7 @@ class PixiClient:
         """
 
         if not self.database_tools_initalized.is_set():
-            await self.__init_database_tools()
+            await self.__register_database_tools()
             await self.database_tools_initalized.wait()
 
         async def rearrage_predicate(msg: ChatMessage):
@@ -612,7 +632,7 @@ class PixiClient:
             metadata=metadata,
             images=attached_images,
             audio=attached_audio,
-            # these properties are intended to be used internally and are NOT reload persistant
+            # the following properties are intended to be used internally and are NOT reload persistant
             instance_id=convo_id,
             origin=message
         )

@@ -189,3 +189,6 @@ last-request.json
 
 # addons folder
 addons/
+
+# uv
+uv.lock

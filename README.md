@@ -16,57 +16,95 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 ## Requirements
 
-- Python >= 3.10
-- openai (`pip install openai`)
-- pillow (for image caching, `pip install pillow`)
-- ffmpegio (for audio caching, `pip install ffmpegio`)
+- Python >= 3.11
+- aiofiles>=25.1.0
+- argparse>=1.4.0
+- discord-py>=2.6.4
+- dotenv>=0.9.9
+- openai>=2.8.1
+- python-telegram-bot>=22.5
+- zstandard>=0.25.0
+- pillow>=12.0.0 (optional, for image caching)
+- ffmpegio>=0.11.1 (optional, for audio caching)
+- UV (optional, for setting up requirements automatically)
 
-## Usage
+## Getting Started
 
-> the following message is provided by running `python main.py --help`
+there are 4 extra optional dependecy groups that you may need to install based on your own needs:
+
+- image: installs pillow and enables audio caching features
+- audio: installs ffmpegio and enables image caching features
+- discord: installs discord.py and enables discord bot functionality
+- telegram: installs python-telegram-bot and enables telegram bot functionality
+
+you have to install at least one of the dependecy groups for a social media platform, this guide shows you how to install all modules at once
+
+### Installation using PIP
+
+```sh
+git clone https://github.com/amiralimollaei/pixi-bot.git
+cd pixi-bot
+pip install .[image,audio,discord,telegram]
+```
+
+### Installation using UV
+
+```sh
+git clone https://github.com/amiralimollaei/pixi-bot.git
+cd pixi-bot
+uv sync --all-extras
+```
+
+### Setup Environment Variables
+
+- Create a `.env` file and set `OPENAI_API_KEY` to your API provider's API Key (prevously was `DEEPINFRA_API_KEY`)
+- Set `DISCORD_BOT_TOKEN` and/or `TELEGRAM_BOT_TOKEN` environment variables
+- Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
+- Optionally set `GIPHY_API_KEY` for GIF search features
+
+### Run The Bot
+
+- for running the discord bot run `pixi-cli -p discord [options]`
+
+### Run Telegram Bot
+
+- for running the telegram bot run `pixi-cli -p telegram [options]`
+
+## CLI Usage
+
+> the following message is provided by running `pixi-cli --help`
 
 ```text
-usage: main.py [-h] --platform {discord,telegram,all} [--log-level {debug,info,warning,error,critical}]
-               [--model MODEL] [--helper-model HELPER_MODEL] [--api-url API_URL] [--disable-tool-calls]
-               [--log-tool-calls] [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
+usage: pixi-cli [-h] --platform {discord,telegram} [--log-level {debug,info,warning,error,critical}] [--model MODEL]
+                [--helper-model HELPER_MODEL] [--api-url API_URL] [--disable-tool-calls] [--disable-images] [--disable-audio]
+                [--log-tool-calls] [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
+                [--allowed-places ALLOWED_PLACES [ALLOWED_PLACES ...]]
 
 Run the Pixi bot, a multi-platform AI chatbot.
 
 options:
   -h, --help            show this help message and exit
-  --platform, -p {discord,telegram,all}
+  --platform {discord,telegram}, -p {discord,telegram}
                         Platform to run the bot on.
-  --log-level, -l {debug,info,warning,error,critical}
+  --log-level {debug,info,warning,error,critical}, -l {debug,info,warning,error,critical}
                         Set the logging level.
-  --model, -m MODEL     Model to use for the bot. Default is 'google/gemini-2.5-pro`.
-  --helper-model HELPER_MODEL
+  --model MODEL, -m MODEL
+                        Model to use for the bot. Default is 'google/gemini-2.5-pro`.
+  --helper-model HELPER_MODEL, -hm HELPER_MODEL
                         Model to use for agentic tools. Default is 'google/gemini-2.5-flash`.
-  --api-url, -a API_URL
-                        OpenAI Compatible API URL to use for the bot. Default is
-                        'https://api.deepinfra.com/v1/openai'.
+  --api-url API_URL, -a API_URL
+                        OpenAI Compatible API URL to use for the bot. Default is 'https://api.deepinfra.com/v1/openai'.
   --disable-tool-calls  Disable tool calls
+  --disable-images      Disable accepting images
+  --disable-audio       Disable accepting audio
   --log-tool-calls      Enable logging for tool calls (enabled by default when running with logging level DEBUG)
-  --database-names, -d DATABASE_NAMES [DATABASE_NAMES ...]
+  --database-names DATABASE_NAMES [DATABASE_NAMES ...], -d DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
+  --allowed-places ALLOWED_PLACES [ALLOWED_PLACES ...]
+                        add the name of places that the bot is allowed to respond in (space-separated). If not provided, the bot
+                        will respond everywhere.
 ```
 
-## Getting Started
+## Lisence
 
-### Setup Environment Variables
-
-- Install `dotenv` using `pip install dotenv`
-- Create a `.env` file and set `OPENAI_API_KEY` to your API provider's API Key (prevously was `DEEPINFRA_API_KEY`)
-- Set `DISCORD_BOT_TOKEN` and/or `TELEGRAM_BOT_TOKEN` environment variables
-- Optionally set `GIPHY_API_KEY` for GIF search features
-
-### Run Discord Bot
-
-- Install `discord.py` using `pip install discord.py`
-- Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
-- Run `python main.py --platform discord`
-
-### Run Telegram Bot
-
-- Install `python-telegram-bot` using `pip install "python-telegram-bot"`
-- Set `DEEPINFRA_API_KEY` environment variable and `TELEGRAM_BOT_TOKEN`
-- Run `python main.py --platform telegram`
+MIT

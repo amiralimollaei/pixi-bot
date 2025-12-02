@@ -8,7 +8,7 @@ from telegram.constants import ChatType, ChatAction, ChatMemberStatus
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 from ..enums import Platform, Messages
-from ..caching import ImageCache, AudioCache, UnsupportedMediaException
+from ..caching.base import MediaCache, UnsupportedMediaException
 
 
 class TelegramReflectionAPI:
@@ -17,8 +17,7 @@ class TelegramReflectionAPI:
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
         if self.token is None:
-            logging.warning("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
-            return
+            raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
 
         application = Application.builder() \
             .token(self.token) \
@@ -146,7 +145,9 @@ class TelegramReflectionAPI:
         assert message.from_user is not None, "from_user is None"
         return message.get_bot().id == message.from_user.id
 
-    async def fetch_attachment_images(self, message: telegram.Message) -> list[ImageCache]:
+    async def fetch_attachment_images(self, message: telegram.Message) -> list[MediaCache]:
+        from ..caching import ImageCache
+        
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
         # Telegram sends images as 'photo' (list of sizes) or as 'document' (if sent as file)
@@ -164,6 +165,8 @@ class TelegramReflectionAPI:
         return attachments
 
     async def fetch_attachment_audio(self, message: telegram.Message) -> list[AudioCache]:
+        from ..caching import AudioCache
+        
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
         supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []

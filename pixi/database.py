@@ -4,9 +4,9 @@ import hashlib
 import json
 import os
 import re
-import zstandard
 
 import aiofiles
+import zstandard
 
 # constants
 

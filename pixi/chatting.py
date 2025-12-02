@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 import logging
-import re
 import os
 import json
 import time
+from typing import Sequence
 
+import httpx
 from openai import AsyncOpenAI, APIError
 
 from .enums import ChatRole
 from .utils import CoroutineQueueExecutor, exists, format_time_ago
-from .caching import AudioCache, ImageCache
+from .caching.base import MediaCache
 from .typing import AsyncPredicate, AsyncFunction, Optional
 
 # constants
@@ -78,8 +79,8 @@ class ChatMessage:
         content: Optional[str] = None,
         metadata: Optional[dict] = None,
         message_time: Optional[float] = None,
-        images: Optional[ImageCache | list[ImageCache]] = None,
-        audio: Optional[AudioCache | list[AudioCache]] = None,
+        images: Optional[MediaCache | Sequence[MediaCache]] = None,
+        audio: Optional[MediaCache | Sequence[MediaCache]] = None,
         tool_calls: Optional[list[FunctionCall]] = None,
         tool_call_id: Optional[str] = None,
         *,
@@ -98,7 +99,9 @@ class ChatMessage:
         self.bot = bot
 
         assert role is not None, f"expected `role` to be of type `Role` and not be None, but got `{role}`"
-        if images is not None:
+        if images:
+            from .caching import ImageCache
+
             assert isinstance(images, (ImageCache, list)
                               ), f"Images must be of type ImageCache or list[ImageCache], but got {images}."
             if isinstance(images, ImageCache):
@@ -109,7 +112,9 @@ class ChatMessage:
         else:
             images = []
 
-        if audio is not None:
+        if audio:
+            from .caching import AudioCache
+
             assert isinstance(audio, (AudioCache, list)
                               ), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
             if isinstance(audio, AudioCache):
@@ -208,12 +213,21 @@ class ChatMessage:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ChatMessage':
+        images = []
+        if images_cache := data.get("images", []):
+            from .caching import ImageCache
+            images = [ImageCache.from_dict(d) for d in images_cache]
+        audio = []
+        if audio_cache := data.get("audio", []):
+            from .caching import AudioCache
+            audio = [AudioCache.from_dict(d) for d in audio_cache]
         return cls(
             role=ChatRole[data["role"].upper()],
             content=data.get("content"),
             metadata=data.get("metadata"),
             message_time=data.get("time", time.time()),
-            images=[ImageCache.from_dict(i) for i in data.get("images", [])],
+            images=images,
+            audio=audio,
             tool_calls=[FunctionCall.from_dict(d) for d in data.get("tool_calls", [])],
             tool_call_id=data.get("tool_call_id")
         )
@@ -317,7 +331,9 @@ class AsyncChatClient:
     def session(self):
         return AsyncOpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            # don't use proxies from environment variables
+            http_client=httpx.AsyncClient(trust_env = False),
         )
 
     def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
@@ -455,7 +471,7 @@ class AsyncChatClient:
                     yield char_to_yield
 
             # check for tags
-            if lookbehind_buffer.endswith(start_think_tag):
+            if lookbehind_buffer.endswith(start_think_tag) and not is_thinking:
                 is_thinking = True
                 lookbehind_buffer = ""
             elif lookbehind_buffer.endswith(end_think_tag) and is_thinking:

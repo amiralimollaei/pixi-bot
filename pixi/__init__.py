@@ -1,9 +1,8 @@
 import logging
 
 
-from pixi.enums import Platform
-from pixi.utils import Ansi
-from pixi.client import PixiClient
+from .enums import Platform
+from .utils import Ansi
 
 logging.basicConfig(
     format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
@@ -16,6 +15,7 @@ logging.basicConfig(
 httpx_logger = logging.getLogger("httpx")
 # Set the logging level to WARNING to ignore INFO and DEBUG logs
 httpx_logger.setLevel(logging.WARNING)
+
 
 def run(
     platform: Platform,
@@ -30,6 +30,8 @@ def run(
     accept_images=True,
     accept_audio=True,
 ):
+    from .client import PixiClient
+
     client = PixiClient(
         platform=platform,
         model=model,
@@ -44,9 +46,8 @@ def run(
     )
     client.run()
 
-
-if __name__ == '__main__':
-    from pixi.utils import load_dotenv
+def main():
+    from .utils import load_dotenv
 
     import argparse
 
@@ -139,3 +140,9 @@ if __name__ == '__main__':
 
     platform = args.platform.upper()
     run(platform=Platform[platform], **client_args)
+    
+    return 0
+
+
+if __name__ == '__main__':
+    main()

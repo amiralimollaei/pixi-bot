@@ -1,12 +1,9 @@
 import logging
-from typing import IO, Callable
-
-import aiohttp
+from typing import IO, Callable, Sequence
 
 from ..typing import Optional
 from ..enums import Platform
-from ..caching import ImageCache, AudioCache
-
+from ..caching.base import MediaCache
 
 class ReflectionAPI:
     def __init__(self, platform: Platform):
@@ -14,13 +11,16 @@ class ReflectionAPI:
         self.platform = platform
 
         logging.info(f"initializing ReflectionAPI for {self.platform}...")
-        match platform:
-            case Platform.DISCORD:
-                from .discord import DiscordReflectionAPI
-                self._ref = DiscordReflectionAPI()
-            case Platform.TELEGRAM:
-                from .telegram import TelegramReflectionAPI
-                self._ref = TelegramReflectionAPI()
+        try:
+            match platform:
+                case Platform.DISCORD:
+                    from .discord import DiscordReflectionAPI
+                    self._ref = DiscordReflectionAPI()
+                case Platform.TELEGRAM:
+                    from .telegram import TelegramReflectionAPI
+                    self._ref = TelegramReflectionAPI()
+        except ImportError:
+            raise RuntimeError(f"ReflectionAPI for {self.platform} is not available, maybe you forgot to install its dependecies?")
         logging.info(f"ReflectionAPI has been initilized for {self.platform}.")
 
     def run(self):
@@ -53,7 +53,7 @@ class ReflectionAPI:
     async def send_status_typing(self, message):
         try:
             return await self._ref.send_status_typing(message)
-        except aiohttp.ClientError:
+        except ConnectionError:
             logging.exception("Connection error while sending status typing")
 
     def can_read_history(self, channel) -> bool:
@@ -81,10 +81,10 @@ class ReflectionAPI:
     def is_message_from_the_bot(self, message) -> bool:
         return self._ref.is_message_from_the_bot(message)
 
-    async def fetch_attachment_images(self, message) -> list[ImageCache]:
+    async def fetch_attachment_images(self, message) -> Sequence[MediaCache]:
         return await self._ref.fetch_attachment_images(message)
 
-    async def fetch_attachment_audio(self, message) -> list[AudioCache]:
+    async def fetch_attachment_audio(self, message) -> Sequence[MediaCache]:
         return await self._ref.fetch_attachment_audio(message)
 
     def get_message_text(self, message) -> str:
@@ -111,7 +111,7 @@ class ReflectionAPI:
     async def send_file(self, message, filepath: str, filename: str, caption: str | None = None):
         return await self._ref.send_file(message, filepath, filename, caption)
 
-    async def get_user_avatar(self, user_id: int) -> ImageCache | None:
+    async def get_user_avatar(self, user_id: int) -> MediaCache | None:
         return await self._ref.get_user_avatar(user_id)
 
     async def fetch_channel_history(self, message, n: int = 10):
