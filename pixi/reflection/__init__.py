@@ -51,10 +51,7 @@ class ReflectionAPI:
         return self._ref.get_realtime_data(message)
 
     async def send_status_typing(self, message):
-        try:
-            return await self._ref.send_status_typing(message)
-        except ConnectionError:
-            logging.exception("Connection error while sending status typing")
+        return await self._ref.send_status_typing(message)
 
     def can_read_history(self, channel) -> bool:
         return self._ref.can_read_history(channel)

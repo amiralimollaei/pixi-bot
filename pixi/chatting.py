@@ -333,7 +333,7 @@ class AsyncChatClient:
             api_key=self.api_key,
             base_url=self.base_url,
             # don't use proxies from environment variables
-            http_client=httpx.AsyncClient(trust_env = False),
+            http_client=httpx.AsyncClient(trust_env=False),
         )
 
     def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
@@ -545,7 +545,7 @@ class AsyncChatClient:
             )
 
         async with CoroutineQueueExecutor() as tool_call_queue:
-            partial_function_calls:  dict[int, PartialFunctionCall] = dict()
+            partial_function_calls: dict[int, PartialFunctionCall] = dict()
             last_function_call_index = None
             response = ""
             finish_reason = None

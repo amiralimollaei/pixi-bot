@@ -470,8 +470,11 @@ class PixiClient:
                 allow_ignore=allow_ignore
             )
             while not task.done():
-                await self.reflection_api.send_status_typing(message)
-                await asyncio.sleep(3)
+                try:
+                    await self.reflection_api.send_status_typing(message)
+                    await asyncio.sleep(3)
+                except Exception:
+                    logging.exception("an error accrued while sending typing status")
             noncall_result = await task
             if noncall_result:
                 logging.warning(f"{noncall_result=}")
