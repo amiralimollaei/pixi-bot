@@ -41,15 +41,6 @@ class ReflectionAPI:
     def register_slash_command(self, name: str, function: Callable, description: str | None = None):
         return self._ref.register_slash_command(name, function, description)
 
-    def get_identifier_from_message(self, message: ReflectionMessageBase) -> str:
-        # if the message is in a forum type environemnt (server, guild, channels group, etc.)
-        if message.environment.is_forum:
-            return f"forum#{message.environment.forum_id}"
-        return f"chat#{message.environment.chat_id}"
-
-    def get_chat_info(self, message: ReflectionMessageBase) -> dict:
-        return {"type": message.environment.chat_type, "name": message.environment.chat_title, "id": message.environment.chat_id}
-
     def get_guild_info(self, guild) -> dict:
         return self._ref.get_guild_info(guild)
 
@@ -59,7 +50,7 @@ class ReflectionAPI:
     def get_realtime_data(self, message: ReflectionMessageBase) -> dict:
         data = dict(
             platform=self.platform,
-            chat_info=self.get_chat_info(message)
+            chat_info=message.get_chat_info()
         )
 
         if guild_info := self.get_guild_info(message):
@@ -84,9 +75,6 @@ class ReflectionAPI:
     def is_bot_mentioned(self, message: ReflectionMessageBase) -> bool:
         self.__typecheck_reflectionmessage(message)
         return self._ref.is_bot_mentioned(message)  # pyright: ignore[reportArgumentType]
-
-    def is_inside_dm(self, message: ReflectionMessageBase) -> bool:
-        return message.environment.chat_type == ChatType.PRIVATE
 
     async def is_dm_or_admin(self, message: ReflectionMessageBase) -> bool:
         self.__typecheck_reflectionmessage(message)

@@ -33,9 +33,9 @@ class ReflectionMessageBase:
 
     # hold a refrence of the original message for everything else that we didn't define here
     origin: Any
-    
+
     @classmethod
-    def from_origin(cls, message) -> 'ReflectionMessageBase': 
+    def from_origin(cls, message) -> 'ReflectionMessageBase':
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("__to_reflectionmessage", cls.__name__))
 
     async def send(self, content: str) -> 'ReflectionMessageBase':
@@ -46,7 +46,7 @@ class ReflectionMessageBase:
 
     async def delete(self):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("delete", self.__class__.__name__))
-    
+
     async def typing(self):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("typing", self.__class__.__name__))
 
@@ -55,12 +55,24 @@ class ReflectionMessageBase:
 
     async def fetch_audio(self) -> list[MediaCache]:
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_audio", self.__class__.__name__))
-    
+
     async def fetch_refrences(self) -> 'ReflectionMessageBase | None':
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_message_reply", self.__class__.__name__))
-    
+
     async def add_reaction(self, emoji: str):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("add_reaction", self.__class__.__name__))
-    
+
     async def send_file(self, filepath: str, filename: str, caption: str | None = None):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("send_file", self.__class__.__name__))
+    
+    def get_environment_id(self) -> str:
+        # if the message is in a forum type environemnt (server, guild, channels group, etc.)
+        if self.environment.is_forum:
+            return f"forum#{self.environment.forum_id}"
+        return f"chat#{self.environment.chat_id}"
+
+    def get_chat_info(self) -> dict:
+        return {"type": self.environment.chat_type, "name": self.environment.chat_title, "id": self.environment.chat_id}
+    
+    def is_inside_dm(self) -> bool:
+        return self.environment.chat_type == ChatType.PRIVATE

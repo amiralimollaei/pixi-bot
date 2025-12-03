@@ -111,14 +111,14 @@ class TelegramReflectionMessage(ReflectionMessageBase):
         if audio_bytes:
             attachments.append(AudioCache(bytes(audio_bytes)))
         return attachments
-    
+
     async def fetch_refrences(self) -> 'TelegramReflectionMessage | None':
         ref = self.origin.reply_to_message
         return TelegramReflectionMessage.from_origin(ref) if ref else None
 
     async def add_reaction(self, emoji: str):
         await self.origin.set_reaction(emoji)
-        
+
     async def send_file(self, filepath: str, filename: str, caption: str | None = None):
         for i in range(3):
             try:

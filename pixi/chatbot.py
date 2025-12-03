@@ -165,7 +165,8 @@ class AsyncChatbotInstance:
     def set_rearrange_predicate(self, predicate: AsyncPredicate):
         """
         Set a predicate function to rearrange messages based on a specific condition.
-        This is useful for filtering messages by channel or other criteria.
+        This is useful for filtering messages by channel or other criteria and moving them
+        to the front of the model context.
         """
         assert callable(predicate), f"Predicate must be callable, got {predicate}."
         self.client.set_rearrange_predicate(predicate)

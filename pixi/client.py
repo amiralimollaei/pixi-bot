@@ -77,7 +77,7 @@ class PixiClient:
         self.database_tools_initalized = asyncio.Event()
 
         self.reflection_api = ReflectionAPI(platform=platform)
-        
+
         self.__register_builtin_commands()
 
         self.gif_api = None
@@ -87,21 +87,15 @@ class PixiClient:
         except KeyError:
             logging.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
 
-        # try:
-        #    self.gif_api = AsyncGiphyAPI()
-        # except KeyError:
-        #    logging.warning("GIPHY_API_KEY is not set, GIPHY API features will not be available.")
-
         # TODO: add configurable wikis
         if self.enable_tool_calls:
             self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
-            # self.init_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
-            # self.init_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
-
+            self.register_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
+            self.register_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
         if platform == Platform.DISCORD and self.enable_tool_calls:
             self.__register_discord_specific_tools()
-            
+
         self.__register_builtin_slash_commands()
 
         self.addon_manager = AddonManager(self)
@@ -136,9 +130,9 @@ class PixiClient:
 
     def register_slash_command(self, name: str, function, description: str | None = None):
         async def checked_function(message: ReflectionMessageBase):
-            convo_id = self.reflection_api.get_identifier_from_message(message)
-            if not self.is_identifier_allowed(convo_id):
-                logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
+            environment_id = message.get_environment_id()
+            if not self.is_environment_allowed(environment_id):
+                logging.warning(f"ignoring slash command in {environment_id} because it is not in the allowed places.")
                 await message.send("This command is not allowed here.")
                 return
             await function(message)
@@ -150,7 +144,7 @@ class PixiClient:
             await message.typing()
             await asyncio.sleep(3.0)
             delay_served += 3.0
-    
+
     def __register_builtin_commands(self):
         async def send_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
             if not value:
@@ -163,7 +157,7 @@ class PixiClient:
             instance.last_send_time = time.time()
 
             wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-            
+
             await self.typing_delay(message, wait_time)
             await message.send(value)
 
@@ -174,7 +168,7 @@ class PixiClient:
             description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         )
 
-        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):            
+        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
             assert reference.origin is not None
             message: ReflectionMessageBase = reference.origin
 
@@ -219,7 +213,7 @@ class PixiClient:
         if not self.enable_tool_calls:
             logging.warning("tried to initalize a database tool, but tool calls are disabled")
             return
-        
+
         from .database import DirectoryDatabase
 
         database_api = await DirectoryDatabase.from_directory(database_name)
@@ -412,8 +406,8 @@ class PixiClient:
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
             try:
-                identifier = self.reflection_api.get_identifier_from_message(message)
-                conversation = await self.get_conversation_instance(identifier)
+                environment_id = message.get_environment_id()
+                conversation = await self.get_conversation_instance(environment_id)
                 is_notes_visible = conversation.toggle_notes()
                 notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
                 await message.send(notes_message)
@@ -426,13 +420,13 @@ class PixiClient:
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
 
-            identifier = self.reflection_api.get_identifier_from_message(message)
+            environment_id = message.get_environment_id()
 
-            self.chatbot_factory.remove(identifier)
-            logging.info(f"the conversation in {identifier} has been reset.")
+            self.chatbot_factory.remove(environment_id)
+            logging.info(f"the conversation in {environment_id} has been reset.")
 
             await message.send("Wha- Where am I?!")
-        
+
         if self.platform == Platform.TELEGRAM:
             # for some reason event handlers in telegram are order dependent, meaning we should
             # run register_on_message_event after all slash commands are registered or else the
@@ -441,7 +435,7 @@ class PixiClient:
                 await message.send("Hiiiii, how's it going?")
 
             self.register_slash_command(name="start", function=start_command)
-            
+
         self.register_slash_command(
             name="reset",
             function=reset_slash_command,
@@ -452,7 +446,7 @@ class PixiClient:
             name="notes",
             function=notes_slash_command,
             description="See pixi's thoughts"
-        )        
+        )
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get_or_create(identifier)
@@ -514,8 +508,8 @@ class PixiClient:
             await self.database_tools_initalized.wait()
 
         async def rearrage_predicate(msg: ChatMessage):
-            msg_channel_id = msg.metadata.get("channel_id") if msg.metadata else None
-            current_channel_id = chat_message.metadata.get("channel_id") if chat_message.metadata else None
+            msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
+            current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
 
             if msg_channel_id is None or current_channel_id is None:
                 return False
@@ -546,7 +540,7 @@ class PixiClient:
                 logging.warning(f"Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
 
-    def is_identifier_allowed(self, identifier: str) -> bool:
+    def is_environment_allowed(self, identifier: str) -> bool:
         """
         Check if the identifier is in the allowed places.
         If allowed places are not set, return True.
@@ -568,20 +562,19 @@ class PixiClient:
                 is_keyword_present = True
                 break
         is_prefixed = message_text.lower().startswith(tuple(COMMAND_PREFIXES))
-        is_inside_dm = self.reflection_api.is_inside_dm(message)
-        convo_id = self.reflection_api.get_identifier_from_message(message)
+        environment_id = message.get_environment_id()
 
-        if not (is_inside_dm or bot_mentioned or is_prefixed or is_keyword_present):
+        if not (message.is_inside_dm() or bot_mentioned or is_prefixed or is_keyword_present):
             return
 
-        if not self.is_identifier_allowed(convo_id):
-            logging.warning(f"ignoring message in {convo_id} because it is not in the allowed places.")
+        if not self.is_environment_allowed(environment_id):
+            logging.warning(f"ignoring message in {environment_id} because it is not in the allowed places.")
             return
 
         if is_prefixed:
             message_text = remove_prefixes(message_text)
 
-        convo = await self.chatbot_factory.get_or_create(convo_id)
+        instance = await self.chatbot_factory.get_or_create(environment_id)
 
         attached_images = None
         if self.accept_images:
@@ -602,17 +595,17 @@ class PixiClient:
             reply_message_text = remove_prefixes(reply_message.content)
             # if the reply is to the last message that is sent by the bot, we don't need to do anything.
             reply_optimization = -1
-            convo_messages = convo.get_messages()
+            instance_messages = instance.get_messages()
             matching_messages = [
-                msg.content for msg in convo_messages if msg.content is not None and reply_message_text in msg.content]
+                msg.content for msg in instance_messages if msg.content is not None and reply_message_text in msg.content]
             if matching_messages:
-                if convo_messages[-1].content in matching_messages:
+                if instance_messages[-1].content in matching_messages:
                     reply_optimization = 2
                 else:
                     reply_optimization = 1
             if reply_optimization == 2:
                 # completely ignore reply context
-                logging.debug(f"completely ignore reply context for {convo_id=}")
+                logging.debug(f"completely ignore reply context for {environment_id=}")
             elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
                     metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
@@ -644,7 +637,7 @@ class PixiClient:
             images=attached_images,
             audio=attached_audio,
             # the following properties are intended to be used internally and are NOT reload persistant
-            instance_id=convo_id,
+            instance_id=environment_id,
             origin=message
         )
         await self.pixi_resp_retry(role_message)

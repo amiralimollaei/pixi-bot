@@ -117,14 +117,6 @@ class DiscordReflectionAPI:
             } for m in thread.members]
         }
 
-    async def send_status_typing(self, chat_id: int):
-        try:
-            channel = self.bot.get_channel(chat_id)
-            if channel is not None and hasattr(channel, "typing"):
-                await channel.typing()  # pyright: ignore[reportAttributeAccessIssue]
-        except ConnectionError:
-            logging.exception("unable to send typing status")
-
     def can_read_history(self, chat_id: int) -> bool:
         channel = self.bot.get_channel(chat_id)
         # Check if the bot can read message history in the channel
