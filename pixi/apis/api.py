@@ -41,7 +41,7 @@ class APIBase:
             data = data | api_key_data
         params = {k: v for k, v in data.items() if v is not None}
         async with httpx.AsyncClient() as session:
-            resp = await session.get(url, params=params)
+            resp = await session.get(os.path.join(self.base, url), params=params)
             content = resp.read().strip(b"\n").strip(b" ")
             if content.startswith(b"{") and content.endswith(b"}"):
                 return json.loads(content)
