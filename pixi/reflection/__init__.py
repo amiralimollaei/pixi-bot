@@ -1,14 +1,16 @@
 import logging
-from typing import IO, Callable, Sequence
+from typing import Callable
 
-from ..typing import Optional
-from ..enums import Platform
+from .message import ReflectionMessageBase
+from ..enums import Platform, ChatType
 from ..caching.base import MediaCache
+
 
 class ReflectionAPI:
     def __init__(self, platform: Platform):
         assert type(platform) == Platform
         self.platform = platform
+        self.reflection_message_cls: type[ReflectionMessageBase] | None = None
 
         logging.info(f"initializing ReflectionAPI for {self.platform}...")
         try:
@@ -16,11 +18,18 @@ class ReflectionAPI:
                 case Platform.DISCORD:
                     from .discord import DiscordReflectionAPI
                     self._ref = DiscordReflectionAPI()
+                    from .message.discord import DiscordReflectionMessage
+                    self.reflection_message_cls = DiscordReflectionMessage
                 case Platform.TELEGRAM:
                     from .telegram import TelegramReflectionAPI
                     self._ref = TelegramReflectionAPI()
+                    from .message.telegram import TelegramReflectionMessage
+                    self.reflection_message_cls = TelegramReflectionMessage
+                case _:
+                    raise RuntimeError(f"ReflectionAPI unknown platform {self.platform}.")
         except ImportError:
-            raise RuntimeError(f"ReflectionAPI for {self.platform} is not available, maybe you forgot to install its dependecies?")
+            raise RuntimeError(
+                f"ReflectionAPI for {self.platform} is not available, maybe you forgot to install its dependecies?")
         logging.info(f"ReflectionAPI has been initilized for {self.platform}.")
 
     def run(self):
@@ -32,14 +41,14 @@ class ReflectionAPI:
     def register_slash_command(self, name: str, function: Callable, description: str | None = None):
         return self._ref.register_slash_command(name, function, description)
 
-    def get_identifier_from_message(self, message) -> str:
-        return self._ref.get_identifier_from_message(message)
+    def get_identifier_from_message(self, message: ReflectionMessageBase) -> str:
+        # if the message is in a forum type environemnt (server, guild, channels group, etc.)
+        if message.environment.is_forum:
+            return f"forum#{message.environment.forum_id}"
+        return f"chat#{message.environment.chat_id}"
 
-    def get_message_channel_id(self, message) -> int:
-        return self._ref.get_message_channel_id(message)
-
-    def get_channel_info(self, message) -> dict:
-        return self._ref.get_channel_info(message)
+    def get_chat_info(self, message: ReflectionMessageBase) -> dict:
+        return {"type": message.environment.chat_type, "name": message.environment.chat_title, "id": message.environment.chat_id}
 
     def get_guild_info(self, guild) -> dict:
         return self._ref.get_guild_info(guild)
@@ -47,69 +56,47 @@ class ReflectionAPI:
     def get_thread_info(self, thread) -> dict:
         return self._ref.get_thread_info(thread)
 
-    def get_realtime_data(self, message) -> dict:
-        return self._ref.get_realtime_data(message)
+    def get_realtime_data(self, message: ReflectionMessageBase) -> dict:
+        data = dict(
+            platform=self.platform,
+            chat_info=self.get_chat_info(message)
+        )
 
-    async def send_status_typing(self, message):
-        return await self._ref.send_status_typing(message)
+        if guild_info := self.get_guild_info(message):
+            data["guild_info"] = guild_info
+
+        if thread_info := self.get_thread_info(message):
+            data["thread_info"] = thread_info
+
+        return data
 
     def can_read_history(self, channel) -> bool:
         return self._ref.can_read_history(channel)
 
-    async def send_response(self, origin, text: str, ephemeral: bool = False, *args, **kwargs):
-        return await self._ref.send_response(origin, text, ephemeral, *args, **kwargs)
+    def __typecheck_reflectionmessage(self, message: ReflectionMessageBase):
+        assert self.reflection_message_cls is not None
+        assert isinstance(message, self.reflection_message_cls)
 
-    async def send_reply(self, message, text: str, delay: Optional[int] = None, ephemeral: bool = False, should_reply: bool = True):
-        # Hotfix: ensure the response is not too long
-        return await self._ref.send_reply(message, text[:1024], delay, ephemeral, should_reply)
+    def is_message_from_the_bot(self, message: ReflectionMessageBase) -> bool:
+        self.__typecheck_reflectionmessage(message)
+        return self._ref.is_message_from_the_bot(message)  # pyright: ignore[reportArgumentType]
 
-    async def edit_message(self, message, text):
-        return await self._ref.edit_message(message, text)
+    def is_bot_mentioned(self, message: ReflectionMessageBase) -> bool:
+        self.__typecheck_reflectionmessage(message)
+        return self._ref.is_bot_mentioned(message)  # pyright: ignore[reportArgumentType]
 
-    def get_sender_id(self, message) -> int:
-        return self._ref.get_sender_id(message)
+    def is_inside_dm(self, message: ReflectionMessageBase) -> bool:
+        return message.environment.chat_type == ChatType.PRIVATE
 
-    def get_sender_name(self, message) -> str:
-        return self._ref.get_sender_name(message)
+    async def is_dm_or_admin(self, message: ReflectionMessageBase) -> bool:
+        self.__typecheck_reflectionmessage(message)
+        return await self._ref.is_dm_or_admin(message)  # pyright: ignore[reportArgumentType]
 
-    def get_sender_information(self, message) -> dict:
-        return self._ref.get_sender_information(message)
-
-    def is_message_from_the_bot(self, message) -> bool:
-        return self._ref.is_message_from_the_bot(message)
-
-    async def fetch_attachment_images(self, message) -> Sequence[MediaCache]:
-        return await self._ref.fetch_attachment_images(message)
-
-    async def fetch_attachment_audio(self, message) -> Sequence[MediaCache]:
-        return await self._ref.fetch_attachment_audio(message)
-
-    def get_message_text(self, message) -> str:
-        return self._ref.get_message_text(message)
-
-    async def fetch_message_reply(self, message):
-        return await self._ref.fetch_message_reply(message)
-
-    def is_bot_mentioned(self, message) -> bool:
-        return self._ref.is_bot_mentioned(message)
-
-    def is_inside_dm(self, message) -> bool:
-        return self._ref.is_inside_dm(message)
-
-    async def is_dm_or_admin(self, origin) -> bool:
-        return await self._ref.is_dm_or_admin(origin)
-
-    async def add_reaction(self, message, emoji: str):
-        return await self._ref.add_reaction(message, emoji)
-
-    async def send_video(self, message, video: IO[bytes], filename: str, caption: str | None = None):
-        return await self._ref.send_video(message, video, filename, caption)
-
-    async def send_file(self, message, filepath: str, filename: str, caption: str | None = None):
-        return await self._ref.send_file(message, filepath, filename, caption)
+    async def send_file(self, chat_id: int, filepath: str, filename: str, caption: str | None = None):
+        return await self._ref.send_file(chat_id, filepath, filename, caption)  # pyright: ignore[reportArgumentType]
 
     async def get_user_avatar(self, user_id: int) -> MediaCache | None:
         return await self._ref.get_user_avatar(user_id)
 
-    async def fetch_channel_history(self, message, n: int = 10):
-        return await self._ref.fetch_channel_history(message, n)
+    async def fetch_channel_history(self, channel_id: int, n: int = 10):
+        return await self._ref.fetch_channel_history(channel_id, n)  # pyright: ignore[reportArgumentType]

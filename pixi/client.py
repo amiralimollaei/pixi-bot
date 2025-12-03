@@ -12,7 +12,7 @@ from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .chatbot import PredicateCommand, PredicateTool
 from .chatting import ChatMessage
 from .enums import ChatRole, Messages, Platform
-from .reflection import ReflectionAPI
+from .reflection import ReflectionAPI, ReflectionMessageBase
 from .addon import AddonManager
 
 # constants
@@ -135,27 +135,37 @@ class PixiClient:
         return agent(model=self.helper_model, base_url=self.api_url, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
-        async def checked_function(interaction):
-            convo_id = self.reflection_api.get_identifier_from_message(interaction)
+        async def checked_function(message: ReflectionMessageBase):
+            convo_id = self.reflection_api.get_identifier_from_message(message)
             if not self.is_identifier_allowed(convo_id):
                 logging.warning(f"ignoring slash command in {convo_id} because it is not in the allowed places.")
-                await self.reflection_api.send_reply(interaction, "This command is not allowed here.", ephemeral=True)
+                await message.send("This command is not allowed here.")
                 return
-            await function(interaction)
+            await function(message)
         self.reflection_api.register_slash_command(name, checked_function, description)
 
+    async def typing_delay(self, message: ReflectionMessageBase, delay: float):
+        delay_served = 0.0
+        while delay_served < delay:
+            await message.typing()
+            await asyncio.sleep(3.0)
+            delay_served += 3.0
+    
     def __register_builtin_commands(self):
         async def send_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
             if not value:
                 return
 
             assert reference.origin is not None
+            message: ReflectionMessageBase = reference.origin
 
             delay_time = time.time() - instance.last_send_time
             instance.last_send_time = time.time()
 
             wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
-            await self.reflection_api.send_reply(reference.origin, value, wait_time, should_reply=False)
+            
+            await self.typing_delay(message, wait_time)
+            await message.send(value)
 
         self.register_command(
             name="send",
@@ -164,12 +174,12 @@ class PixiClient:
             description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         )
 
-        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):            
             assert reference.origin is not None
-            assert reference.instance_id is not None
+            message: ReflectionMessageBase = reference.origin
 
             if instance.is_notes_visible:
-                await self.reflection_api.send_reply(reference.origin, f"> thoughts: {value}")
+                await message.send(f"> thoughts: {value}")
 
         self.register_command(
             name="note",
@@ -180,12 +190,12 @@ class PixiClient:
 
         async def react_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
             assert reference.origin is not None
-            reference_message = reference.origin
+            message: ReflectionMessageBase = reference.origin
 
             try:
-                await self.reflection_api.add_reaction(reference_message, value)
+                await message.add_reaction(value)
             except Exception:
-                logging.exception(f"Failed to add reaction {value} to message {reference_message.id}")
+                logging.exception(f"Failed to add reaction {value} to message {message.id}")
 
         self.register_command(
             name="react",
@@ -397,38 +407,38 @@ class PixiClient:
             )
 
     def __register_builtin_slash_commands(self):
-        async def notes_slash_command(interaction):
-            if not await self.reflection_api.is_dm_or_admin(interaction):
-                await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+        async def notes_slash_command(message: ReflectionMessageBase):
+            if not await self.reflection_api.is_dm_or_admin(message):
+                await message.send("You must be a guild admin or use this in DMs.")
                 return
             try:
-                identifier = self.reflection_api.get_identifier_from_message(interaction)
+                identifier = self.reflection_api.get_identifier_from_message(message)
                 conversation = await self.get_conversation_instance(identifier)
                 is_notes_visible = conversation.toggle_notes()
                 notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
-                await self.reflection_api.send_reply(interaction, notes_message)
+                await message.send(notes_message)
             except Exception:
                 logging.exception(f"Failed to toggle notes")
-                await self.reflection_api.send_reply(interaction, "Failed to toggle notes.")
+                await message.send("Failed to toggle notes.")
 
-        async def reset_slash_command(interaction):
-            if not await self.reflection_api.is_dm_or_admin(interaction):
-                await self.reflection_api.send_reply(interaction, "You must be a guild admin or use this in DMs.", ephemeral=True)
+        async def reset_slash_command(message: ReflectionMessageBase):
+            if not await self.reflection_api.is_dm_or_admin(message):
+                await message.send("You must be a guild admin or use this in DMs.")
                 return
 
-            identifier = self.reflection_api.get_identifier_from_message(interaction)
+            identifier = self.reflection_api.get_identifier_from_message(message)
 
             self.chatbot_factory.remove(identifier)
             logging.info(f"the conversation in {identifier} has been reset.")
 
-            await self.reflection_api.send_reply(interaction, "Wha- Where am I?!")
+            await message.send("Wha- Where am I?!")
         
         if self.platform == Platform.TELEGRAM:
             # for some reason event handlers in telegram are order dependent, meaning we should
             # run register_on_message_event after all slash commands are registered or else the
             # slash commands will not work.
-            async def start_command(message):
-                await self.reflection_api.send_reply(message, "Hiiiii, how's it going?")
+            async def start_command(message: ReflectionMessageBase):
+                await message.send("Hiiiii, how's it going?")
 
             self.register_slash_command(name="start", function=start_command)
             
@@ -449,9 +459,9 @@ class PixiClient:
 
     async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
         assert chat_message.origin
-        message = chat_message.origin
+        message: ReflectionMessageBase = chat_message.origin
 
-        channel_id = self.reflection_api.get_message_channel_id(message)
+        channel_id = message.environment.chat_id
 
         try:
             instance.add_message(chat_message)
@@ -471,7 +481,7 @@ class PixiClient:
             )
             while not task.done():
                 try:
-                    await self.reflection_api.send_status_typing(message)
+                    await message.typing()
                     await asyncio.sleep(3)
                 except Exception:
                     logging.exception("an error accrued while sending typing status")
@@ -480,7 +490,7 @@ class PixiClient:
                 logging.warning(f"{noncall_result=}")
         except Exception:
             logging.exception(f"Unknown error while responding to a message in {instance.id}.")
-            await self.reflection_api.send_reply(message, Messages.UNKNOWN_ERROR)
+            await message.send(Messages.UNKNOWN_ERROR)
 
         responded = True  # TODO: track the command usage and check if the message is responded to
         if not responded:
@@ -543,12 +553,12 @@ class PixiClient:
         """
         return not self.allowed_places or identifier in self.allowed_places
 
-    async def on_message(self, message):
+    async def on_message(self, message: ReflectionMessageBase):
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return
 
-        message_text = self.reflection_api.get_message_text(message)
+        message_text = message.content
 
         # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
@@ -575,23 +585,21 @@ class PixiClient:
 
         attached_images = None
         if self.accept_images:
-            attached_images = await self.reflection_api.fetch_attachment_images(message)
+            attached_images = await message.fetch_images()
         attached_audio = None
         if self.accept_audio:
-            attached_audio = await self.reflection_api.fetch_attachment_audio(message)
+            attached_audio = await message.fetch_audio()
 
-        message_author = self.reflection_api.get_sender_information(message)
+        message_author = asdict(message.author)
 
         metadata = dict(
             from_user=message_author
         )
 
         # check if the message is a reply to a bot message
-        reply_message = await self.reflection_api.fetch_message_reply(message)
+        reply_message = await message.fetch_refrences()
         if reply_message is not None:
-            reply_message_text = self.reflection_api.get_message_text(reply_message)
-            reply_message_text = remove_prefixes(reply_message_text)
-            metadata.update({"in_reply_to": {}})
+            reply_message_text = remove_prefixes(reply_message.content)
             # if the reply is to the last message that is sent by the bot, we don't need to do anything.
             reply_optimization = -1
             convo_messages = convo.get_messages()
@@ -607,28 +615,28 @@ class PixiClient:
                 logging.debug(f"completely ignore reply context for {convo_id=}")
             elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
-                    metadata["in_reply_to"].update({
+                    metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
                         "from": "[YOU]",
                         "partial_content": reply_message_text[:64]
-                    })
+                    }
                 else:
-                    metadata["in_reply_to"].update({
+                    metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
                         "from": "[YOU]",
                         "message": reply_message_text
-                    })
+                    }
             else:
                 if reply_optimization == 1:
-                    metadata["in_reply_to"].update({
-                        "from": self.reflection_api.get_sender_information(reply_message),
+                    metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
+                        "from": asdict(reply_message.author),
                         "partial_message": reply_message_text[:64]
-                    })
+                    }
                 else:
-                    metadata["in_reply_to"].update({
-                        "from": self.reflection_api.get_sender_information(reply_message),
+                    metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
+                        "from": asdict(reply_message.author),
                         "message": reply_message_text
-                    })
+                    }
 
-        # convert everything into `ChatMessage``
+        # convert everything into `ChatMessage`
         role_message = ChatMessage(
             role=ChatRole.USER,
             content=message_text,

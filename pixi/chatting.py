@@ -12,6 +12,7 @@ from .enums import ChatRole
 from .utils import CoroutineQueueExecutor, exists, format_time_ago
 from .caching.base import MediaCache
 from .typing import AsyncPredicate, AsyncFunction, Optional
+from .reflection.message import ReflectionMessageBase
 
 # constants
 
@@ -86,7 +87,7 @@ class ChatMessage:
         *,
         # TODO: add type hints and type checks
         instance_id: Optional[str] = None,
-        origin=None,
+        origin: ReflectionMessageBase | None = None,
         bot=None
     ):
         self.instance_id = instance_id

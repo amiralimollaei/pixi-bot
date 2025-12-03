@@ -46,6 +46,7 @@ def run(
     )
     client.run()
 
+
 def main():
     from .utils import load_dotenv
 
@@ -140,7 +141,7 @@ def main():
 
     platform = args.platform.upper()
     run(platform=Platform[platform], **client_args)
-    
+
     return 0
 
 
