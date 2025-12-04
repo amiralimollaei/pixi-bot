@@ -75,8 +75,8 @@ uv sync --all-extras
 ```text
 usage: pixi-cli [-h] --platform {discord,telegram}
                 [--log-level {debug,info,warning,error,critical}] [--api-url API_URL]
-                [--auth | --no-auth] --model MODEL
-                [--model-max-context MODEL_MAX_CONTEXT] [--helper-model HELPER_MODEL]
+                [--auth | --no-auth] --model MODEL [--model-max-context MODEL_MAX_CONTEXT]
+                [--helper-model HELPER_MODEL]
                 [--helper-model-max-context HELPER_MODEL_MAX_CONTEXT]
                 [--embedding-model EMBEDDING_MODEL]
                 [--embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT]
@@ -85,11 +85,9 @@ usage: pixi-cli [-h] --platform {discord,telegram}
                 [--embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE]
                 [--embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE]
                 [--embedding-model-sentence-level | --no-embedding-model-sentence-level]
-                [--tool-calling | --no-tool-calling]
-                [--tool-logging | --no-tool-logging]
+                [--tool-calling | --no-tool-calling] [--tool-logging | --no-tool-logging]
                 [--wiki-search | --no-wiki-search] [--gif-search | --no-gif-search]
-                [--image-support | --no-image-support]
-                [--audio-support | --no-audio-support]
+                [--image-support | --no-image-support] [--audio-support | --no-audio-support]
                 [--environment-whitelist | --no-environment-whitelist]
                 [--environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]]
                 [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
@@ -107,41 +105,38 @@ options:
   --auth, --no-auth     whether or not to authorize to the API backends
   --model, -m MODEL     Language Model to use for the main chatbot bot
   --model-max-context, -ctx MODEL_MAX_CONTEXT
-                        Maximum model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is
-                        '16192`.
+                        Maximum model context size (in tokens), pixi tries to apporiximately
+                        stay within this context size, Default is '16192`.
   --helper-model, -hm HELPER_MODEL
                         Language Model to use for agentic tools
   --helper-model-max-context, -hctx HELPER_MODEL_MAX_CONTEXT
                         Maximum helper model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is
-                        '16192`.
+                        apporiximately stay within this context size, Default is '16192`.
   --embedding-model, -em EMBEDDING_MODEL
                         Embedding Model to use for embedding tools
   --embedding-model-max-context, -ectx EMBEDDING_MODEL_MAX_CONTEXT
-                        Maximum embedding model context size (in tokens), pixi tries
-                        to apporiximately stay within this context size, Default is
-                        '16192`.
+                        Maximum embedding model context size (in tokens), pixi tries to
+                        apporiximately stay within this context size, Default is '16192`.
   --embedding-model-dimension, -ed EMBEDDING_MODEL_DIMENSION
                         Dimention to use for the embedding model, Default is '768`.
   --embedding-model-split-size, -esplit EMBEDDING_MODEL_SPLIT_SIZE
-                        Split size to use for the embedding chunk tokenizer, Default
-                        is '1024`.
+                        Split size to use for the embedding chunk tokenizer, Default is
+                        '1024`.
   --embedding-model-min-size, -emin EMBEDDING_MODEL_MIN_SIZE
-                        Minimum chunk size to use for the embedding chunk tokenizer,
-                        Default is '256`.
+                        Minimum chunk size to use for the embedding chunk tokenizer, Default
+                        is '256`.
   --embedding-model-max-size, -emax EMBEDDING_MODEL_MAX_SIZE
-                        Maximum chunk size to use for the embedding chunk tokenizer,
-                        Default is '256`.
+                        Maximum chunk size to use for the embedding chunk tokenizer, Default
+                        is '256`.
   --embedding-model-sentence-level, --no-embedding-model-sentence-level
-                        whether or not the embedding model is a sentence level
-                        embedding model, Default is 'False`.
+                        whether or not the embedding model is a sentence level embedding
+                        model, Default is 'False`.
   --tool-calling, --no-tool-calling
-                        allows pixi to use built-in and/or plugin tools, tool calling
-                        can only be used if the model supports them
+                        allows pixi to use built-in and/or plugin tools, tool calling can
+                        only be used if the model supports them
   --tool-logging, --no-tool-logging
-                        verbose logging for tool calls (enabled by default when
-                        running with logging level DEBUG)
+                        verbose logging for tool calls (enabled by default when running with
+                        logging level DEBUG)
   --wiki-search, --no-wiki-search
                         allows pixi to search any mediawiki compatible Wiki
   --gif-search, --no-gif-search
@@ -151,12 +146,12 @@ options:
   --audio-support, --no-audio-support
                         allows pixi to download and process audio files
   --environment-whitelist, --no-environment-whitelist
-                        whether or not the ids passed to --filter-environment-ids are
-                        whitelisted or blacklisted
+                        whether or not the ids passed to environment ids are whitelisted or
+                        blacklisted
   --environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]
-                        add the id of the environment that the bot is or is not
-                        allowed to respond in (space-separated). If not provided, the
-                        bot will respond everywhere.
+                        add the id of the environment that the bot is or is not allowed to
+                        respond in (space-separated). If not provided, the bot will respond
+                        everywhere.
   --database-names, -d DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
 ```

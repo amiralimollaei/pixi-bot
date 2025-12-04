@@ -213,7 +213,7 @@ def main():
         "--environment-whitelist",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="whether or not the ids passed to --filter-environment-ids are whitelisted or blacklisted"
+        help="whether or not the ids passed to environment ids are whitelisted or blacklisted"
     )
     parser.add_argument(
         "--environment-ids",
