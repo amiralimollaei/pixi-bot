@@ -84,7 +84,8 @@ usage: pixi-cli [-h] --platform {discord,telegram}
                 [--embedding-model-split-size EMBEDDING_MODEL_SPLIT_SIZE]
                 [--embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE]
                 [--embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE]
-                [--embedding-model-sentence-level | --no-embedding-model-sentence-level | -esent]
+                [--embedding-model-sentence-level | --no-embedding-model-sentence-level
+                | -esent]
                 [--tool-calling | --no-tool-calling]
                 [--tool-logging | --no-tool-logging]
                 [--wiki-search | --no-wiki-search] [--gif-search | --no-gif-search]
