@@ -6,14 +6,16 @@ import math
 import time
 
 from .typing import AsyncPredicate, Optional
-from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory
+from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory, PredicateCommand, PredicateTool
 from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
-from .chatbot import PredicateCommand, PredicateTool
+from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import ChatMessage
 from .enums import ChatRole, Messages, Platform
 from .reflection import ReflectionAPI, ReflectionMessageBase
 from .addon import AddonManager
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
+
 
 # constants
 
@@ -34,64 +36,61 @@ class PixiClient:
         self,
         platform: Platform,
         *,
-        model: str,
-        helper_model: str,
-        api_url: str,
+        auth: OpenAIAuthConfig,
+        model: OpenAILanguageModelConfig,
+        helper_model: OpenAILanguageModelConfig | None,
+        embedding_model: OpenAIEmbeddingModelConfig | None,
+        features: PixiFeatures = PixiFeatures.EnableToolCalling | PixiFeatures.EnableToolLogging,
         database_names: Optional[list[str]] = None,
-        enable_tool_calls: bool = False,
-        log_tool_calls: bool = False,
-        allowed_places: Optional[list[str]] = None,
-        accept_images: bool = True,
-        accept_audio: bool = True,
+        environment_filter: IdFilter = IdFilter.allow(),
     ):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.info(f"Initalizing Pixi with feature set {features} and platform {platform}...")
+
         self.platform = platform
-        self.api_url = api_url
-        self.chatbot_factory = CachedAsyncChatbotFactory(
-            parent=self,
-            model=model,
-            base_url=api_url,
-            hash_prefix=platform,
-            log_tool_calls=log_tool_calls,
-        )
-        self.helper_model = helper_model
-        self.enable_tool_calls = enable_tool_calls
 
-        self.allowed_places = allowed_places or []
-
-        self.accept_images = accept_images
-        if self.accept_images:
-            try:
-                from .caching import ImageCache
-            except Exception:
-                logging.warning("tried to accept images, but image caching features are not available")
-                self.accept_images = False
-        self.accept_audio = accept_audio
-        if self.accept_audio:
-            try:
-                from .caching import AudioCache
-            except Exception:
-                logging.warning("tried to accept audio, but audio caching features are not available")
-                self.accept_audio = False
-
+        self.auth = auth
+        self.model = model
+        self.helper_model = helper_model or model
+        self.embedding_model = embedding_model
         self.database_names = database_names or []
         self.database_tools_initalized = asyncio.Event()
+        self.features = features
+        self.enable_tool_calls = PixiFeatures.EnableToolCalling in features
+        self.log_tool_calls = PixiFeatures.EnableToolLogging in features
+        self.environment_filter = environment_filter
+
+        self.accept_images = PixiFeatures.EnableImageSupport in features
+        self.accept_audio = PixiFeatures.EnableAudioSupport in features
+        if (self.accept_images or self.accept_audio) and not SUPPORTS_MEDIA_CACHING:
+            self.logger.warning("tried to accept audio/images, but media caching features are not available")
+            self.accept_images = False
+            self.accept_audio = False
+
+        self.chatbot_factory = CachedAsyncChatbotFactory(
+            parent=self,
+            auth=self.auth,
+            model=model,
+            hash_prefix=platform,
+            log_tool_calls=self.log_tool_calls,
+        )
 
         self.reflection_api = ReflectionAPI(platform=platform)
 
         self.__register_builtin_commands()
 
         self.gif_api = None
-
-        try:
-            self.gif_api = AsyncTenorAPI()
-        except KeyError:
-            logging.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
+        if PixiFeatures.EnableGIFSearch in features:
+            try:
+                self.gif_api = AsyncTenorAPI()
+            except KeyError:
+                self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
 
         # TODO: add configurable wikis
-        if self.enable_tool_calls:
+        if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features:
             self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
             self.register_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
-            self.register_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
+            # self.register_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
         if platform == Platform.DISCORD and self.enable_tool_calls:
             self.__register_discord_specific_tools()
@@ -103,9 +102,11 @@ class PixiClient:
 
         self.reflection_api.register_on_message_event(self.on_message)
 
+        self.logger.info(f"Pixi finised initalizing!")
+
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
-            logging.warning("tried to register a tool, but tool calls are disabled, ignoring...")
+            self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
         self.chatbot_factory.register_tool(PredicateTool(
@@ -126,13 +127,14 @@ class PixiClient:
         ))
 
     def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs) -> AgentBase:
-        return agent(model=self.helper_model, base_url=self.api_url, **agent_kwargs)
+        return agent(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
         async def checked_function(message: ReflectionMessageBase):
-            environment_id = message.get_environment_id()
+            environment_id = message.environment_id
             if not self.is_environment_allowed(environment_id):
-                logging.warning(f"ignoring slash command in {environment_id} because it is not in the allowed places.")
+                self.logger.warning(
+                    f"ignoring slash command in {environment_id} because it is not in the allowed places.")
                 await message.send("This command is not allowed here.")
                 return
             await function(message)
@@ -189,7 +191,7 @@ class PixiClient:
             try:
                 await message.add_reaction(value)
             except Exception:
-                logging.exception(f"Failed to add reaction {value} to message {message.id}")
+                self.logger.exception(f"Failed to add reaction {value} to message {message.id}")
 
         self.register_command(
             name="react",
@@ -200,7 +202,7 @@ class PixiClient:
 
     async def __register_database_tools(self):
         if not self.enable_tool_calls:
-            logging.warning("tried to initalize a database tool, but tool calls are disabled")
+            self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             self.database_tools_initalized.set()
             return
 
@@ -211,7 +213,7 @@ class PixiClient:
 
     async def register_database_tool(self, database_name: str):
         if not self.enable_tool_calls:
-            logging.warning("tried to initalize a database tool, but tool calls are disabled")
+            self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             return
 
         from .database import DirectoryDatabase
@@ -277,7 +279,7 @@ class PixiClient:
 
     def register_mediawiki_tools(self, url: str, wiki_name: str):
         if not self.enable_tool_calls:
-            logging.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
+            self.logger.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
 
         wiki_api = AsyncWikimediaAPI(url)
@@ -306,12 +308,14 @@ class PixiClient:
             if titles.split("|") is None:
                 return "no result: no page specified"
 
+            context = await asyncio.gather(*[
+                wiki_api.get_raw(t.strip()) for t in titles.split("|")
+            ])
+
             agent = self.create_agent_instance(
                 agent=RetrievalAgent,
-                context=await asyncio.gather(*[
-                    wiki_api.get_raw(t.strip()) for t in titles.split("|")
-                ])
-            )  # pyright: ignore[reportAssignmentType]
+                context=context
+            )
             return await agent.execute_query(query)
 
         self.register_tool(
@@ -339,7 +343,7 @@ class PixiClient:
 
     def __register_discord_specific_tools(self):
         if not self.enable_tool_calls:
-            logging.warning("tried to initalize discord specific tools, but tool calls are disabled")
+            self.logger.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
 
         async def fetch_channel_history(instance: AsyncChatbotInstance, reference: ChatMessage, channel_id: str, n: int):
@@ -406,13 +410,13 @@ class PixiClient:
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
             try:
-                environment_id = message.get_environment_id()
+                environment_id = message.environment_id
                 conversation = await self.get_conversation_instance(environment_id)
                 is_notes_visible = conversation.toggle_notes()
                 notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
                 await message.send(notes_message)
             except Exception:
-                logging.exception(f"Failed to toggle notes")
+                self.logger.exception(f"Failed to toggle notes")
                 await message.send("Failed to toggle notes.")
 
         async def reset_slash_command(message: ReflectionMessageBase):
@@ -420,10 +424,10 @@ class PixiClient:
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
 
-            environment_id = message.get_environment_id()
+            environment_id = message.environment_id
 
             self.chatbot_factory.remove(environment_id)
-            logging.info(f"the conversation in {environment_id} has been reset.")
+            self.logger.info(f"the conversation in {environment_id} has been reset.")
 
             await message.send("Wha- Where am I?!")
 
@@ -478,12 +482,12 @@ class PixiClient:
                     await message.typing()
                     await asyncio.sleep(3)
                 except Exception:
-                    logging.exception("an error accrued while sending typing status")
+                    self.logger.exception("an error accrued while sending typing status")
             noncall_result = await task
             if noncall_result:
-                logging.warning(f"{noncall_result=}")
+                self.logger.warning(f"{noncall_result=}")
         except Exception:
-            logging.exception(f"Unknown error while responding to a message in {instance.id}.")
+            self.logger.exception(f"Unknown error while responding to a message in {instance.id}.")
             await message.send(Messages.UNKNOWN_ERROR)
 
         responded = True  # TODO: track the command usage and check if the message is responded to
@@ -491,7 +495,7 @@ class PixiClient:
             if not allow_ignore:
                 raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
             else:
-                logging.warning("there was no response to the message while ignoring a message is allowed.")
+                self.logger.warning("there was no response to the message while ignoring a message is allowed.")
 
         return responded
 
@@ -530,22 +534,21 @@ class PixiClient:
             try:
                 ok = await self.pixi_resp(instance, chat_message)
             except Exception:
-                logging.exception("There was an error in `pixi_resp`")
+                self.logger.exception("There was an error in `pixi_resp`")
                 ok = False
             if ok:
                 instance.save()
-                logging.debug("responded to a message and saved the conversation.")
+                self.logger.debug("responded to a message and saved the conversation.")
                 return True
             else:
-                logging.warning(f"Retrying ({i}/{num_retry})")
+                self.logger.warning(f"Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
 
     def is_environment_allowed(self, identifier: str) -> bool:
         """
-        Check if the identifier is in the allowed places.
-        If allowed places are not set, return True.
+        Check if the environment identifier is allowed to be processed.
         """
-        return not self.allowed_places or identifier in self.allowed_places
+        return self.environment_filter.is_allowed(identifier)
 
     async def on_message(self, message: ReflectionMessageBase):
         # we should not process our own messages again
@@ -562,13 +565,13 @@ class PixiClient:
                 is_keyword_present = True
                 break
         is_prefixed = message_text.lower().startswith(tuple(COMMAND_PREFIXES))
-        environment_id = message.get_environment_id()
+        environment_id = message.environment_id
 
         if not (message.is_inside_dm() or bot_mentioned or is_prefixed or is_keyword_present):
             return
 
         if not self.is_environment_allowed(environment_id):
-            logging.warning(f"ignoring message in {environment_id} because it is not in the allowed places.")
+            self.logger.warning(f"ignoring message in {environment_id} because it's not in an allowed environment.")
             return
 
         if is_prefixed:
@@ -605,7 +608,7 @@ class PixiClient:
                     reply_optimization = 1
             if reply_optimization == 2:
                 # completely ignore reply context
-                logging.debug(f"completely ignore reply context for {environment_id=}")
+                self.logger.debug(f"completely ignore reply context for {environment_id=}")
             elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
                     metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]

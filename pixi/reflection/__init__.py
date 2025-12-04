@@ -8,11 +8,13 @@ from ..caching.base import MediaCache
 
 class ReflectionAPI:
     def __init__(self, platform: Platform):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         assert type(platform) == Platform
         self.platform = platform
         self.reflection_message_cls: type[ReflectionMessageBase] | None = None
 
-        logging.info(f"initializing ReflectionAPI for {self.platform}...")
+        self.logger.debug(f"initializing ReflectionAPI for {self.platform}...")
         try:
             match platform:
                 case Platform.DISCORD:
@@ -30,7 +32,7 @@ class ReflectionAPI:
         except ImportError:
             raise RuntimeError(
                 f"ReflectionAPI for {self.platform} is not available, maybe you forgot to install its dependecies?")
-        logging.info(f"ReflectionAPI has been initilized for {self.platform}.")
+        self.logger.debug(f"ReflectionAPI has been initilized for {self.platform}.")
 
     def run(self):
         return self._ref.run()

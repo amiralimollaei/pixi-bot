@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import logging
-import os
 import json
 import time
 from typing import Sequence
@@ -13,13 +12,7 @@ from .utils import CoroutineQueueExecutor, exists, format_time_ago
 from .caching.base import MediaCache
 from .typing import AsyncPredicate, AsyncFunction, Optional
 from .reflection.message import ReflectionMessageBase
-
-# constants
-
-DEFAULT_BASE_URL = "https://api.deepinfra.com/v1/openai"
-DEFAULT_MODEL = "google/gemini-2.5-flash"
-
-MAX_CONTEXT_LENGTH = 8000
+from .config import OpenAILanguageModelConfig, OpenAIAuthConfig
 
 
 @dataclass
@@ -299,40 +292,38 @@ async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncP
 class AsyncChatClient:
     def __init__(
         self,
+        auth: OpenAIAuthConfig,
+        model: OpenAILanguageModelConfig,
         messages: Optional[list[ChatMessage]] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
         log_tool_calls: bool = False,
         enforce_system_header: bool = False,
     ):
-        if messages is not None:
-            assert isinstance(
-                messages, list), f"expected messages to be of type `list[ChatMessage]` or be None, but got `{messages}`"
-            for m in messages:
-                assert isinstance(
-                    m, ChatMessage), f"expected messages to be of type `list[ChatMessage]` or be None, but at least one element in the list is not of type `ChatMessage`, got `{messages}`"
-        self.base_url = base_url or DEFAULT_BASE_URL
-        self.api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPINFRA_API_KEY")
-        assert exists(self.api_key), "API key must be set in the environment variable OPENAI_API_KEY or DEEPINFRA_API_KEY."
-        assert exists(self.base_url), f"base_url must be set, but got {self.base_url}"
-        assert isinstance(self.base_url, str), f"base_url must be a string, but got {self.base_url}"
-        self.model = model or DEFAULT_MODEL
-        assert exists(self.model), f"model must be set, but got {self.model}"
-        assert isinstance(self.model, str), f"model must be a string, but got {self.model}"
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.auth = auth
+        self.model = model
         self.messages = messages or []
         self.log_tool_calls = log_tool_calls
         self.enforce_system_header = enforce_system_header
+
+        if messages is not None:
+            assert isinstance(messages, list), \
+                f"expected messages to be of type `list[ChatMessage]` or be None, but got `{messages}`"
+            for m in messages:
+                assert isinstance(m, ChatMessage), \
+                    f"expected messages to be of type `list[ChatMessage]` or be None, but at least one element in the list is not of type `ChatMessage`, got `{messages}`"
+
         self.system_prompt = None
         self.tools: dict = {}
-
         self.rearrange_predicate = None
 
     # Hotfix: create a new session every time to avoid issues with cancelling requests and connection errors
+
     @property
     def session(self):
         return AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
+            api_key=self.auth.api_key,
+            base_url=self.auth.base_url,
             # don't use proxies from environment variables
             http_client=httpx.AsyncClient(trust_env=False),
         )
@@ -386,7 +377,7 @@ class AsyncChatClient:
     async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         openai_messages: list = await self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
         kwargs = dict(
-            model=self.model,
+            model=self.model.id,
             messages=openai_messages,
             temperature=0.7,
             top_p=0.9,
@@ -438,20 +429,20 @@ class AsyncChatClient:
             # TODO: better handle images and audio
             request_size += len(role) + len(context) + 1024 * len(message.audio) + 1024 * len(message.images)
             # approximate size of the message in tokens, assuming 4 characters per token
-            if request_size > MAX_CONTEXT_LENGTH * 4:
+            if request_size > self.model.max_context * 4:
                 break
         else:
             cutoff_index = None
 
         if cutoff_index:
             if cutoff_index == 0:
-                logging.warning("No messages fit in the request, cutting off the first message.")
+                self.logger.warning("No messages fit in the request, cutting off the first message.")
                 message_cut = messages[0]
                 assert message_cut.content, "Message content must not be empty, this is a bug."
                 message_cut.content = "(This message was cut off due to length limitations)\n\n" + \
                     message_cut.content[:request_size-system_prompt_size -
                                         200]  # cut off the message to fit in the request
-            logging.warning("unable to fit all messages in one request.")
+            self.logger.warning("unable to fit all messages in one request.")
             messages = messages[-(cutoff_index-1):]
         return messages
 
@@ -505,22 +496,22 @@ class AsyncChatClient:
                     ])
                 try:
                     if self.log_tool_calls:
-                        logging.info(f"Calling {fn.name}({func_args_str})...")
+                        self.logger.info(f"Calling {fn.name}({func_args_str})...")
                     else:
-                        logging.debug(f"Calling {fn.name}({func_args_str})...")
+                        self.logger.debug(f"Calling {fn.name}({func_args_str})...")
                     result = await func(reference_message, **fn.arguments)  # type: ignore
                     result = json.dumps(result, ensure_ascii=False)
                 except Exception as e:
-                    logging.exception(f"Error calling tool '{fn.name}({func_args_str})'")
+                    self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
                     result = f"Tool error: {e}"
 
                 if self.log_tool_calls:
-                    logging.info(f"Call {fn.name}({func_args_str}): {result}")
+                    self.logger.info(f"Call {fn.name}({func_args_str}): {result}")
                 else:
-                    logging.debug(f"Call {fn.name}({func_args_str}): {result}")
+                    self.logger.debug(f"Call {fn.name}({func_args_str}): {result}")
             else:
                 result = f"Tool '{fn.name}' was not found."
-                logging.warning(f"Tool '{fn.name}' was not found.")
+                self.logger.warning(f"Tool '{fn.name}' was not found.")
 
             results.append(ChatMessage(
                 ChatRole.TOOL,
@@ -645,13 +636,10 @@ class AsyncChatClient:
         if temporal:
             self.messages = orig_messages  # type: ignore
 
-    def to_dict(self):
+    def state_dict(self):
         return dict(
             messages=[msg.to_dict() for msg in self.messages]
         )
 
-    @classmethod
-    def from_dict(cls, data: dict):
-        return cls(
-            messages=[ChatMessage.from_dict(msg) for msg in data.get("messages") or []],
-        )
+    def load_state_dict(self, data: dict):
+        self.messages = [ChatMessage.from_dict(msg) for msg in data.get("messages") or []]

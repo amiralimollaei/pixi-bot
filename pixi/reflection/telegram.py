@@ -15,6 +15,8 @@ from ..enums import Platform, Messages
 
 class TelegramReflectionAPI:
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.platform = Platform.TELEGRAM
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -96,12 +98,12 @@ class TelegramReflectionAPI:
                         write_timeout=600,
                     )
             except telegram.error.TimedOut as e:
-                logging.error(f"Timed out while sending file: {e}, retrying {i+1}/{3}")
+                self.logger.error(f"Timed out while sending file: {e}, retrying {i+1}/{3}")
             except telegram.error.BadRequest as e:
-                logging.exception(f"BadRequest error while sending file: {e}")
+                self.logger.exception(f"BadRequest error while sending file: {e}")
                 break
             except Exception as e:
-                logging.exception(f"Unexpected error while sending file: {e}")
+                self.logger.exception(f"Unexpected error while sending file: {e}")
             else:
                 break
 
@@ -115,10 +117,10 @@ class TelegramReflectionAPI:
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
                 return ImageCache(bytes(image_bytes))
         except telegram.error.BadRequest as e:
-            logging.error(f"Failed to fetch user avatar: {e}")
+            self.logger.error(f"Failed to fetch user avatar: {e}")
             return None
         except Exception as e:
-            logging.exception(f"Unexpected error while fetching user avatar: {e}")
+            self.logger.exception(f"Unexpected error while fetching user avatar: {e}")
             return None
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):

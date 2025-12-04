@@ -11,12 +11,16 @@ class AgentBase:
         self.client = client or AsyncChatClient(**client_kwargs)
 
     def to_dict(self) -> dict:
-        return self.client.to_dict()
+        return dict(
+            client = self.client.state_dict()
+        )
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'AgentBase':
+    def from_dict(cls, data: dict, **client_kwargs) -> 'AgentBase':
+        client = AsyncChatClient(**client_kwargs)
+        client.load_state_dict(data["client"])
         return cls(
-            client = AsyncChatClient.from_dict(data)
+            client = client
         )
 
     def save_json(self, file: str):
@@ -24,11 +28,11 @@ class AgentBase:
             json.dump(self.to_dict(), f, ensure_ascii=False)
 
     @classmethod
-    def from_file(cls, file: str) -> 'AgentBase':
+    def from_file(cls, file: str, **client_kwargs) -> 'AgentBase':
         if os.path.isfile(file):
             with open(file, "rb") as f:
                 data = json.load(f)
-            return cls.from_dict(data)
+            return cls.from_dict(data, **client_kwargs)
         else:
             logging.warning(f"Unable to find agent save file at `{file}`, creating a new instance.")
             instance = cls()

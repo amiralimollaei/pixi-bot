@@ -15,6 +15,8 @@ from ..enums import Platform
 
 class DiscordReflectionAPI:
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.platform = Platform.DISCORD
 
         self.token = os.getenv("DISCORD_BOT_TOKEN")
@@ -155,11 +157,11 @@ class DiscordReflectionAPI:
         try:
             await channel.send(file=discord.File(fp=video, filename=filename, caption=caption))  # type: ignore
         except discord.Forbidden:
-            logging.exception("unable to send video, operation forbidden.")
+            self.logger.exception("unable to send video, operation forbidden.")
         except discord.HTTPException as e:
-            logging.exception(f"HTTPException while sending video: {e}")
+            self.logger.exception(f"HTTPException while sending video: {e}")
         except Exception:
-            logging.exception("unknown error while sending a video")
+            self.logger.exception("unknown error while sending a video")
 
     async def send_file(self, chat_id: int, filepath: str, filename: str, caption: str | None = None):
         channel = self.bot.get_channel(chat_id)
@@ -171,11 +173,11 @@ class DiscordReflectionAPI:
                     file=discord.File(fp=f, filename=filename)
                 )
         except discord.Forbidden:
-            logging.exception("unable to send file, operation forbidden.")
+            self.logger.exception("unable to send file, operation forbidden.")
         except discord.HTTPException as e:
-            logging.exception(f"HTTPException while sending file: {e}")
+            self.logger.exception(f"HTTPException while sending file: {e}")
         except Exception:
-            logging.exception("unknown error while sending a file")
+            self.logger.exception("unknown error while sending a file")
 
     async def get_user_avatar(self, user_id: int) -> MediaCache | None:
         """
@@ -190,10 +192,10 @@ class DiscordReflectionAPI:
             avatar_bytes = await user.avatar.read()
             return ImageCache(avatar_bytes)
         except discord.NotFound:
-            logging.error(f"User with ID {user_id} not found.")
+            self.logger.error(f"User with ID {user_id} not found.")
             return None
         except discord.HTTPException as e:
-            logging.error(f"Failed to fetch user avatar: {e}")
+            self.logger.error(f"Failed to fetch user avatar: {e}")
             return None
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):

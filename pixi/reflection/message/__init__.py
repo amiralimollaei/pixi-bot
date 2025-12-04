@@ -65,7 +65,8 @@ class ReflectionMessageBase:
     async def send_file(self, filepath: str, filename: str, caption: str | None = None):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("send_file", self.__class__.__name__))
     
-    def get_environment_id(self) -> str:
+    @property
+    def environment_id(self) -> str:
         # if the message is in a forum type environemnt (server, guild, channels group, etc.)
         if self.environment.is_forum:
             return f"forum#{self.environment.forum_id}"

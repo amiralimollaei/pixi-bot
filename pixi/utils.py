@@ -6,12 +6,14 @@ import os
 from types import CoroutineType
 from typing import IO
 
-MODULE_PATH = importlib.resources.files(__package__)
+MODULE_PATH = importlib.resources.files(__package__) # pyright: ignore[reportArgumentType]
 RESOURCES_PATH = str(MODULE_PATH / "resources")
 
 
 class CoroutineQueueExecutor:
     def __init__(self, max_queue_size: int = 1000):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.max_queue_size = max_queue_size
         self.tasks: list[CoroutineType] = []
         self.execute_lock = asyncio.Lock()
@@ -37,7 +39,7 @@ class CoroutineQueueExecutor:
             self.execute_lock.release()
 
         if len(self.tasks) > 0:
-            logging.warning(f"Corotine never avaited: {self.tasks}")
+            self.logger.warning(f"Corotine never avaited: {self.tasks}")
 
         self.tasks = []
 

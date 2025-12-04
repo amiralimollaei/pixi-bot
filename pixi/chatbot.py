@@ -73,12 +73,13 @@ class AsyncChatbotInstance:
     def __init__(self,
                  uuid: int | str,
                  hash_prefix: str,
-                 messages: Optional[list[ChatMessage]] = None,
                  *,
                  bot=None,
                  resource_folder: str | None = None,
                  **client_kwargs,
                  ):
+        self.logger = logging.getLogger(self.__class__.__name__)
+
         self.bot = bot
         assert self.bot
 
@@ -108,8 +109,8 @@ class AsyncChatbotInstance:
         self.last_send_time = 0.0
         self.responded = False
 
-        self.client = AsyncChatClient(messages, **client_kwargs)
-        if messages is not None:
+        self.client = AsyncChatClient(**client_kwargs)
+        if not self.client.messages:
             self.client.add_message(ChatMessage(
                 role=ChatRole.ASSISTANT,
                 content="[NOTE: I accept the guidelines of the system, I use the SEND command] [SEND: OK!] [SEND: LLLet's begin!]",
@@ -190,8 +191,9 @@ class AsyncChatbotInstance:
             try:
                 await self.stream_call(reference_message, allow_ignore)
             except asyncio.CancelledError:
-                logging.warning(
-                    f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}")
+                self.logger.warning(
+                    f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}"
+                )
 
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
@@ -236,25 +238,18 @@ class AsyncChatbotInstance:
                 self.hash_prefix = data.get("prefix")
                 self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
             except json.decoder.JSONDecodeError:
-                logging.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
+                self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         else:
             if not_found_ok:
-                logging.info(f"Unable to find the instance save file {self.path}`, using default values.")
+                self.logger.info(f"Unable to find the instance save file {self.path}`, using default values.")
             else:
                 raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
-
-    @classmethod
-    def from_dict(cls, data: dict, **client_kwargs) -> 'AsyncChatbotInstance':
-        return cls(
-            uuid=data["uuid"],
-            hash_prefix=data["prefix"],
-            messages=[ChatMessage.from_dict(d) for d in data.get("messages", [])],
-            **client_kwargs
-        )
 
 
 class CachedAsyncChatbotFactory:
     def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
         self.hash_prefix = hash_prefix
@@ -335,11 +330,11 @@ class CachedAsyncChatbotFactory:
             instance.load(not_found_ok=True)
             # cache the instance
             self.cache_instance(instance)
-            logging.info(f"initiated a conversation with {identifier=}.")
+            self.logger.info(f"initiated a conversation with {identifier=}.")
         return instance
 
     def remove(self, identifier: str):
-        logging.info(f"removing {identifier}")
+        self.logger.info(f"removing {identifier}")
         save_path = get_instance_save_path(id=identifier, hash_prefix=self.hash_prefix)
         if os.path.exists(save_path):
             os.remove(save_path)
@@ -351,4 +346,4 @@ class CachedAsyncChatbotFactory:
             try:
                 conversation.save()
             except Exception as e:
-                logging.exception(f"Failed to save conversation with {identifier=}: {e}")
+                self.logger.exception(f"Failed to save conversation with {identifier=}: {e}")

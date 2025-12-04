@@ -32,6 +32,8 @@ class AsyncCommand:
 
 class AsyncCommandManager:
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        
         self.commands: dict[str, AsyncCommand] = dict()
 
     def _add_command(self, command: AsyncCommand):
@@ -67,7 +69,7 @@ class AsyncCommandManager:
 
         maybe_command_fn = self.commands.get(command_name.lower())
         if maybe_command_fn is None:
-            logging.error(f"The command `{command_name}` is not implemented.")
+            self.logger.error(f"The command `{command_name}` is not implemented.")
             return
 
         return await maybe_command_fn(reference_message, command_data)

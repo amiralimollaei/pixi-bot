@@ -1,56 +1,73 @@
-import logging
 
+import os
 
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
 from .enums import Platform
-from .utils import Ansi
-
-logging.basicConfig(
-    format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[{Ansi.YELLOW}%(levelname)s / %(name)s{Ansi.GREY}] {Ansi.WHITE}%(message)s",
-    level=logging.INFO,
-    force=True
-)
-
-# https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
-# Get the logger for 'httpx'
-httpx_logger = logging.getLogger("httpx")
-# Set the logging level to WARNING to ignore INFO and DEBUG logs
-httpx_logger.setLevel(logging.WARNING)
 
 
 def run(
     platform: Platform,
     *,
-    model: str,
-    helper_model: str,
-    api_url: str,
+    auth: OpenAIAuthConfig,
+    model: OpenAILanguageModelConfig,
+    helper_model: OpenAILanguageModelConfig | None,
+    embedding_model: OpenAIEmbeddingModelConfig | None,
+    features: PixiFeatures = PixiFeatures.empty(),
+    environment_filter: IdFilter = IdFilter.allow(),
     database_names: list[str] | None = None,
-    enable_tool_calls=True,
-    log_tool_calls=False,
-    allowed_places: list[str] | None = None,
-    accept_images=True,
-    accept_audio=True,
 ):
     from .client import PixiClient
-
-    client = PixiClient(
+    
+    PixiClient(
         platform=platform,
+        auth=auth,
         model=model,
         helper_model=helper_model,
-        api_url=api_url,
+        embedding_model=embedding_model,
+        features=features,
+        environment_filter=environment_filter,
         database_names=database_names,
-        enable_tool_calls=enable_tool_calls,
-        log_tool_calls=log_tool_calls,
-        allowed_places=allowed_places,
-        accept_images=accept_images,
-        accept_audio=accept_audio,
-    )
-    client.run()
+    ).run()
 
 
 def main():
-    from .utils import load_dotenv
+    import logging
 
     import argparse
+
+    from .utils import load_dotenv, Ansi
+
+    # injecting colors into the default logger
+
+    COLORS = {
+        logging.DEBUG: (Ansi.BLUE, Ansi.BEIGE),
+        logging.INFO: (Ansi.WHITE, Ansi.WHITE2),
+        logging.WARNING: (Ansi.YELLOW, Ansi.YELLOW2),
+        logging.ERROR: (Ansi.RED, Ansi.RED2),
+        logging.CRITICAL: (Ansi.BOLD + Ansi.RED, Ansi.BOLD + Ansi.RED2)
+    }
+
+    orig_factory = logging.getLogRecordFactory()
+
+    def record_factory(*args, **kwargs):
+        record = orig_factory(*args, **kwargs)
+        level_color, message_color = COLORS.get(record.levelno, (Ansi.GREY, Ansi.WHITE))
+        record.level_color = level_color
+        record.message_color = message_color
+        return record
+    logging.setLogRecordFactory(record_factory)
+
+    logging.basicConfig(
+        format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[%(level_color)s%(levelname)s / %(name)s{Ansi.GREY}] %(message_color)s%(message)s{Ansi.END}",
+        level=logging.INFO,
+        force=True,
+    )
+
+    # https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
+    # Get the logger for 'httpx'
+    httpx_logger = logging.getLogger("httpx")
+    # Set the logging level to WARNING to ignore INFO and DEBUG logs
+    httpx_logger.setLevel(logging.WARNING)
 
     # load environment variables
     load_dotenv()
@@ -71,43 +88,142 @@ def main():
         help="Set the logging level."
     )
     parser.add_argument(
+        "--api-url", "-a",
+        type=str,
+        default="https://api.openai.com/v1",
+        help="OpenAI Compatible API URL to use for the bot"
+    )
+    parser.add_argument(
+        "--auth",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="whether or not to authorize to the API backends"
+    )
+
+    # model arguments
+    parser.add_argument(
         "--model", "-m",
         type=str,
-        default="google/gemini-2.5-pro",
-        help="Model to use for the bot. Default is 'google/gemini-2.5-pro`."
+        required=True,
+        help="Language Model to use for the main chatbot bot"
     )
+    parser.add_argument(
+        "--model-max-context", "-ctx",
+        type=int,
+        default=16192,
+        help="Maximum model context size (in tokens), pixi tries to apporiximately stay within this context size, Default is '16192`."
+    )
+
+    # helper model arguments
     parser.add_argument(
         "--helper-model", "-hm",
         type=str,
-        default="google/gemini-2.5-flash",
-        help="Model to use for agentic tools. Default is 'google/gemini-2.5-flash`."
+        help="Language Model to use for agentic tools"
     )
     parser.add_argument(
-        "--api-url", "-a",
+        "--helper-model-max-context", "-hctx",
+        type=int,
+        default=16192,
+        help="Maximum helper model context size (in tokens), pixi tries to apporiximately stay within this context size, Default is '16192`."
+    )
+
+    # embedding model arguments
+    parser.add_argument(
+        "--embedding-model", "-em",
         type=str,
-        default="https://api.deepinfra.com/v1/openai",
-        help="OpenAI Compatible API URL to use for the bot. Default is 'https://api.deepinfra.com/v1/openai'."
+        help="Embedding Model to use for embedding tools"
     )
     parser.add_argument(
-        "--disable-tool-calls",
-        action="store_true",
-        help="Disable tool calls"
+        "--embedding-model-max-context", "-ectx",
+        type=int,
+        default=16192,
+        help="Maximum embedding model context size (in tokens), pixi tries to apporiximately stay within this context size, Default is '16192`."
     )
     parser.add_argument(
-        "--disable-images",
-        action="store_true",
-        help="Disable accepting images"
+        "--embedding-model-dimension", "-ed",
+        type=int,
+        default=768,
+        help="Dimention to use for the embedding model, Default is '768`."
     )
     parser.add_argument(
-        "--disable-audio",
-        action="store_true",
-        help="Disable accepting audio"
+        "--embedding-model-split-size", "-esplit",
+        type=int,
+        default=1024,
+        help="Split size to use for the embedding chunk tokenizer, Default is '1024`."
     )
     parser.add_argument(
-        "--log-tool-calls",
-        action="store_true",
-        help="Enable logging for tool calls (enabled by default when running with logging level DEBUG)"
+        "--embedding-model-min-size", "-emin",
+        type=int,
+        default=256,
+        help="Minimum chunk size to use for the embedding chunk tokenizer, Default is '256`."
     )
+    parser.add_argument(
+        "--embedding-model-max-size", "-emax",
+        type=int,
+        default=256,
+        help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '256`."
+    )
+    parser.add_argument(
+        "--embedding-model-sentence-level", "-esent",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether or not the embedding model is a sentence level embedding model, Default is 'False`."
+    )
+
+    # feature arguments
+    parser.add_argument(
+        "--tool-calling",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="allows pixi to use built-in and/or plugin tools, tool calling can only be used if the model supports them"
+    )
+    parser.add_argument(
+        "--tool-logging",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="verbose logging for tool calls (enabled by default when running with logging level DEBUG)"
+    )
+    parser.add_argument(
+        "--wiki-search",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="allows pixi to search any mediawiki compatible Wiki"
+    )
+    parser.add_argument(
+        "--gif-search",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="allows pixi to search for gifs online, and send them in chat"
+    )
+    parser.add_argument(
+        "--image-support",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="allows pixi to download and process image files"
+    )
+    parser.add_argument(
+        "--audio-support",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="allows pixi to download and process audio files"
+    )
+
+    # environment filter arguments
+    parser.add_argument(
+        "--environment-whitelist",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="whether or not the ids passed to --filter-environment-ids are whitelisted or blacklisted"
+    )
+    parser.add_argument(
+        "--environment-ids",
+        type=str,
+        nargs="+",
+        default=None,
+        help="add the id of the environment that the bot is or is not allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
+    )
+
+    # database arguments
     parser.add_argument(
         "--database-names", "-d",
         type=str,
@@ -115,35 +231,68 @@ def main():
         default=None,
         help="add the name of databases to use (space-separated)."
     )
-    parser.add_argument(
-        "--allowed-places",
-        type=str,
-        nargs="+",
-        default=None,
-        help="add the name of places that the bot is allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
-    )
     args = parser.parse_args()
 
     # Set logging level
-    logging.getLogger().setLevel(args.log_level.upper())
+    logging.root.setLevel(args.log_level.upper())
 
-    client_args = dict(
-        model=args.model,
-        helper_model=args.helper_model,
-        api_url=args.api_url,
-        enable_tool_calls=not args.disable_tool_calls,
-        accept_images=not args.disable_images,
-        accept_audio=not args.disable_audio,
-        log_tool_calls=args.log_tool_calls,
-        database_names=args.database_names,
-        allowed_places=args.allowed_places,
+    api_key = "NO_AUTH"
+    if args.auth:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
+
+    auth = OpenAIAuthConfig(
+        base_url=os.getenv("OPENAI_BASE_URL", args.api_url),
+        api_key=api_key
     )
 
-    platform = args.platform.upper()
-    run(platform=Platform[platform], **client_args)
+    model = OpenAILanguageModelConfig(
+        id=args.model,
+        max_context=args.model_max_context,
+    )
 
-    return 0
+    helper_model = OpenAILanguageModelConfig(
+        id=args.helper_model,
+        max_context=args.helper_model_max_context,
+    ) if args.helper_model else model
 
+    embedding_model = OpenAIEmbeddingModelConfig(
+        id=args.embedding_model,
+        max_context=args.embedding_model_max_context,
+        dimension=args.embedding_model_dimension,
+        split_chunk_size=args.embedding_model_split_size,
+        min_chunk_size=args.embedding_model_min_size,
+        max_chunk_size=args.embedding_model_max_size,
+        sentence_level=args.embedding_model_sentence_level,
+    )
 
-if __name__ == '__main__':
-    main()
+    features = PixiFeatures(0)
+    if args.tool_calling:
+        features |= PixiFeatures.EnableToolCalling
+    if args.tool_logging:
+        features |= PixiFeatures.EnableToolLogging
+    if args.wiki_search:
+        features |= PixiFeatures.EnableWikiSearch
+    if args.gif_search:
+        features |= PixiFeatures.EnableGIFSearch
+    if args.image_support:
+        features |= PixiFeatures.EnableImageSupport
+    if args.audio_support:
+        features |= PixiFeatures.EnableAudioSupport
+
+    environment_filter = IdFilter.allow()
+    if args.environment_ids:
+        environment_filter = IdFilter.whitelist(
+            args.environment_ids) if args.environment_whitelist else IdFilter.blacklist(args.environment_ids)
+
+    return run(
+        Platform[args.platform.upper()],
+        auth=auth,
+        model=model,
+        helper_model=helper_model,
+        embedding_model=embedding_model,
+        features=features,
+        environment_filter=environment_filter,
+        database_names=args.database_names,
+    )
