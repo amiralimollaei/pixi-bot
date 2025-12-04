@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import dataclasses
 from glob import glob
 import hashlib
 import json
@@ -7,13 +7,18 @@ import re
 
 import aiofiles
 import zstandard
+import openai
+import numpy as np
+
+from .caching import EmbedingCache
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
 
 # constants
 
 BASE_DIR = "datasets"
 
 
-@dataclass
+@dataclasses.dataclass(frozen=True)
 class DatasetEntry:
     title: str
     content: str
@@ -29,7 +34,7 @@ class DatasetEntry:
         return self.content == other.content
 
 
-@dataclass
+@dataclasses.dataclass(frozen=True)
 class QueryMatch:
     title: str
     id: int
@@ -184,3 +189,235 @@ class DirectoryDatabase:
         return hashlib.sha256(
             (entry.content + entry.title + str(entry.source) + str(entry.id)).encode("utf-8")
         )
+
+
+class SentenceTokenizer:
+    """This class provides functions for extracting sentences from text."""
+
+    def __init__(self: "SentenceTokenizer") -> None:
+        self.pattern = re.compile(r"([!.?⸮؟]+)[ \n]+")
+
+    def tokenize(self: "SentenceTokenizer", text: str) -> list[str]:
+        """Splits the input text into its component sentences.
+
+        Examples:
+            >>> tokenizer = SentenceTokenizer()
+            >>> tokenizer.tokenize('Splitting is simple. Almost, anyway!')
+            ['Splitting is simple.', 'Almost, anyway!']
+
+        Args:
+            text: The text whose sentences should be extracted.
+
+        Returns:
+            A list of extracted sentences.
+        """
+        text = self.pattern.sub(r"\1\n\n", text)
+        return [
+            sentence.replace("\n", " ").strip()
+            for sentence in text.split("\n\n")
+            if sentence.strip()
+        ]
+
+
+# constants
+
+PARAGRAPH_SPLIT = re.compile(r"\n{2,}")
+DEFAULT_MODEL = "BAAI/bge-m3-multi"
+
+
+@dataclasses.dataclass(frozen=True)
+class EmbeddedDocumentReference:
+    id: int
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class EmbeddedDocumentPiece:
+    data: EmbedingCache
+    reference: EmbeddedDocumentReference
+
+    @property
+    def vec(self):
+        return self.data.vec
+
+    @property
+    def text(self):
+        return self.data.text
+
+
+@dataclasses.dataclass(frozen=True)
+class DocumentPieceMatch:
+    text: str
+    similarity_score: float
+    reference: EmbeddedDocumentReference
+
+
+class AsyncEmbeddingDatabase:
+    def __init__(self, auth: OpenAIAuthConfig, model: OpenAIEmbeddingModelConfig):
+        self.auth = auth
+        self.model = model
+
+        self.sent_tokenizer = SentenceTokenizer()
+
+        self.dataset: list[EmbeddedDocumentPiece] = []
+
+        self.client = openai.AsyncOpenAI(
+            base_url=self.auth.base_url,
+            api_key=self.auth.api_key,
+        )
+
+    async def add_document_piece(self, input: str | list[str], reference: EmbeddedDocumentReference):
+        embeddings = await self.embed(input)
+
+        if isinstance(embeddings, EmbedingCache):
+            embeddings = [embeddings]
+
+        for embedding in embeddings:
+            self.dataset.append(EmbeddedDocumentPiece(
+                data=embedding,
+                reference=reference
+            ))
+
+    async def add_document(
+        self,
+        text: str,
+        name: str,
+        id: int,
+    ):
+        """
+        breaks the document into smaller pieses and adds them using `self.add_document_piece(...)`
+
+        paragraph level splitting algorithm:
+          - split the text into paragraphs and for each paragraph:
+          - if the paragraph's length is between `min_chunk_size` and `max_chunk_size`, yiled the paragraph
+          - if the paragraph's length is less than `min_chunk_size` add it to the start of the next paragraph
+          - if the paragraph's length is more than `max_chunk_size` split it using `sentence_chunk_split`,
+          and add the remainder to the next paragraph
+
+        params:
+            text: (str) the full text of the document to be porcessed
+            name: (str) the name of the document used for referencing
+            id: (int) the id of the document used for referencing
+
+        returns:
+            None
+        """
+
+        text = text.strip(" \n\r\t")
+
+        chunks = []
+        current_chunk = ""
+        if self.model.sentence_level:
+            chunks, current_chunk = self.sentence_chunk_split(text)
+        else:
+            for paragraph in PARAGRAPH_SPLIT.split(text):
+                current_chunk += paragraph + "\n\n"
+                if self.model.min_chunk_size < len(current_chunk) < self.model.max_chunk_size:
+                    chunks.append(current_chunk)
+                elif len(current_chunk) > self.model.max_chunk_size:
+                    new_chunks, current_chunk = self.sentence_chunk_split(current_chunk)
+                    if new_chunks:
+                        chunks += new_chunks
+                if len(current_chunk) > self.model.min_chunk_size:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+        current_chunk = current_chunk.strip(" \n\r\t")
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        await self.add_document_piece(
+            chunks,
+            reference=EmbeddedDocumentReference(
+                name=name,
+                id=id
+            )
+        )
+
+    def sentence_chunk_split(self, current_chunk: str) -> tuple[list[str], str]:
+        chunks: list[str] = []
+        sentences = []
+        for line in current_chunk.split("\n"):
+            if not line:
+                continue
+            line_sentences = self.sent_tokenizer.tokenize(line)
+            if not line_sentences:
+                continue
+            line_sentences[-1] = line_sentences[-1] + "\n"
+            sentences += line_sentences
+        temp_chunk: str = ""
+        for sentence in sentences:
+            temp_chunk += sentence
+            if not temp_chunk.endswith((" ", "\n", "\n\r", "\t")):
+                temp_chunk += " "
+            while len(temp_chunk) > self.model.max_chunk_size:
+                chunks.append(temp_chunk[:self.model.max_chunk_size])
+                temp_chunk = temp_chunk[self.model.max_chunk_size:]
+            if len(temp_chunk) > self.model.min_chunk_size:
+                chunks.append(temp_chunk)
+                temp_chunk = ""
+        current_chunk = temp_chunk
+        return chunks, current_chunk
+
+    async def embed(self, input: str | list[str]):
+        assert self.model.dimension, "no embedding dimension specified"
+
+        was_unbatched = False
+        if isinstance(input, str):
+            input = [input]
+            was_unbatched = True
+
+        missed_inputs = []
+        results: list[EmbedingCache] = []
+        for input_text in input:
+            try:
+                results.append(EmbedingCache(text=input_text, dim=self.model.dimension))
+            except FileNotFoundError:
+                # cache miss
+                missed_inputs.append(input_text)
+                continue
+
+        if missed_inputs:
+            assert self.model, "no embedding model specified"
+
+            embedding_response = await self.client.embeddings.create(
+                input=missed_inputs,
+                model=self.model.id,
+                dimensions=self.model.dimension,
+                encoding_format="float"
+            )
+
+            for embedding_data, embedding_text in zip(embedding_response.data, missed_inputs):
+                results.append(EmbedingCache(
+                    text=embedding_text,
+                    dim=self.model.dimension,
+                    vec=np.array(embedding_data.embedding, dtype="float16"),
+                ))
+
+        return results[0] if was_unbatched else results
+
+    def similarity(
+        self,
+        query: EmbedingCache,
+        document: EmbeddedDocumentPiece,
+        epsilon: float = 1e-6,
+    ) -> float:
+        assert epsilon != 0.0
+        assert query.vec is not None
+        assert document.vec is not None
+
+        q_dot_docs = (query.vec * document.vec).sum(axis=-1)
+        norm_coeff = np.linalg.norm(query.vec, axis=-1) * np.linalg.norm(document.vec, axis=-1)
+        norm_coeff = np.clip(norm_coeff, a_min=epsilon, a_max=None)  # avoid devision by zero
+
+        return float(q_dot_docs / norm_coeff)
+
+    def search(self, query: EmbedingCache, best_n: int = 10):
+        matches: list[DocumentPieceMatch] = []
+        for document_piece in self.dataset:
+            similarity_score = self.similarity(query, document_piece)
+            matches.append(DocumentPieceMatch(
+                text=document_piece.text,
+                similarity_score=similarity_score,
+                reference=document_piece.reference
+            ))
+        return sorted(matches, key=lambda x: x.similarity_score, reverse=True)[:best_n]
