@@ -191,4 +191,8 @@ last-request.json
 addons/
 
 # uv
-uv.lock
+*.lock
+*.python-version
+
+# vscode
+.vscode/
