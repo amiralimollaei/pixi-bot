@@ -164,7 +164,7 @@ def main():
         help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '256`."
     )
     parser.add_argument(
-        "--embedding-model-sentence-level", "-esent",
+        "--embedding-model-sentence-level",
         action=argparse.BooleanOptionalAction,
         default=False,
         help="whether or not the embedding model is a sentence level embedding model, Default is 'False`."
