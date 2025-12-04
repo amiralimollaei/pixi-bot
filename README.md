@@ -42,7 +42,7 @@ you have to install at least one of the dependecy groups for a social media plat
 ```sh
 git clone https://github.com/amiralimollaei/pixi-bot.git
 cd pixi-bot
-pip install .[image,audio,discord,telegram]
+pip install .[media,discord,telegram]
 ```
 
 ### Installation using UV
