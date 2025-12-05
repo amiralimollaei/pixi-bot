@@ -33,6 +33,8 @@ class APIBase:
         self.api_key = api_key
         self.api_key_key = api_key_key
 
+        self.client = httpx.AsyncClient(trust_env=False)
+
     async def request(self, url: str, data: Optional[dict] = None) -> str | dict | list:
         api_key_data = {self.api_key_key: self.api_key} if self.api_key else dict()
         if data is None:
@@ -40,12 +42,12 @@ class APIBase:
         else:
             data = data | api_key_data
         params = {k: v for k, v in data.items() if v is not None}
-        async with httpx.AsyncClient() as session:
-            resp = await session.get(os.path.join(self.base, url), params=params)
-            content = resp.read().strip(b"\n").strip(b" ")
-            if content.startswith(b"{") and content.endswith(b"}"):
-                return json.loads(content)
-            elif content.startswith(b"[") and content.endswith(b"]"):
-                return json.loads(content)
-            else:
-                return content.decode("utf-8")
+
+        resp = await self.client.get(os.path.join(self.base, url), params=params)
+        content = resp.read().strip(b"\n").strip(b" ")
+        if content.startswith(b"{") and content.endswith(b"}"):
+            return json.loads(content)
+        elif content.startswith(b"[") and content.endswith(b"]"):
+            return json.loads(content)
+        else:
+            return content.decode("utf-8")

@@ -6,9 +6,10 @@ import os
 import re
 
 import aiofiles
-import zstandard
-import openai
+import httpx
 import numpy as np
+import openai
+import zstandard
 
 from .caching import EmbedingCache
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
@@ -264,6 +265,8 @@ class AsyncEmbeddingDatabase:
         self.client = openai.AsyncOpenAI(
             base_url=self.auth.base_url,
             api_key=self.auth.api_key,
+            # don't use proxies from environment variables
+            http_client=httpx.AsyncClient(trust_env=False),
         )
 
     async def add_document_piece(self, input: str | list[str], reference: EmbeddedDocumentReference):
