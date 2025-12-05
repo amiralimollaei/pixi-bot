@@ -29,14 +29,20 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 ## Getting Started
 
-there are 4 extra optional dependecy groups that you may need to install based on your own needs:
+there are many extra optional dependecy groups that you may need to install based on your own needs, for simplicity, this guide shows you how to install all modules at once.
 
-- media: installs PyAV and enables media caching and processing features
-- pandoc: enables converting documents from many types to readable text to be processed by the LLM, make sure you have [Pandoc](https://pandoc.org/installing.html) installed.
-- discord: installs discord.py and enables discord bot functionality
-- telegram: installs python-telegram-bot and enables telegram bot functionality
+| extra dependecy group | packages | description | status |
+|---|---|---|:---:|
+| media | av>=16.0.0 | installs PyAV and enables media caching and processing features | optional |
+| pandoc | pandoc>=2.4 | enables converting documents from many types to readable text to be processed by the LLM, currently used only for mediawiki searches, make sure you have [Pandoc](https://pandoc.org/installing.html) installed. | optional |
+| discord | discord-py>=2.6.4 | installs discord.py and enables discord bot functionality | optional\* |
+| telegram | python-telegram-bot>=22.5 | installs python-telegram-bot and enables telegram bot functionality | optional\* |
 
-you have to install at least one of the dependecy groups for a social media platform, this guide shows you how to install all modules at once
+> \[\*\] you have to install at least one of these dependecy groups for the bot to function
+
+You should also have your own OpenAI compatible API URL and API Key and provide that to pixi, using the command line interface and/or environment variables
+and you should also choose a large langauge model to use for the bot and optionally a seperate one for agentic tools, e.g. online/offline search tools, based on my testing, it works best with `google/gemini-2.0-flash-001`
+optionally you may also choose an embedding model to process web search or offline search content, works best with `BAAI/bge-m3-multi`
 
 ### Installation using PIP
 
