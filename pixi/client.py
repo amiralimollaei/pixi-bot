@@ -15,6 +15,13 @@ from .enums import ChatRole, Messages, Platform
 from .reflection import ReflectionAPI, ReflectionMessageBase
 from .addon import AddonManager
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
+from .database import AsyncEmbeddingDatabase
+
+pandoc = None
+try:
+    import pandoc
+except ImportError:
+    logging.warning("pandoc is not installed, for the best experience with wiki search tools, please install pandoc.")
 
 
 # constants
@@ -248,13 +255,27 @@ class PixiClient:
             if ids is None:
                 return "no result: no id specified"
 
-            agent = self.create_agent_instance(
-                agent=RetrievalAgent,
-                context=await asyncio.gather(*[
-                    get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
+            if self.embedding_model:
+                embedding_database = AsyncEmbeddingDatabase(self.auth, self.embedding_model)
+                entries = await asyncio.gather(*[
+                    database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
-            )
-            return await agent.execute_query(query)
+                for entry in entries:
+                    await embedding_database.add_document(entry.content, entry.title, entry.id)
+                query_embed = await embedding_database.embed(query)
+                matches = [
+                    asdict(doc_match)
+                    for doc_match in embedding_database.search(query_embed)  # pyright: ignore[reportArgumentType]
+                ]
+                return matches
+            else:
+                agent = self.create_agent_instance(
+                    agent=RetrievalAgent,
+                    context=await asyncio.gather(*[
+                        get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
+                    ])
+                )
+                return await agent.execute_query(query)
 
         self.register_tool(
             name=f"query_{database_name}_database",
@@ -274,7 +295,7 @@ class PixiClient:
                 required=["query", "ids"],
                 additionalProperties=False
             ),
-            description=f"runs an LLM agent to fetch and query the contents of the {database_name} database using the entry ids for finding relevent entries and a more detailed query for finding relevent information, note that this will not return all the information that the page contains, you might need to use this command multiple times to get all the information out of the database entry."
+            description=f"fetch and retrieve relevent information from the content of the {database_name} database based on a query."
         )
 
     def register_mediawiki_tools(self, url: str, wiki_name: str):
@@ -283,6 +304,17 @@ class PixiClient:
             return
 
         wiki_api = AsyncWikimediaAPI(url)
+
+        async def fetch_wiki_page(title: str) -> tuple[str, str]:
+            title = title.strip()
+            mediawiki_raw = await wiki_api.get_raw(title)
+
+            if pandoc:
+                doc = pandoc.read(mediawiki_raw, format="mediawiki")
+                markdown_raw = pandoc.write(doc, format="markdown")
+                return (markdown_raw, title) # pyright: ignore[reportReturnType]
+
+            return (mediawiki_raw, title)
 
         async def search_wiki(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
             return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
@@ -305,18 +337,31 @@ class PixiClient:
         )
 
         async def query_wiki_content(instance: AsyncChatbotInstance, reference: ChatMessage, titles: str, query: str):
-            if titles.split("|") is None:
+            if not titles:
+                return "no result: no page specified"
+            if (_titles := titles.split("|")) is None:
                 return "no result: no page specified"
 
             context = await asyncio.gather(*[
-                wiki_api.get_raw(t.strip()) for t in titles.split("|")
+                fetch_wiki_page(t) for t in _titles
             ])
 
-            agent = self.create_agent_instance(
-                agent=RetrievalAgent,
-                context=context
-            )
-            return await agent.execute_query(query)
+            if self.embedding_model:
+                embedding_database = AsyncEmbeddingDatabase(self.auth, self.embedding_model)
+                for i, (page, title) in enumerate(context):
+                    await embedding_database.add_document(page, title, i)
+                query_embed = await embedding_database.embed(query)
+                matches = [
+                    asdict(doc_match)
+                    for doc_match in embedding_database.search(query_embed)  # pyright: ignore[reportArgumentType]
+                ]
+                return matches
+            else:
+                agent = self.create_agent_instance(
+                    agent=RetrievalAgent,
+                    context=[page for page, title in context]
+                )
+                return await agent.execute_query(query)
 
         self.register_tool(
             name=f"query_wiki_content_{wiki_name}",
@@ -326,7 +371,7 @@ class PixiClient:
                 properties=dict(
                     query=dict(
                         type="string",
-                        description=f"A question or a statement that you want to find information about.",
+                        description=f"A statement that is searched inside the content of the wiki, the query should be discriptive and clearly describe what you're searching for.",
                     ),
                     titles=dict(
                         type="string",
@@ -336,9 +381,7 @@ class PixiClient:
                 required=["query", "titles"],
                 additionalProperties=False
             ),
-            description=f"runs an LLM agent to fetch and retrieve relevent information from the contents of the {wiki_name} wiki. \
-                This will not return all the information that the page contains, you might need to use this command multiple \
-                times to find the information you're looking for."
+            description=f"fetch wiki content and retrieve relevent information from them based on a query."
         )
 
     def __register_discord_specific_tools(self):

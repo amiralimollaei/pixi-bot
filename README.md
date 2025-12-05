@@ -29,9 +29,10 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 ## Getting Started
 
-there are 3 extra optional dependecy groups that you may need to install based on your own needs:
+there are 4 extra optional dependecy groups that you may need to install based on your own needs:
 
 - media: installs PyAV and enables media caching and processing features
+- pandoc: enables converting documents from many types to readable text to be processed by the LLM, make sure you have [Pandoc](https://pandoc.org/installing.html) installed.
 - discord: installs discord.py and enables discord bot functionality
 - telegram: installs python-telegram-bot and enables telegram bot functionality
 

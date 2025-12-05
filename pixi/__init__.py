@@ -149,7 +149,7 @@ def main():
         "--embedding-model-split-size", "-esplit",
         type=int,
         default=1024,
-        help="Split size to use for the embedding chunk tokenizer, Default is '1024`."
+        help="Split size to use for the embedding chunk tokenizer, Default is '512`."
     )
     parser.add_argument(
         "--embedding-model-min-size", "-emin",
@@ -160,8 +160,8 @@ def main():
     parser.add_argument(
         "--embedding-model-max-size", "-emax",
         type=int,
-        default=256,
-        help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '256`."
+        default=4096,
+        help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '4096`."
     )
     parser.add_argument(
         "--embedding-model-sentence-level",
@@ -255,7 +255,7 @@ def main():
     helper_model = OpenAILanguageModelConfig(
         id=args.helper_model,
         max_context=args.helper_model_max_context,
-    ) if args.helper_model else model
+    ) if args.helper_model else None
 
     embedding_model = OpenAIEmbeddingModelConfig(
         id=args.embedding_model,
@@ -265,7 +265,7 @@ def main():
         min_chunk_size=args.embedding_model_min_size,
         max_chunk_size=args.embedding_model_max_size,
         sentence_level=args.embedding_model_sentence_level,
-    )
+    ) if args.embedding_model else None
 
     features = PixiFeatures(0)
     if args.tool_calling:

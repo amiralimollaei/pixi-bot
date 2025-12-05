@@ -289,7 +289,7 @@ class AsyncEmbeddingDatabase:
 
         paragraph level splitting algorithm:
           - split the text into paragraphs and for each paragraph:
-          - if the paragraph's length is between `min_chunk_size` and `max_chunk_size`, yiled the paragraph
+          - if the paragraph's length is between `min_chunk_size` and `max_chunk_size`, yield the paragraph
           - if the paragraph's length is less than `min_chunk_size` add it to the start of the next paragraph
           - if the paragraph's length is more than `max_chunk_size` split it using `sentence_chunk_split`,
           and add the remainder to the next paragraph
@@ -314,6 +314,7 @@ class AsyncEmbeddingDatabase:
                 current_chunk += paragraph + "\n\n"
                 if self.model.min_chunk_size < len(current_chunk) < self.model.max_chunk_size:
                     chunks.append(current_chunk)
+                    current_chunk = ""
                 elif len(current_chunk) > self.model.max_chunk_size:
                     new_chunks, current_chunk = self.sentence_chunk_split(current_chunk)
                     if new_chunks:
