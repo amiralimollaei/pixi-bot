@@ -1,10 +1,10 @@
 import logging
 import asyncio
 import os
-from typing import IO, Callable, Sequence
+from typing import Callable
 
 import telegram
-from telegram.constants import ChatType, ChatAction, ChatMemberStatus
+from telegram.constants import ChatType, ChatMemberStatus
 from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
 
 
@@ -12,11 +12,17 @@ from .message.telegram import TelegramReflectionMessage
 from ..caching.base import MediaCache, UnsupportedMediaException
 from ..enums import Platform, Messages
 
+ImageCache = None
+try:
+    from ..caching import ImageCache
+except ImportError:
+    pass
+
 
 class TelegramReflectionAPI:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         self.platform = Platform.TELEGRAM
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -108,12 +114,11 @@ class TelegramReflectionAPI:
                 break
 
     async def get_user_avatar(self, user_id: int) -> MediaCache | None:
-        from ..caching import ImageCache
-
         try:
             file = await self.application.bot.get_user_profile_photos(user_id)
             if file.photos:
                 photo = file.photos[0][-1]  # Get the highest resolution photo
+                assert ImageCache
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
                 return ImageCache(bytes(image_bytes))
         except telegram.error.BadRequest as e:

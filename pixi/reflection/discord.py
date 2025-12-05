@@ -12,6 +12,12 @@ from .message.discord import DiscordReflectionMessage
 from ..caching.base import MediaCache, UnsupportedMediaException
 from ..enums import Platform
 
+ImageCache = None
+try:
+    from ..caching import ImageCache
+except ImportError:
+    pass
+
 
 class DiscordReflectionAPI:
     def __init__(self):
@@ -183,12 +189,11 @@ class DiscordReflectionAPI:
         """
         Fetches the avatar of a user and returns it as an ImageCache object.
         """
-        from ..caching import ImageCache
-
         try:
             user = await self.bot.fetch_user(user_id)
             if user is None or user.avatar is None:
-                raise UnsupportedMediaException("User avatar not found or unsupported media type.")
+                raise UnsupportedMediaException("User avatar not found or has an unsupported media type.")
+            assert ImageCache
             avatar_bytes = await user.avatar.read()
             return ImageCache(avatar_bytes)
         except discord.NotFound:
