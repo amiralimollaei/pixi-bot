@@ -49,7 +49,7 @@ optionally you may also choose an embedding model to process web search or offli
 ```sh
 git clone https://github.com/amiralimollaei/pixi-bot.git
 cd pixi-bot
-pip install .[media,discord,telegram]
+pip install .[pandoc,media,discord,telegram]
 ```
 
 ### Installation using UV
