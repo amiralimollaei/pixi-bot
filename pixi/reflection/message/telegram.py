@@ -5,6 +5,17 @@ from telegram.constants import ChatAction, ChatType as TChatType
 from . import ReflectionMessageBase, ReflectionMessageAuthor, ReflectionEnvironment, ChatType, Platform
 from ...caching.base import MediaCache
 
+ImageCache = None
+AudioCache = None
+try:
+    from ...caching import ImageCache
+except ImportError:
+    pass
+try:
+    from ...caching import AudioCache
+except ImportError:
+    pass
+
 
 class TelegramReflectionMessage(ReflectionMessageBase):
     origin: telegram.Message
@@ -62,8 +73,6 @@ class TelegramReflectionMessage(ReflectionMessageBase):
         return await self.origin.chat.send_chat_action(ChatAction.TYPING)
 
     async def fetch_images(self) -> list[MediaCache]:
-        from ...caching import ImageCache
-
         origin: telegram.Message = self.origin
 
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
@@ -79,12 +88,11 @@ class TelegramReflectionMessage(ReflectionMessageBase):
             file = await origin.document.get_file()
             image_bytes = await file.download_as_bytearray()
         if image_bytes:
+            assert ImageCache
             attachments.append(ImageCache(bytes(image_bytes)))
         return attachments
 
     async def fetch_audio(self) -> list[MediaCache]:
-        from ...caching import AudioCache
-
         origin = self.origin
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
@@ -109,6 +117,7 @@ class TelegramReflectionMessage(ReflectionMessageBase):
             file = await origin.document.get_file()
             audio_bytes = await file.download_as_bytearray()
         if audio_bytes:
+            assert AudioCache
             attachments.append(AudioCache(bytes(audio_bytes)))
         return attachments
 

@@ -1,9 +1,19 @@
 import logging
-from typing import IO
 import discord
 
 from . import ReflectionMessageBase, ReflectionMessageAuthor, ReflectionEnvironment, ChatType, Platform
 from ...caching.base import MediaCache
+
+ImageCache = None
+AudioCache = None
+try:
+    from ...caching import ImageCache
+except ImportError:
+    pass
+try:
+    from ...caching import AudioCache
+except ImportError:
+    pass
 
 
 class DiscordReflectionMessage(ReflectionMessageBase):
@@ -90,20 +100,17 @@ class DiscordReflectionMessage(ReflectionMessageBase):
         if isinstance(self.origin, discord.Interaction):
             return []
 
-        from ...caching import ImageCache
-
         supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
         for attachment in self.origin.attachments:
             if attachment.content_type in supported_mime_types:
+                assert ImageCache
                 attachments.append(ImageCache(await attachment.read()))
         return attachments
 
     async def fetch_audio(self) -> list[MediaCache]:
         if isinstance(self.origin, discord.Interaction):
             return []
-
-        from ...caching import AudioCache
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
         supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
@@ -113,6 +120,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
             ext = attachment.filename.lower().rsplit('.', 1)[-1] if '.' in attachment.filename else ''
             ext = f'.{ext}'
             if (mime and mime in supported_mime_types) or (ext in supported_extensions):
+                assert AudioCache
                 attachments.append(AudioCache(await attachment.read()))
         return attachments
 
