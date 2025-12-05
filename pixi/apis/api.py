@@ -20,10 +20,9 @@ class APIBase:
         KeyError: If the base URL is None or if the API key is not provided and the environment variable is not set.
     """
 
-    def __init__(self, base, api_key_env_var: Optional[str] = None, api_key: Optional[str] = None, api_key_key: str = "api_key"):
+    def __init__(self, base: str | None , api_key_env_var: Optional[str] = None, api_key: Optional[str] = None, api_key_key: str = "api_key"):
+        assert base, f"base url is not valid, got \"{base}\""
         self.base = base
-        if self.base is None:
-            raise KeyError("base must not be None.")
 
         if api_key_env_var:
             api_key = api_key or os.getenv(api_key_env_var)
