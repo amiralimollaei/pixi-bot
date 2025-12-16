@@ -11,12 +11,9 @@ import numpy as np
 import openai
 import zstandard
 
+from .utils import PixiPaths
 from .caching import EmbedingCache
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
-
-# constants
-
-BASE_DIR = "datasets"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -140,14 +137,14 @@ class DirectoryDatabase:
     async def from_directory(cls, directory: str):
         assert directory
 
-        full_dir = os.path.join(BASE_DIR, directory)
+        full_dir = cls.get_dataset_directory(directory)
 
         if not os.path.isdir(full_dir):
             dataset = DocumentDataset()
             return cls(directory=directory, dataset=dataset)
 
         data = dict()
-        for file in glob(os.path.join(full_dir, "*.zst")):
+        for file in glob(str(full_dir / "*.zst")):
             async with aiofiles.open(file, mode='rb') as f:
                 json_data = zstandard.decompress(await f.read())
                 entry_data = json.loads(json_data)
@@ -161,23 +158,26 @@ class DirectoryDatabase:
         dataset = DocumentDataset(data)
         return cls(directory=directory, dataset=dataset)
 
+    @classmethod
+    def get_dataset_directory(cls, directory):
+        return PixiPaths.datasets() / directory
+
     def clear(self):
-        full_dir = os.path.join(BASE_DIR, self.directory)
-        for file in glob(os.path.join(full_dir, "*.zst")):
+        full_dir = DirectoryDatabase.get_dataset_directory(self.directory)
+        for file in glob(str(full_dir / "*.zst")):
             if os.path.isfile(file):
                 os.remove(file)
 
     async def save(self):
         assert self.dataset, "dataset is not initialized, nothing to save"
 
-        full_dir = os.path.join(BASE_DIR, self.directory)
+        full_dir = DirectoryDatabase.get_dataset_directory(self.directory)
 
         os.makedirs(full_dir, exist_ok=True)
 
         for entry in self.dataset.data.values():
             entry_hash = self.get_entry_hash(entry).hexdigest()
-            filepath = os.path.join(full_dir, f"{entry_hash}.zst")
-            async with aiofiles.open(filepath, mode='wb') as f:
+            async with aiofiles.open(full_dir / f"{entry_hash}.zst", mode='wb') as f:
                 json_data = json.dumps(dict(
                     title=entry.title,
                     content=entry.content,

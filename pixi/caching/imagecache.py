@@ -4,19 +4,19 @@ from typing import Optional
 
 import av
 
+from ..utils import PixiPaths
 from .base import MediaCache, CompressedMedia
 
 
 # constants
 
-CACHE_DIR = os.path.join(".cache", "images")
 THUMBNAIL_SIZE = 512
 
 
 class ImageCache(MediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None):
         super().__init__(
-            CACHE_DIR,
+            str(PixiPaths.cache() / "images"),
             format="jpg",
             mime_type="image/jpeg",
             data_bytes=data_bytes,

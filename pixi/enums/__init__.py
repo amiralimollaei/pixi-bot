@@ -13,7 +13,8 @@ class ChatRole(StrEnum):
     ASSISTANT = "assistant"
     USER = "user"
     TOOL = "tool"
-    
+
+
 class ChatType(StrEnum):
     PRIVATE = "private"
     GROUP = "group"

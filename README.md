@@ -34,7 +34,6 @@ there are many extra optional dependecy groups that you may need to install base
 | extra dependecy group | packages | description | status |
 |---|---|---|:---:|
 | media | av>=16.0.0 | installs PyAV and enables media caching and processing features | optional |
-| pandoc | pandoc>=2.4 | enables converting documents from many types to readable text to be processed by the LLM, currently used only for mediawiki searches, make sure you have [Pandoc](https://pandoc.org/installing.html) installed. | optional |
 | discord | discord-py>=2.6.4 | installs discord.py and enables discord bot functionality | optional\* |
 | telegram | python-telegram-bot>=22.5 | installs python-telegram-bot and enables telegram bot functionality | optional\* |
 
@@ -49,7 +48,7 @@ optionally you may also choose an embedding model to process web search or offli
 ```sh
 git clone https://github.com/amiralimollaei/pixi-bot.git
 cd pixi-bot
-pip install .[pandoc,media,discord,telegram]
+pip install .[media,discord,telegram]
 ```
 
 ### Installation using UV
@@ -62,10 +61,10 @@ uv sync --all-extras
 
 ### Setup Environment Variables
 
-- Create a `.env` file and set `OPENAI_API_KEY` to your API provider's API Key (prevously was `DEEPINFRA_API_KEY`)
+- Create a `.env` file and set `OPENAI_API_KEY` to your API provider's API Key
 - Set `DISCORD_BOT_TOKEN` and/or `TELEGRAM_BOT_TOKEN` environment variables
 - Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
-- Optionally set `GIPHY_API_KEY` for GIF search features
+- Optionally set `TENOR_API_KEY` for GIF search features powered by Tenor
 
 ### Runninig The Bot
 

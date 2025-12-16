@@ -4,12 +4,13 @@ from typing import Optional
 
 import av
 
+from ..utils import PixiPaths
+
 from .base import MediaCache, CompressedMedia, UnsupportedMediaException
 
 
 # constants
 
-CACHE_DIR = os.path.join(".cache", "audio")
 CACHE_SAMPLERATE = 16000
 CACHE_BITRATE = 32000
 CACHE_MAX_DURATION = 30
@@ -19,7 +20,7 @@ class AudioCache(MediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None, strict: bool = False):
         self.strict = strict
         super().__init__(
-            CACHE_DIR,
+            str(PixiPaths.cache() / "audio"),
             format="aac",
             mime_type="audio/aac",
             data_bytes=data_bytes,

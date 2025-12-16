@@ -4,10 +4,7 @@ from typing import Optional
 
 import numpy as np
 
-
-# constants
-CACHE_DIR = os.path.join(".cache", "embeddings")
-os.makedirs(CACHE_DIR, exist_ok=True)
+from ..utils import PixiPaths
 
 
 class EmbedingCache:
@@ -22,11 +19,14 @@ class EmbedingCache:
         self.dim = dim
         self.vec = vec
 
+        cache_dir = PixiPaths.cache() / "embeddings"
+
         if self.vec is None:
             # loads the cached vector
             self.load()
         else:
             # caches the vector
+            os.makedirs(cache_dir, exist_ok=True)
             self.save()
 
     @property
@@ -35,7 +35,7 @@ class EmbedingCache:
 
     @staticmethod
     def get_save_path(hash: str):
-        return os.path.join(CACHE_DIR, f"{hash}.npz")
+        return str(PixiPaths.cache() / "embeddings" / f"{hash}.npz")
 
     def save(self):
         assert self.vec is not None

@@ -25,9 +25,6 @@ class AsyncWikimediaAPI(APIBase):
             data=data
         )  # type: ignore
 
-    async def indexphp_request(self, **kwargs) -> str:
-        return await self.request("index.php", data=kwargs)  # type: ignore
-
     async def search(self, srsearch: str) -> list[WikiMediaSearchResult]:
         resp = await self.apiphp_request(
             action="query",
@@ -87,12 +84,6 @@ class AsyncWikimediaAPI(APIBase):
 
         return results
 
-    async def get_raw(self, title: str) -> str:
-        return await self.indexphp_request(
-            title=title,
-            action="raw",
-        )
-
     async def get_info(self, titles: Optional[str] = None, pageids: Optional[str] = None):
         return await self.apiphp_request(
             action="query",
@@ -115,3 +106,14 @@ class AsyncWikimediaAPI(APIBase):
             prop="wikitext",
             contentmodel="wikitext"
         )
+    
+    async def get_plaintext(self, title: str) -> tuple[str, str]:
+        result: dict = await self.apiphp_request(
+            action="query",
+            prop="extracts",
+            explaintext=1,
+            format="json",
+            titles=title
+        ) # pyright: ignore[reportAssignmentType]
+        pagecontent = result["query"]["pages"][0]
+        return pagecontent["extract"], pagecontent["title"]

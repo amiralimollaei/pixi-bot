@@ -1,5 +1,6 @@
 
 import os
+from pathlib import Path
 
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
 from .enums import Platform
@@ -7,6 +8,7 @@ from .enums import Platform
 
 def run(
     platform: Platform,
+    pixi_directory: str | Path,
     *,
     auth: OpenAIAuthConfig,
     model: OpenAILanguageModelConfig,
@@ -16,6 +18,10 @@ def run(
     environment_filter: IdFilter = IdFilter.allow(),
     database_names: list[str] | None = None,
 ):
+    from .utils import PixiPaths, copy_default_resources
+    PixiPaths.set_root(pixi_directory)
+    copy_default_resources()
+    
     from .client import PixiClient
     
     PixiClient(
@@ -79,6 +85,13 @@ def main():
         choices=[p.name.lower() for p in Platform],
         required=True,
         help="Platform to run the bot on."
+    )
+    parser.add_argument(
+        "--pixi-directory", "-pd",
+        type=str,
+        choices=[p.name.lower() for p in Platform],
+        default="~/.pixi/",
+        help="The root directory for configuration files, addons, userdata, assets and cache, defaults to \"~/.pixi/\""
     )
     parser.add_argument(
         "--log-level", "-l",
@@ -288,6 +301,7 @@ def main():
 
     return run(
         Platform[args.platform.upper()],
+        pixi_directory=args.pixi_directory,
         auth=auth,
         model=model,
         helper_model=helper_model,

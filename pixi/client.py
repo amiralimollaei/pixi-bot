@@ -17,12 +17,6 @@ from .addon import AddonManager
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
 from .database import AsyncEmbeddingDatabase
 
-pandoc = None
-try:
-    import pandoc
-except ImportError:
-    logging.warning("pandoc is not installed, for the best experience with wiki search tools, please install pandoc.")
-
 
 # constants
 
@@ -306,15 +300,8 @@ class PixiClient:
         wiki_api = AsyncWikimediaAPI(url)
 
         async def fetch_wiki_page(title: str) -> tuple[str, str]:
-            title = title.strip()
-            mediawiki_raw = await wiki_api.get_raw(title)
-
-            if pandoc:
-                doc = pandoc.read(mediawiki_raw, format="mediawiki")
-                markdown_raw = pandoc.write(doc, format="markdown")
-                return (markdown_raw, title) # pyright: ignore[reportReturnType]
-
-            return (mediawiki_raw, title)
+            page_content, title = await wiki_api.get_plaintext(title.strip())
+            return (page_content, title)
 
         async def search_wiki(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
             return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
@@ -371,7 +358,7 @@ class PixiClient:
                 properties=dict(
                     query=dict(
                         type="string",
-                        description=f"A statement that is searched inside the content of the wiki, the query should be discriptive and clearly describe what you're searching for.",
+                        description=f"A statement that is searched inside the content of the wiki, it should clearly name what you're looking for, example: \"how to craft an arrow?\" not \"how to craft it\" and not \"craft\"",
                     ),
                     titles=dict(
                         type="string",

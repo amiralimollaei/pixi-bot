@@ -11,10 +11,7 @@ import os
 from .chatting import AsyncChatClient, ChatMessage, ChatRole
 from .commands import AsyncCommandManager
 from .typing import AsyncFunction, AsyncPredicate, Optional
-from .utils import exists, open_resource
-
-# constants
-SAVE_PATH = "./storage/userdata"
+from .utils import PixiPaths, exists, open_resource
 
 
 @dataclass
@@ -65,7 +62,7 @@ class PredicateCommand:
 
 def get_instance_save_path(id: str, hash_prefix: str):
     uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
-    path = os.path.join(SAVE_PATH, f"{hash_prefix}_{uuid_hash}.json")
+    path = str(PixiPaths.userdata() / f"{hash_prefix}_{uuid_hash}.json")
     return path
 
 
@@ -95,10 +92,10 @@ class AsyncChatbotInstance:
 
         # load resources
         self.persona = AssistantPersona.from_dict(
-            json.load(open_resource(resource_folder, "persona.json", "r"))
+            json.load(open_resource("persona.json", "r"))
         )
-        self.system_prompt: str = open_resource(resource_folder, "system.md", "r").read()
-        self.examples: str = open_resource(resource_folder, "examples.txt", "r").read()
+        self.system_prompt: str = open_resource("system.md", "r").read()
+        self.examples: str = open_resource("examples.txt", "r").read()
 
         self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
 
@@ -227,7 +224,7 @@ class AsyncChatbotInstance:
         )
 
     def save(self):
-        os.makedirs(SAVE_PATH, exist_ok=True)
+        os.makedirs(PixiPaths.userdata(), exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
             f.write(json.dumps(self.to_dict(), ensure_ascii=False))
 
