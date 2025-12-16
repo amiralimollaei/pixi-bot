@@ -59,8 +59,8 @@ source .venv/bin/activate
 ### Standalone CLI Using UVX (Recommended)
 
 ```sh
-# installs pixi-bot from pypi, updates it, and runs pixi-cli
-uvx --from pixi-bot[discord,telegram,media] pixi-cli -p [platform] [options]
+# installs pixi-bot from pypi, updates it, and runs it
+uvx pixi-bot[discord,telegram,media]@latest -p [platform] [options]
 ```
 
 ### Installation using PIP
