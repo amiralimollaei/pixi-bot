@@ -30,5 +30,6 @@ discord = [
     "discord-py>=2.6.4"
 ]
 
-[tool.setuptools]
-py-modules = ['pixi']
+[tool.setuptools.packages.find]
+where = ["."]
+
