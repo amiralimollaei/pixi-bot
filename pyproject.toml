@@ -1,6 +1,6 @@
 [project]
 name = "pixi-bot"
-version = "1.1.0"
+version = "1.1.1"
 description = "A modular and multiplatform AI chatbot"
 readme = "README.md"
 requires-python = ">=3.11"
