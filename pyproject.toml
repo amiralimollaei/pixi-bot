@@ -1,5 +1,5 @@
 [project]
-name = "pixi"
+name = "pixi-bot"
 version = "1.1.0"
 description = "A modular and multiplatform AI chatbot"
 readme = "README.md"
