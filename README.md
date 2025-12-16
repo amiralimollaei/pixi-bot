@@ -6,7 +6,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 ## Features
 
-- **Multi-platform Support:** Works with Discord and Telegram out of the box.
+- **Multi-Platform Support:** Works with Discord and Telegram out of the box.
 - **Multi-Instance Support:** Run multiple instances with completely different configurations in parallel.
 - **Tool Calling:** Supports calling external tools and APIs from chat.
 - **Advanced Logging:** Colored logging, Supports logging tool calls and extra information for debugging.
@@ -27,7 +27,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - discord-py>=2.6.4 (optional, for discord platform)
 - python-telegram-bot>=22.5  (optional, for telegram platform)
 - av>=16.0.0 (optional, for media caching)
-- uv (recomended, for setting up all the requirements easily in a python virtual environemnt)
+- uv (recommended, for setting up all the requirements easily in a python virtual environemnt)
 
 ## Getting Started
 
@@ -45,20 +45,20 @@ You should also have your own OpenAI compatible API URL and API Key and provide 
 and you should also choose a large langauge model to use for the bot and optionally a seperate one for agentic tools, e.g. online/offline search tools, based on my testing, it works best with `google/gemini-2.0-flash-001`, works best with agentic models.
 optionally you may also choose an embedding model to process web search or offline search content, works best with `BAAI/bge-m3-multi` but you can use any other model.
 
+### Installation using UV (Recommended)
+
+```sh
+git clone https://github.com/amiralimollaei/pixi-bot.git
+cd pixi-bot
+uv sync --all-extras
+```
+
 ### Installation using PIP
 
 ```sh
 git clone https://github.com/amiralimollaei/pixi-bot.git
 cd pixi-bot
 pip install .[media,discord,telegram]
-```
-
-### Installation using UV
-
-```sh
-git clone https://github.com/amiralimollaei/pixi-bot.git
-cd pixi-bot
-uv sync --all-extras
 ```
 
 ### Setup Environment Variables
@@ -70,10 +70,10 @@ uv sync --all-extras
 
 ### Runninig The Bot
 
-- discord: `pixi-cli -p discord [options]`
-- telegram: `pixi-cli -p telegram [options]`
+- Discord: `pixi-cli -p discord [options]`
+- Telegram: `pixi-cli -p telegram [options]`
 
-> NOTE: if you've installed this project using UV you should run `uv run pixi-cli` instead of just `pixi-cli`
+> NOTE: if you've installed this project using UV you can run `uv run pixi-cli` instead
 > or run `source ./venv/bin/activate` before running the above commands
 
 ## CLI Usage
