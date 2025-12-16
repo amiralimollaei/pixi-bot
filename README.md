@@ -10,7 +10,8 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - **Tool calling:** Supports calling external tools and APIs from chat.
 - **Image support:** Can recieve, compress and cache images.
 - **Audio support:** Can recieve, compress and cache audio.
-- **Persona configuration:** Easily modify the bot's persona and behavior.
+- **Configurable:** Easily modify the bot's persona and behavior.
+- **Multi-Instance:** Run multiple instances with completely different configurations in parallel.
 - **Addon Support:** Easily add new commands, tools, or other integrations (WIP, API is unstable and documentation is pending).
 - **Environment variable:** Securely manage API keys and tokens with dotenv support.
 
