@@ -6,14 +6,15 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 ## Features
 
-- **Multi-platform support:** Works with Discord and Telegram out of the box.
-- **Tool calling:** Supports calling external tools and APIs from chat.
-- **Image support:** Can recieve, compress and cache images.
-- **Audio support:** Can recieve, compress and cache audio.
+- **Multi-platform Support:** Works with Discord and Telegram out of the box.
+- **Multi-Instance Support:** Run multiple instances with completely different configurations in parallel.
+- **Tool Calling:** Supports calling external tools and APIs from chat.
+- **Advanced Logging:** Colored logging, Supports logging tool calls and extra information for debugging.
+- **Image Support:** Can recieve, compress and cache all image formats.
+- **Audio Support:** Can recieve, compress and cache all audio formats.
 - **Configurable:** Easily modify the bot's persona and behavior.
-- **Multi-Instance:** Run multiple instances with completely different configurations in parallel.
 - **Addon Support:** Easily add new commands, tools, or other integrations (WIP, API is unstable and documentation is pending).
-- **Environment variable:** Securely manage API keys and tokens with dotenv support.
+- **Dotenv Support:** Securely manage API keys and tokens with environment variables.
 
 ## Requirements
 
@@ -26,11 +27,11 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - discord-py>=2.6.4 (optional, for discord platform)
 - python-telegram-bot>=22.5  (optional, for telegram platform)
 - av>=16.0.0 (optional, for media caching)
-- uv (optional, for setting up the requirements automatically in a venv)
+- uv (recomended, for setting up all the requirements easily in a python virtual environemnt)
 
 ## Getting Started
 
-there are many extra optional dependecy groups that you may need to install based on your own needs, for simplicity, this guide shows you how to install all modules at once.
+There are many extra optional dependecy groups that you may need to install based on your own needs, for simplicity, this guide shows you how to install all modules at once.
 
 | extra dependecy group | packages | description | status |
 |---|---|---|:---:|
@@ -41,8 +42,8 @@ there are many extra optional dependecy groups that you may need to install base
 > \[\*\] you have to install at least one of these dependecy groups for the bot to function
 
 You should also have your own OpenAI compatible API URL and API Key and provide that to pixi, using the command line interface and/or environment variables
-and you should also choose a large langauge model to use for the bot and optionally a seperate one for agentic tools, e.g. online/offline search tools, based on my testing, it works best with `google/gemini-2.0-flash-001`
-optionally you may also choose an embedding model to process web search or offline search content, works best with `BAAI/bge-m3-multi`
+and you should also choose a large langauge model to use for the bot and optionally a seperate one for agentic tools, e.g. online/offline search tools, based on my testing, it works best with `google/gemini-2.0-flash-001`, works best with agentic models.
+optionally you may also choose an embedding model to process web search or offline search content, works best with `BAAI/bge-m3-multi` but you can use any other model.
 
 ### Installation using PIP
 
@@ -80,7 +81,7 @@ uv sync --all-extras
 > the following message is provided by running `pixi-cli --help`
 
 ```text
-usage: pixi-cli [-h] --platform {discord,telegram}
+usage: pixi-cli [-h] --platform {discord,telegram} [--pixi-directory {discord,telegram}]
                 [--log-level {debug,info,warning,error,critical}] [--api-url API_URL]
                 [--auth | --no-auth] --model MODEL [--model-max-context MODEL_MAX_CONTEXT]
                 [--helper-model HELPER_MODEL]
@@ -105,6 +106,9 @@ options:
   -h, --help            show this help message and exit
   --platform, -p {discord,telegram}
                         Platform to run the bot on.
+  --pixi-directory, -pd {discord,telegram}
+                        The root directory for configuration files, addons, userdata, assets and
+                        cache, defaults to "~/.pixi/"
   --log-level, -l {debug,info,warning,error,critical}
                         Set the logging level.
   --api-url, -a API_URL
@@ -112,8 +116,8 @@ options:
   --auth, --no-auth     whether or not to authorize to the API backends
   --model, -m MODEL     Language Model to use for the main chatbot bot
   --model-max-context, -ctx MODEL_MAX_CONTEXT
-                        Maximum model context size (in tokens), pixi tries to apporiximately
-                        stay within this context size, Default is '16192`.
+                        Maximum model context size (in tokens), pixi tries to apporiximately stay
+                        within this context size, Default is '16192`.
   --helper-model, -hm HELPER_MODEL
                         Language Model to use for agentic tools
   --helper-model-max-context, -hctx HELPER_MODEL_MAX_CONTEXT
@@ -127,20 +131,19 @@ options:
   --embedding-model-dimension, -ed EMBEDDING_MODEL_DIMENSION
                         Dimention to use for the embedding model, Default is '768`.
   --embedding-model-split-size, -esplit EMBEDDING_MODEL_SPLIT_SIZE
-                        Split size to use for the embedding chunk tokenizer, Default is
-                        '1024`.
+                        Split size to use for the embedding chunk tokenizer, Default is '512`.
   --embedding-model-min-size, -emin EMBEDDING_MODEL_MIN_SIZE
-                        Minimum chunk size to use for the embedding chunk tokenizer, Default
-                        is '256`.
+                        Minimum chunk size to use for the embedding chunk tokenizer, Default is
+                        '256`.
   --embedding-model-max-size, -emax EMBEDDING_MODEL_MAX_SIZE
-                        Maximum chunk size to use for the embedding chunk tokenizer, Default
-                        is '256`.
+                        Maximum chunk size to use for the embedding chunk tokenizer, Default is
+                        '4096`.
   --embedding-model-sentence-level, --no-embedding-model-sentence-level
-                        whether or not the embedding model is a sentence level embedding
-                        model, Default is 'False`.
+                        whether or not the embedding model is a sentence level embedding model,
+                        Default is 'False`.
   --tool-calling, --no-tool-calling
-                        allows pixi to use built-in and/or plugin tools, tool calling can
-                        only be used if the model supports them
+                        allows pixi to use built-in and/or plugin tools, tool calling can only be
+                        used if the model supports them
   --tool-logging, --no-tool-logging
                         verbose logging for tool calls (enabled by default when running with
                         logging level DEBUG)
@@ -156,9 +159,8 @@ options:
                         whether or not the ids passed to environment ids are whitelisted or
                         blacklisted
   --environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]
-                        add the id of the environment that the bot is or is not allowed to
-                        respond in (space-separated). If not provided, the bot will respond
-                        everywhere.
+                        add the id of the environment that the bot is or is not allowed to respond
+                        in (space-separated). If not provided, the bot will respond everywhere.
   --database-names, -d DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
 ```
