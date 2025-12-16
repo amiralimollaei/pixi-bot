@@ -51,14 +51,23 @@ optionally you may also choose an embedding model to process web search or offli
 git clone https://github.com/amiralimollaei/pixi-bot.git
 cd pixi-bot
 uv sync --all-extras
+# enter the venv
+source .venv/bin/activate
+# run using pixi-cli -p [platform] [options]
+```
+
+### Standalone CLI Using UVX (Recommended)
+
+```sh
+# installs pixi-bot from pypi, updates it, and runs pixi-cli
+uvx --from pixi-bot[discord,telegram,media] pixi-cli -p [platform] [options]
 ```
 
 ### Installation using PIP
 
 ```sh
-git clone https://github.com/amiralimollaei/pixi-bot.git
-cd pixi-bot
-pip install .[media,discord,telegram]
+pip install pixi-bot[media,discord,telegram]
+pixi-cli -p [platform] [options]
 ```
 
 ### Setup Environment Variables
@@ -72,9 +81,6 @@ pip install .[media,discord,telegram]
 
 - Discord: `pixi-cli -p discord [options]`
 - Telegram: `pixi-cli -p telegram [options]`
-
-> NOTE: if you've installed this project using UV you can run `uv run pixi-cli` instead
-> or run `source ./venv/bin/activate` before running the above commands
 
 ## CLI Usage
 
