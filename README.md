@@ -19,14 +19,14 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 ## Requirements
 
 - Python>=3.10
-- aiofiles>=25.1.0
-- argparse>=1.4.0
-- dotenv>=0.9.9
-- openai>=2.8.1
-- zstandard>=0.25.0
-- discord-py>=2.6.4 (optional, for discord platform)
-- python-telegram-bot>=22.5  (optional, for telegram platform)
-- av>=16.0.0 (optional, for media caching)
+- aiofiles
+- argparse
+- dotenv
+- openai
+- zstandard
+- discord-py (optional, for discord platform)
+- python-telegram-bot  (optional, for telegram platform)
+- av (optional, for media caching)
 - uv (recommended, for setting up all the requirements easily in a python virtual environemnt)
 
 ## Getting Started
@@ -35,9 +35,9 @@ There are many extra optional dependecy groups that you may need to install base
 
 | extra dependecy group | packages | description | status |
 |---|---|---|:---:|
-| media | av>=16.0.0 | installs PyAV and enables media caching and processing features | optional |
-| discord | discord-py>=2.6.4 | installs discord.py and enables discord bot functionality | optional\* |
-| telegram | python-telegram-bot>=22.5 | installs python-telegram-bot and enables telegram bot functionality | optional\* |
+| media | av | installs PyAV and enables media caching and processing features | optional |
+| discord | discord-py | installs discord.py and enables discord bot functionality | optional\* |
+| telegram | python-telegram-bot | installs python-telegram-bot and enables telegram bot functionality | optional\* |
 
 > \[\*\] you have to install at least one of these dependecy groups for the bot to function
 
