@@ -191,36 +191,8 @@ class DirectoryDatabase:
             (entry.content + entry.title + str(entry.source) + str(entry.id)).encode("utf-8")
         )
 
-
-class SentenceTokenizer:
-    """This class provides functions for extracting sentences from text."""
-
-    def __init__(self: "SentenceTokenizer") -> None:
-        self.pattern = re.compile(r"([!.?⸮؟]+)[ \n]+")
-
-    def tokenize(self: "SentenceTokenizer", text: str) -> list[str]:
-        """Splits the input text into its component sentences.
-
-        Examples:
-            >>> tokenizer = SentenceTokenizer()
-            >>> tokenizer.tokenize('Splitting is simple. Almost, anyway!')
-            ['Splitting is simple.', 'Almost, anyway!']
-
-        Args:
-            text: The text whose sentences should be extracted.
-
-        Returns:
-            A list of extracted sentences.
-        """
-        text = self.pattern.sub(r"\1\n\n", text)
-        return [
-            sentence.replace("\n", " ").strip()
-            for sentence in text.split("\n\n")
-            if sentence.strip()
-        ]
-
-
 # constants
+
 
 PARAGRAPH_SPLIT = re.compile(r"\n{2,}")
 DEFAULT_MODEL = "BAAI/bge-m3-multi"
@@ -253,12 +225,127 @@ class DocumentPieceMatch:
     reference: EmbeddedDocumentReference
 
 
+class SmartSplitter:
+    def __init__(self, max_size=1024, min_size=256):
+        # Ensure min_size makes sense relative to max_size
+        self.max_size = max_size
+        self.min_size = min(min_size, max_size // 2)
+
+        self.separators = [
+            r"\n\n+",         # Paragraphs
+            r"\n",            # Newlines
+            r"(?<=[.!?]) +",  # Sentences
+            r"\|",            # Pipes (MediaWiki)
+            r" +",            # Words
+        ]
+
+    def split(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        # 1. Recursive Binary Split with "Safe Zones"
+        # fragments must not be longer than max size, but may be smaller than min size
+        fragments = self._initial_split(text)
+
+        # 2. Greedy Merge
+        # merges fragments that are smaller than min size to bigger fragments that are just less than max size
+        chunks = self._greedy_merge(fragments)
+
+        # 3. Re-balancing Pass
+        # fixes last chunk being too small (we merged all the prevous fragments and the last fragments are merged into a small chunk)
+        return self._rebalance(chunks)
+
+    def _initial_split(self, text: str) -> list[str]:
+        stack = [text]
+        done = []
+
+        while stack:
+            current = stack.pop()
+            if len(current) <= self.max_size:
+                done.append(current)
+                continue
+
+            # Try to find a "Safe Split" (respects min_size on both sides)
+            split_idx = self._find_best_split_point(current, safe=True)
+
+            # Fallback: If no safe split exists, take the best available split
+            if split_idx is None:
+                split_idx = self._find_best_split_point(current, safe=False)
+
+            left, right = current[:split_idx], current[split_idx:]
+            stack.append(right)
+            stack.append(left)
+
+        return done
+
+    def _find_best_split_point(self, text: str, safe: bool = True) -> int | None:
+        mid = len(text) // 2
+
+        for sep in self.separators:
+            matches = list(re.finditer(sep, text))
+
+            if safe:
+                # A "Safe" index ensures both resulting chunks are >= min_size
+                indices = [m.end() for m in matches if self.min_size <= m.end() <= len(text) - self.min_size]
+            else:
+                # A "Forced" index just avoids the absolute 0 or length
+                indices = [m.end() for m in matches if 0 < m.end() < len(text)]
+
+            if indices:
+                return min(indices, key=lambda x: abs(x - mid))
+
+        # If forced and no separator found, split exactly at middle
+        return mid if not safe else None
+
+    def _greedy_merge(self, fragments: list[str]) -> list[str]:
+        if not fragments:
+            return []
+        merged = []
+        current = fragments[0]
+
+        for i in range(1, len(fragments)):
+            f = fragments[i]
+            if len(current) + len(f) <= self.max_size:
+                current += f
+            else:
+                merged.append(current)
+                current = f
+        merged.append(current)
+        return merged
+
+    def _rebalance(self, chunks: list[str]) -> list[str]:
+        """
+        If the last chunk is too small, merge it with the previous and 
+        re-split that combined block at the absolute best middle.
+        """
+        if len(chunks) < 2:
+            return chunks
+
+        # Check if the last chunk violates min_size
+        if len(chunks[-1]) < self.min_size:
+            last = chunks.pop()
+            prev = chunks.pop()
+            combined = prev + last
+
+            # Case A: Combined is small enough to be one chunk
+            if len(combined) <= self.max_size:
+                chunks.append(combined)
+            else:
+                # Case B: Combined is too big; split it exactly in the middle
+                # (ignoring safety) to create two balanced, large-enough chunks.
+                split_idx = self._find_best_split_point(combined, safe=False)
+                chunks.append(combined[:split_idx])
+                chunks.append(combined[split_idx:])
+
+        return chunks
+
+
 class AsyncEmbeddingDatabase:
     def __init__(self, auth: OpenAIAuthConfig, model: OpenAIEmbeddingModelConfig):
         self.auth = auth
         self.model = model
 
-        self.sent_tokenizer = SentenceTokenizer()
+        self.splitter = SmartSplitter(max_size=self.model.max_chunk_size, min_size=self.model.min_chunk_size)
 
         self.dataset: list[EmbeddedDocumentPiece] = []
 
@@ -290,13 +377,6 @@ class AsyncEmbeddingDatabase:
         """
         breaks the document into smaller pieses and adds them using `self.add_document_piece(...)`
 
-        paragraph level splitting algorithm:
-          - split the text into paragraphs and for each paragraph:
-          - if the paragraph's length is between `min_chunk_size` and `max_chunk_size`, yield the paragraph
-          - if the paragraph's length is less than `min_chunk_size` add it to the start of the next paragraph
-          - if the paragraph's length is more than `max_chunk_size` split it using `sentence_chunk_split`,
-          and add the remainder to the next paragraph
-
         params:
             text: (str) the full text of the document to be porcessed
             name: (str) the name of the document used for referencing
@@ -306,61 +386,17 @@ class AsyncEmbeddingDatabase:
             None
         """
 
-        text = text.strip(" \n\r\t")
-
-        chunks = []
-        current_chunk = ""
-        if self.model.sentence_level:
-            chunks, current_chunk = self.sentence_chunk_split(text)
-        else:
-            for paragraph in PARAGRAPH_SPLIT.split(text):
-                current_chunk += paragraph + "\n\n"
-                if self.model.min_chunk_size < len(current_chunk) < self.model.max_chunk_size:
-                    chunks.append(current_chunk)
-                    current_chunk = ""
-                elif len(current_chunk) > self.model.max_chunk_size:
-                    new_chunks, current_chunk = self.sentence_chunk_split(current_chunk)
-                    if new_chunks:
-                        chunks += new_chunks
-                if len(current_chunk) > self.model.min_chunk_size:
-                    chunks.append(current_chunk)
-                    current_chunk = ""
-        current_chunk = current_chunk.strip(" \n\r\t")
-        if current_chunk:
-            chunks.append(current_chunk)
+        # replace any whitepsace that is repeated more than once with only one if its kind
+        # except newline where we allow it to be repeated a maximum of 2 times.
+        text = re.sub(r"(\n\n)\s+|(\s)\s+", r"\1", text)
 
         await self.add_document_piece(
-            chunks,
+            input=self.splitter.split(text.strip(" \n\r\t")),
             reference=EmbeddedDocumentReference(
                 name=name,
                 id=id
             )
         )
-
-    def sentence_chunk_split(self, current_chunk: str) -> tuple[list[str], str]:
-        chunks: list[str] = []
-        sentences = []
-        for line in current_chunk.split("\n"):
-            if not line:
-                continue
-            line_sentences = self.sent_tokenizer.tokenize(line)
-            if not line_sentences:
-                continue
-            line_sentences[-1] = line_sentences[-1] + "\n"
-            sentences += line_sentences
-        temp_chunk: str = ""
-        for sentence in sentences:
-            temp_chunk += sentence
-            if not temp_chunk.endswith((" ", "\n", "\n\r", "\t")):
-                temp_chunk += " "
-            while len(temp_chunk) > self.model.max_chunk_size:
-                chunks.append(temp_chunk[:self.model.max_chunk_size])
-                temp_chunk = temp_chunk[self.model.max_chunk_size:]
-            if len(temp_chunk) > self.model.min_chunk_size:
-                chunks.append(temp_chunk)
-                temp_chunk = ""
-        current_chunk = temp_chunk
-        return chunks, current_chunk
 
     async def embed(self, input: str | list[str]):
         assert self.model.dimension, "no embedding dimension specified"

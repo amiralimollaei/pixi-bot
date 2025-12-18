@@ -160,12 +160,6 @@ def main():
         help="Dimention to use for the embedding model, Default is '768`."
     )
     parser.add_argument(
-        "--embedding-model-split-size", "-esplit",
-        type=int,
-        default=1024,
-        help="Split size to use for the embedding chunk tokenizer, Default is '512`."
-    )
-    parser.add_argument(
         "--embedding-model-min-size", "-emin",
         type=int,
         default=256,
@@ -174,14 +168,8 @@ def main():
     parser.add_argument(
         "--embedding-model-max-size", "-emax",
         type=int,
-        default=4096,
-        help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '4096`."
-    )
-    parser.add_argument(
-        "--embedding-model-sentence-level",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="whether or not the embedding model is a sentence level embedding model, Default is 'False`."
+        default=1024,
+        help="Maximum chunk size to use for the embedding chunk tokenizer, Default is '1024`."
     )
 
     # feature arguments
@@ -275,10 +263,8 @@ def main():
         id=args.embedding_model,
         max_context=args.embedding_model_max_context,
         dimension=args.embedding_model_dimension,
-        split_chunk_size=args.embedding_model_split_size,
         min_chunk_size=args.embedding_model_min_size,
         max_chunk_size=args.embedding_model_max_size,
-        sentence_level=args.embedding_model_sentence_level,
     ) if args.embedding_model else None
 
     features = PixiFeatures(0)

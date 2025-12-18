@@ -66,7 +66,7 @@ def get_instance_save_path(id: str, hash_prefix: str):
     return path
 
 
-class AsyncChatbotInstance:
+class AsyncChatbotInstance(AsyncChatClient):
     def __init__(self,
                  uuid: int | str,
                  hash_prefix: str,
@@ -75,6 +75,9 @@ class AsyncChatbotInstance:
                  resource_folder: str | None = None,
                  **client_kwargs,
                  ):
+        
+        super().__init__(**client_kwargs)
+
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.bot = bot
@@ -85,32 +88,26 @@ class AsyncChatbotInstance:
         assert not exists(resource_folder) or (exists(resource_folder) and isinstance(
             resource_folder, str)), f"Invalid resource_folder \"{resource_folder}\"."
 
-        self.scheduled_messages = []
-
         self.id = str(uuid)
         self.prefix = hash_prefix
+        self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
 
         # load resources
         self.persona = AssistantPersona.from_dict(
             json.load(open_resource("persona.json", "r"))
         )
-        self.system_prompt: str = open_resource("system.md", "r").read()
+        self.system_prompt_template: str = open_resource("system.md", "r").read()
         self.examples: str = open_resource("examples.txt", "r").read()
 
-        self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
-
+        # runtime states
         self.realtime_data = dict()
         self.is_notes_visible = False
         self.command_manager = AsyncCommandManager()
 
-        self.last_send_time = 0.0
-        self.responded = False
-
-        self.client = AsyncChatClient(**client_kwargs)
-        if not self.client.messages:
-            self.client.add_message(ChatMessage(
+        if not self.messages:
+            self.add_message(ChatMessage(
                 role=ChatRole.ASSISTANT,
-                content="[NOTE: I accept the guidelines of the system, I use the SEND command] [SEND: OK!] [SEND: LLLet's begin!]",
+                content="[NOTE: I accept the guidelines of the system, I use the SEND command to respond nicely] [SEND: OK!, Let's begin!]",
                 bot=self.bot
             ))
 
@@ -119,61 +116,29 @@ class AsyncChatbotInstance:
     def add_command(self, name: str, field_name: str, func: AsyncFunction, description: Optional[str] = None):
         self.command_manager.add_command(name, field_name, func, description)
 
-    def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
-        """
-        Register a tool (function) for tool calling.
-        name: tool name (string)
-        func: Callback
-        parameters: OpenAI tool/function parameters schema (dict)
-        description: description of the tool (string)
-        """
-
-        self.client.add_tool(
-            name=name,
-            func=func,
-            parameters=parameters,
-            description=description
-        )
-
     def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
         """
-        Add a message to the conversation.
-        This is useful for initializing the conversation with existing messages.
+        Add a message to the conversation, and adds a reference to the bot to the messages as well.
+        
+        if message is a string, tries to determine the role of the message based on the last message recieved.
         """
         if isinstance(message, str):
             message = ChatMessage(default_role, message, bot=self.bot)
 
         if isinstance(message, ChatMessage):
             message.bot = self.bot  # this is intended to be handled by this class
-            self.client.add_message(message)
-            return message
+            return super().add_message(message)
         else:
             raise TypeError(f"expected message to be a string or a ChatMessage, but got {type(message)}.")
 
-    def set_messages(self, messages: list[ChatMessage]):
-        assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
-        self.client.messages = messages
-
-    def get_messages(self):
-        return self.client.messages
-
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
-
-    def set_rearrange_predicate(self, predicate: AsyncPredicate):
-        """
-        Set a predicate function to rearrange messages based on a specific condition.
-        This is useful for filtering messages by channel or other criteria and moving them
-        to the front of the model context.
-        """
-        assert callable(predicate), f"Predicate must be callable, got {predicate}."
-        self.client.set_rearrange_predicate(predicate)
 
     def get_realtime_data(self):
         return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
     def get_system_prompt(self, allow_ignore: bool = True):
-        return self.system_prompt.format(
+        return self.system_prompt_template.format(
             persona=self.persona,
             allow_ignore=allow_ignore,
             examples=self.examples,
@@ -203,10 +168,10 @@ class AsyncChatbotInstance:
         return task
 
     async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
-        self.client.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
+        self.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
         non_responce = "".join([char async for char in self.command_manager.stream_commands(
-            stream=self.client.stream_completion(),
+            stream=self.stream_completion(),
             reference_message=reference_message
         )])
 
@@ -220,7 +185,7 @@ class AsyncChatbotInstance:
         return dict(
             uuid=self.id,
             prefix=self.prefix,
-            messages=[msg.to_dict() for msg in self.client.messages],
+            messages=[msg.to_dict() for msg in self.messages],
         )
 
     def save(self):
@@ -233,7 +198,7 @@ class AsyncChatbotInstance:
             try:
                 data = json.load(open(self.path, "r", encoding="utf-8"))
                 self.hash_prefix = data.get("prefix")
-                self.client.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
+                self.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
             except json.decoder.JSONDecodeError:
                 self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         else:

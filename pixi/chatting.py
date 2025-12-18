@@ -8,14 +8,14 @@ import httpx
 from openai import AsyncOpenAI, APIError
 
 from .enums import ChatRole
-from .utils import CoroutineQueueExecutor, exists, format_time_ago
+from .utils import CoroutineQueueExecutor, clean_dict, exists, format_time_ago
 from .caching.base import MediaCache
 from .typing import AsyncPredicate, AsyncFunction, Optional
 from .reflection.message import ReflectionMessageBase
 from .config import OpenAILanguageModelConfig, OpenAIAuthConfig
 
 
-@dataclass
+@dataclass(frozen=True)
 class FunctionCall:
     name: str
     index: int
@@ -46,7 +46,7 @@ class FunctionCall:
             name=data["name"],
             index=data["index"],
             id=data["id"],
-            arguments=data.get("arguments"),
+            arguments=data.get("arguments", {}),
         )
 
 
@@ -194,7 +194,7 @@ class ChatMessage:
         return await self.bot.get_conversation_instance(self.instance_id)
 
     def to_dict(self) -> dict:
-        return dict(
+        return clean_dict(dict(
             role=self.role,
             content=self.content,
             metadata=self.metadata,
@@ -203,7 +203,7 @@ class ChatMessage:
             audio=[x.to_dict() for x in self.audio or []],
             tool_calls=[x.to_dict() for x in self.tool_calls or []],
             tool_call_id=self.tool_call_id
-        )
+        ))
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ChatMessage':
@@ -272,7 +272,7 @@ class ChatMessage:
                 ))  # type: ignore
             case _:
                 openai_dict.update(dict(content=self.content))  # type: ignore
-        return openai_dict
+        return clean_dict(openai_dict)
 
 
 # takes the last N messages in the message list that match a predicate, and moves them to the
@@ -349,17 +349,21 @@ class AsyncChatClient:
         )
 
     def set_rearrange_predicate(self, predicate: AsyncPredicate):
+        """
+        Set a predicate function to rearrange messages based on a specific condition.
+        This is useful for filtering messages by channel or other criteria and moving them
+        to the front of the model context.
+        """
+
         self.rearrange_predicate = predicate
 
     def set_system(self, prompt: str):
         assert prompt is not None and prompt != ""
         self.system_prompt = prompt
 
-    def add_message(self, message: ChatMessage | str):
+    def add_message(self, message: ChatMessage | str) -> ChatMessage:
         assert message is not None
-        if isinstance(message, ChatMessage):
-            self.messages.append(message)
-        elif isinstance(message, str):
+        if isinstance(message, str):
             role = None
             match self.messages[-1].role:
                 case ChatRole.SYSTEM:
@@ -370,9 +374,18 @@ class AsyncChatClient:
                     role = ChatRole.ASSISTANT
                 case _:
                     role = ChatRole.ASSISTANT
-            self.messages.append(ChatMessage(role, message))
-        else:
+            message = ChatMessage(role, message)
+        elif not isinstance(message, ChatMessage):
             raise ValueError(f"expected message to be a ChatMessage or a string, but got {message}.")
+        self.messages.append(message)
+        return message
+
+    def set_messages(self, messages: list[ChatMessage]):
+        assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
+        self.messages = messages
+
+    def get_messages(self):
+        return self.messages
 
     async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
         openai_messages: list = await self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
@@ -500,7 +513,7 @@ class AsyncChatClient:
                     else:
                         self.logger.debug(f"Calling {fn.name}({func_args_str})...")
                     result = await func(reference_message, **fn.arguments)  # type: ignore
-                    result = json.dumps(result, ensure_ascii=False)
+                    result = json.dumps(result, ensure_ascii=False, indent=2)
                 except Exception as e:
                     self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
                     result = f"Tool error: {e}"

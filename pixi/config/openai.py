@@ -15,8 +15,6 @@ class OpenAIEmbeddingModelConfig:
     id: str
     max_context: int
     dimension: int
-    split_chunk_size: int
     min_chunk_size: int
     max_chunk_size: int
-    sentence_level: bool
     

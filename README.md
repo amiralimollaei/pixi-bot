@@ -56,11 +56,20 @@ source .venv/bin/activate
 # run using pixi-cli -p [platform] [options]
 ```
 
-### Standalone CLI Using UVX (Recommended)
+### CLI Usage with UVX (Recommended)
+
+You can combine the process of installing and/or updating requirements and pixi, and running it into a single command:
 
 ```sh
+# for telegram
 # installs pixi-bot from pypi, updates it, and runs pixi-cli
-uvx --from pixi-bot[discord,telegram,media] pixi-cli -p [platform] [options]
+uvx --env-file .env pixi-bot[telegram,media]@latest -p telegram [options]
+```
+
+```sh
+# for discord
+# installs pixi-bot from pypi, updates it, and runs pixi-cli
+uvx --env-file .env pixi-bot[discord,media]@latest -p discord [options]
 ```
 
 ### Installation using PIP
@@ -90,15 +99,12 @@ pixi-cli -p [platform] [options]
 usage: pixi-cli [-h] --platform {discord,telegram} [--pixi-directory {discord,telegram}]
                 [--log-level {debug,info,warning,error,critical}] [--api-url API_URL]
                 [--auth | --no-auth] --model MODEL [--model-max-context MODEL_MAX_CONTEXT]
-                [--helper-model HELPER_MODEL]
-                [--helper-model-max-context HELPER_MODEL_MAX_CONTEXT]
+                [--helper-model HELPER_MODEL] [--helper-model-max-context HELPER_MODEL_MAX_CONTEXT]
                 [--embedding-model EMBEDDING_MODEL]
                 [--embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT]
                 [--embedding-model-dimension EMBEDDING_MODEL_DIMENSION]
-                [--embedding-model-split-size EMBEDDING_MODEL_SPLIT_SIZE]
                 [--embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE]
                 [--embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE]
-                [--embedding-model-sentence-level | --no-embedding-model-sentence-level]
                 [--tool-calling | --no-tool-calling] [--tool-logging | --no-tool-logging]
                 [--wiki-search | --no-wiki-search] [--gif-search | --no-gif-search]
                 [--image-support | --no-image-support] [--audio-support | --no-audio-support]
@@ -110,43 +116,39 @@ Run the Pixi bot, a multi-platform AI chatbot.
 
 options:
   -h, --help            show this help message and exit
-  --platform, -p {discord,telegram}
+  --platform {discord,telegram}, -p {discord,telegram}
                         Platform to run the bot on.
-  --pixi-directory, -pd {discord,telegram}
+  --pixi-directory {discord,telegram}, -pd {discord,telegram}
                         The root directory for configuration files, addons, userdata, assets and
                         cache, defaults to "~/.pixi/"
-  --log-level, -l {debug,info,warning,error,critical}
+  --log-level {debug,info,warning,error,critical}, -l {debug,info,warning,error,critical}
                         Set the logging level.
-  --api-url, -a API_URL
+  --api-url API_URL, -a API_URL
                         OpenAI Compatible API URL to use for the bot
   --auth, --no-auth     whether or not to authorize to the API backends
-  --model, -m MODEL     Language Model to use for the main chatbot bot
-  --model-max-context, -ctx MODEL_MAX_CONTEXT
+  --model MODEL, -m MODEL
+                        Language Model to use for the main chatbot bot
+  --model-max-context MODEL_MAX_CONTEXT, -ctx MODEL_MAX_CONTEXT
                         Maximum model context size (in tokens), pixi tries to apporiximately stay
                         within this context size, Default is '16192`.
-  --helper-model, -hm HELPER_MODEL
+  --helper-model HELPER_MODEL, -hm HELPER_MODEL
                         Language Model to use for agentic tools
-  --helper-model-max-context, -hctx HELPER_MODEL_MAX_CONTEXT
-                        Maximum helper model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is '16192`.
-  --embedding-model, -em EMBEDDING_MODEL
+  --helper-model-max-context HELPER_MODEL_MAX_CONTEXT, -hctx HELPER_MODEL_MAX_CONTEXT
+                        Maximum helper model context size (in tokens), pixi tries to apporiximately
+                        stay within this context size, Default is '16192`.
+  --embedding-model EMBEDDING_MODEL, -em EMBEDDING_MODEL
                         Embedding Model to use for embedding tools
-  --embedding-model-max-context, -ectx EMBEDDING_MODEL_MAX_CONTEXT
+  --embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT, -ectx EMBEDDING_MODEL_MAX_CONTEXT
                         Maximum embedding model context size (in tokens), pixi tries to
                         apporiximately stay within this context size, Default is '16192`.
-  --embedding-model-dimension, -ed EMBEDDING_MODEL_DIMENSION
+  --embedding-model-dimension EMBEDDING_MODEL_DIMENSION, -ed EMBEDDING_MODEL_DIMENSION
                         Dimention to use for the embedding model, Default is '768`.
-  --embedding-model-split-size, -esplit EMBEDDING_MODEL_SPLIT_SIZE
-                        Split size to use for the embedding chunk tokenizer, Default is '512`.
-  --embedding-model-min-size, -emin EMBEDDING_MODEL_MIN_SIZE
+  --embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE, -emin EMBEDDING_MODEL_MIN_SIZE
                         Minimum chunk size to use for the embedding chunk tokenizer, Default is
                         '256`.
-  --embedding-model-max-size, -emax EMBEDDING_MODEL_MAX_SIZE
+  --embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE, -emax EMBEDDING_MODEL_MAX_SIZE
                         Maximum chunk size to use for the embedding chunk tokenizer, Default is
-                        '4096`.
-  --embedding-model-sentence-level, --no-embedding-model-sentence-level
-                        whether or not the embedding model is a sentence level embedding model,
-                        Default is 'False`.
+                        '1024`.
   --tool-calling, --no-tool-calling
                         allows pixi to use built-in and/or plugin tools, tool calling can only be
                         used if the model supports them
@@ -167,7 +169,7 @@ options:
   --environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]
                         add the id of the environment that the bot is or is not allowed to respond
                         in (space-separated). If not provided, the bot will respond everywhere.
-  --database-names, -d DATABASE_NAMES [DATABASE_NAMES ...]
+  --database-names DATABASE_NAMES [DATABASE_NAMES ...], -d DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
 ```
 

@@ -4,7 +4,8 @@ import logging
 import os
 from pathlib import Path
 from types import CoroutineType
-from typing import IO
+from typing import IO, Sequence
+
 
 class CoroutineQueueExecutor:
     def __init__(self, max_queue_size: int = 1000):
@@ -211,3 +212,21 @@ if __package__ is not None:
     def copy_default_resources():
         os.makedirs(PixiPaths.resources(), exist_ok=True)
         shutil.copytree(RESOURCES_PATH, PixiPaths.resources(), dirs_exist_ok=True, copy_function=copy_if_absent)
+
+
+def clean_dict(d: dict):
+    final_dict = {}
+    for k, v in d.items():
+        if v is None:
+            continue
+        elif isinstance(v, dict):
+            if len(v) == 0:
+                continue
+            v = clean_dict(v)
+        elif isinstance(v, Sequence):
+            if len(v) == 0:
+                continue
+            if not isinstance(v, str): # other than strings, we every other sequence is a nested dynamic type
+                v = [(clean_dict(e) if isinstance(e, dict) else e) for e in v]
+        final_dict[k] = v
+    return final_dict

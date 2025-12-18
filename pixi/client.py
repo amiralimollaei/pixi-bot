@@ -156,10 +156,7 @@ class PixiClient:
             assert reference.origin is not None
             message: ReflectionMessageBase = reference.origin
 
-            delay_time = time.time() - instance.last_send_time
-            instance.last_send_time = time.time()
-
-            wait_time = max(0, (0.5 + (1.8 ** math.log2(1+len(value))) / 10) - delay_time)
+            wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
 
             await self.typing_delay(message, wait_time)
             await message.send(value)
