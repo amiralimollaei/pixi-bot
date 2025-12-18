@@ -1,16 +1,16 @@
 [project]
 name = "pixi-bot"
-version = "1.2.0"
+version = "1.2.1"
 description = "A modular and multiplatform AI chatbot"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "aiofiles>=25.1.0",
-    "argparse>=1.4.0",
-    "dotenv>=0.9.9",
-    "numpy>=2.2",
-    "openai>=2.8.1",
-    "zstandard>=0.25.0",
+    "aiofiles>=25.0",
+    "argparse>=1.0",
+    "dotenv>=0.9",
+    "numpy>=2.0",
+    "openai>=2.0",
+    "zstandard>=0.25",
 ]
 
 [tool.uv]
@@ -22,13 +22,13 @@ pixi-bot = "pixi:main"
 
 [project.optional-dependencies]
 media = [
-    "av>=16.0.1",
+    "av>=16.0",
 ]
 telegram = [
-    "python-telegram-bot>=22.5",
+    "python-telegram-bot>=22.0",
 ]
 discord = [
-    "discord-py>=2.6.4"
+    "discord-py>=2.6"
 ]
 
 [tool.setuptools.packages.find]
