@@ -3,7 +3,7 @@ __author__ = "amiralimollaei"
 import os
 from pathlib import Path
 
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig, MediaWikiConfig
 from .enums import Platform
 from .utils import PixiPaths, Ansi, copy_default_resources, load_dotenv
 
@@ -17,8 +17,9 @@ def run(
     helper_model: OpenAILanguageModelConfig | None,
     embedding_model: OpenAIEmbeddingModelConfig | None,
     features: PixiFeatures = PixiFeatures.empty(),
-    environment_filter: IdFilter = IdFilter.allow(),
     datasets: list[DatasetConfig] = [],
+    wikis: list[MediaWikiConfig] = [],
+    environment_filter: IdFilter = IdFilter.allow(),
 ):
     PixiPaths.set_root(pixi_directory)
     copy_default_resources()
@@ -32,8 +33,9 @@ def run(
         helper_model=helper_model,
         embedding_model=embedding_model,
         features=features,
-        environment_filter=environment_filter,
         datasets=datasets,
+        wikis=wikis,
+        environment_filter=environment_filter,
     ).run()
 
 
@@ -186,7 +188,7 @@ def main():
     parser.add_argument(
         "--wiki-search",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="allows pixi to search any mediawiki compatible Wiki"
     )
     parser.add_argument(
@@ -231,6 +233,16 @@ def main():
         default=[],
         help="add the name of databases to use (space-separated)."
     )
+
+    # mediawiki wiki arguments
+    parser.add_argument(
+        "--mediawiki-wikis", "-mv",
+        type=str,
+        nargs="+",
+        default=[],
+        help="add the mediawiki wikis to use (space-separated), it should follow the format of `name=url`, Example: wikipedia=https://www.wikipedia.org/w/"
+    )
+
     args = parser.parse_args()
 
     # Set logging level
@@ -283,12 +295,23 @@ def main():
     for name in args.database_names:
         datasets.append(DatasetConfig(name=name))
 
+    wikis = []
+    for nameurl in args.mediawiki_wikis:
+        name, url = nameurl.split("=")
+        wikis.append(MediaWikiConfig(url=url, name=name))
+
+    if PixiFeatures.EnableWikiSearch in features and not wikis:
+        wikis = [MediaWikiConfig(
+            url="https://www.wikipedia.org/w/",
+            name="wikipedia"
+        )]
+
     environment_filter = IdFilter.allow()
     if args.environment_ids:
         if args.environment_whitelist:
             environment_filter = IdFilter.whitelist(args.environment_ids)
         else:
-            environment_whitelist = IdFilter.blacklist(args.environment_ids)
+            environment_filter = IdFilter.blacklist(args.environment_ids)
 
     return run(
         Platform[args.platform.upper()],
@@ -298,6 +321,7 @@ def main():
         helper_model=helper_model,
         embedding_model=embedding_model,
         features=features,
-        environment_filter=environment_filter,
         datasets=datasets,
+        wikis=wikis,
+        environment_filter=environment_filter,
     )

@@ -13,7 +13,7 @@ from .chatting import ChatMessage
 from .enums import ChatRole, Messages, Platform
 from .reflection import ReflectionAPI, ReflectionMessageBase
 from .addon import AddonManager
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig, MediaWikiConfig
 from .database import AsyncEmbeddingDatabase, DirectoryDatabase
 
 
@@ -42,6 +42,7 @@ class PixiClient:
         embedding_model: OpenAIEmbeddingModelConfig | None,
         features: PixiFeatures = PixiFeatures.EnableToolCalling | PixiFeatures.EnableToolLogging,
         datasets: list[DatasetConfig] = [],
+        wikis: list[MediaWikiConfig] = [],
         environment_filter: IdFilter = IdFilter.allow(),
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -58,10 +59,7 @@ class PixiClient:
         self.log_tool_calls = PixiFeatures.EnableToolLogging in features
         self.datasets = []
         self.environment_filter = environment_filter
-        
-        if self.enable_tool_calls:
-            self.datasets = [self.register_database_tool(d) for d in datasets]
-
+    
         self.accept_images = PixiFeatures.EnableImageSupport in features
         self.accept_audio = PixiFeatures.EnableAudioSupport in features
         if (self.accept_images or self.accept_audio) and not SUPPORTS_MEDIA_CACHING:
@@ -88,17 +86,25 @@ class PixiClient:
 
         self.__register_builtin_commands()
         
-        # TODO: add configurable wikis
-        if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features:
+        if self.enable_tool_calls and datasets:
+            self.logger.info(f"registering {len(datasets)} dataset(s):")
+            for dataset_config in datasets:
+                self.logger.info(f" - {dataset_config.name}")
+                self.datasets.append(self.register_database_tool(dataset_config))
+        
+        if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features and wikis:
+            self.logger.info(f"registering {len(wikis)} wiki(s):")
+            for wiki_config in wikis:
+                self.logger.info(f" - {wiki_config.name}: {wiki_config.url}")
+                self.register_mediawiki_tools(url=wiki_config.url, wiki_name=wiki_config.name)
             self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
-            self.register_mediawiki_tools(url="https://www.wikipedia.org/w/", wiki_name="wikipedia")
-            # self.register_mediawiki_tools(url="https://mcdf.wiki.gg/", wiki_name="minecraft_discontinued_features")
 
         if platform == Platform.DISCORD and self.enable_tool_calls:
             self.__register_discord_specific_tools()
 
         self.__register_builtin_slash_commands()
 
+        self.logger.info(f"loading addons...")
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
 
