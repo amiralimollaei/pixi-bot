@@ -227,7 +227,7 @@ def main():
 
     # database arguments
     parser.add_argument(
-        "--database-names", "-ds",
+        "--database-names", "-db",
         type=str,
         nargs="+",
         default=[],

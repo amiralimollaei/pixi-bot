@@ -173,7 +173,7 @@ options:
                         add the id of the environment that the bot is or is not allowed
                         to respond in (space-separated). If not provided, the bot will
                         respond everywhere.
-  --database-names DATABASE_NAMES [DATABASE_NAMES ...], -ds DATABASE_NAMES [DATABASE_NAMES ...]
+  --database-names DATABASE_NAMES [DATABASE_NAMES ...], -db DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
   --mediawiki-wikis MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...], -mv MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
                         add the mediawiki wikis to use (space-separated), it should
