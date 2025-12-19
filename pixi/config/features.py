@@ -2,6 +2,10 @@ from enum import IntFlag, auto
 
 
 class PixiFeatures(IntFlag):
+    """
+    A bitflag containing all the toggleable features of pixi
+    """
+    
     EnableToolCalling = auto()
     EnableToolLogging = auto()
     EnableWikiSearch = auto()

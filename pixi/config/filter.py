@@ -11,6 +11,10 @@ class FilterType(IntEnum):
 
 @dataclasses.dataclass(frozen=True)
 class IdFilter:
+    """
+    A dataclass that defines a filtering logic based on a list of string identifiers
+    """
+    
     type: FilterType
     ids: list[str] | None = None
 
