@@ -236,7 +236,7 @@ def main():
 
     # mediawiki wiki arguments
     parser.add_argument(
-        "--mediawiki-wikis", "-mv",
+        "--mediawiki-wikis", "-mw",
         type=str,
         nargs="+",
         default=[],

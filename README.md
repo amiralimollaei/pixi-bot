@@ -175,7 +175,7 @@ options:
                         respond everywhere.
   --database-names DATABASE_NAMES [DATABASE_NAMES ...], -db DATABASE_NAMES [DATABASE_NAMES ...]
                         add the name of databases to use (space-separated).
-  --mediawiki-wikis MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...], -mv MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
+  --mediawiki-wikis MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...], -mw MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
                         add the mediawiki wikis to use (space-separated), it should
                         follow the format of `name=url`, Example:
                         wikipedia=https://www.wikipedia.org/w/
