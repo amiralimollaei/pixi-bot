@@ -3,8 +3,9 @@ __author__ = "amiralimollaei"
 import os
 from pathlib import Path
 
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig
 from .enums import Platform
+from .utils import PixiPaths, Ansi, copy_default_resources, load_dotenv
 
 
 def run(
@@ -17,14 +18,13 @@ def run(
     embedding_model: OpenAIEmbeddingModelConfig | None,
     features: PixiFeatures = PixiFeatures.empty(),
     environment_filter: IdFilter = IdFilter.allow(),
-    database_names: list[str] | None = None,
+    datasets: list[DatasetConfig] = [],
 ):
-    from .utils import PixiPaths, copy_default_resources
     PixiPaths.set_root(pixi_directory)
     copy_default_resources()
-    
-    from .client import PixiClient
-    
+
+    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
+
     PixiClient(
         platform=platform,
         auth=auth,
@@ -33,7 +33,7 @@ def run(
         embedding_model=embedding_model,
         features=features,
         environment_filter=environment_filter,
-        database_names=database_names,
+        datasets=datasets,
     ).run()
 
 
@@ -42,11 +42,9 @@ def main():
 
     import argparse
 
-    from .utils import load_dotenv, Ansi
-
     # injecting colors into the default logger
 
-    COLORS = {
+    COLORS = {  # (level_color, message_color)
         logging.DEBUG: (Ansi.BLUE, Ansi.BEIGE),
         logging.INFO: (Ansi.WHITE, Ansi.WHITE2),
         logging.WARNING: (Ansi.YELLOW, Ansi.YELLOW2),
@@ -230,7 +228,7 @@ def main():
         "--database-names", "-d",
         type=str,
         nargs="+",
-        default=None,
+        default=[],
         help="add the name of databases to use (space-separated)."
     )
     args = parser.parse_args()
@@ -281,10 +279,16 @@ def main():
     if args.audio_support:
         features |= PixiFeatures.EnableAudioSupport
 
+    datasets = []
+    for name in args.database_names:
+        datasets.append(DatasetConfig(name=name))
+
     environment_filter = IdFilter.allow()
     if args.environment_ids:
-        environment_filter = IdFilter.whitelist(
-            args.environment_ids) if args.environment_whitelist else IdFilter.blacklist(args.environment_ids)
+        if args.environment_whitelist:
+            environment_filter = IdFilter.whitelist(args.environment_ids)
+        else:
+            environment_whitelist = IdFilter.blacklist(args.environment_ids)
 
     return run(
         Platform[args.platform.upper()],
@@ -295,5 +299,5 @@ def main():
         embedding_model=embedding_model,
         features=features,
         environment_filter=environment_filter,
-        database_names=args.database_names,
+        datasets=datasets,
     )

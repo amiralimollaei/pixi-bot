@@ -2,8 +2,7 @@ from dataclasses import asdict
 import asyncio
 import json
 import logging
-import math
-import time
+import ssl
 
 from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory, PredicateCommand, PredicateTool
@@ -14,8 +13,8 @@ from .chatting import ChatMessage
 from .enums import ChatRole, Messages, Platform
 from .reflection import ReflectionAPI, ReflectionMessageBase
 from .addon import AddonManager
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter
-from .database import AsyncEmbeddingDatabase
+from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig
+from .database import AsyncEmbeddingDatabase, DirectoryDatabase
 
 
 # constants
@@ -42,7 +41,7 @@ class PixiClient:
         helper_model: OpenAILanguageModelConfig | None,
         embedding_model: OpenAIEmbeddingModelConfig | None,
         features: PixiFeatures = PixiFeatures.EnableToolCalling | PixiFeatures.EnableToolLogging,
-        database_names: Optional[list[str]] = None,
+        datasets: list[DatasetConfig] = [],
         environment_filter: IdFilter = IdFilter.allow(),
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -54,12 +53,14 @@ class PixiClient:
         self.model = model
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
-        self.database_names = database_names or []
-        self.database_tools_initalized = asyncio.Event()
         self.features = features
         self.enable_tool_calls = PixiFeatures.EnableToolCalling in features
         self.log_tool_calls = PixiFeatures.EnableToolLogging in features
+        self.datasets = []
         self.environment_filter = environment_filter
+        
+        if self.enable_tool_calls:
+            self.datasets = [self.register_database_tool(d) for d in datasets]
 
         self.accept_images = PixiFeatures.EnableImageSupport in features
         self.accept_audio = PixiFeatures.EnableAudioSupport in features
@@ -224,25 +225,13 @@ class PixiClient:
             description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
 
-    async def __register_database_tools(self):
-        if not self.enable_tool_calls:
-            self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
-            self.database_tools_initalized.set()
-            return
-
-        await asyncio.gather(*(
-            self.register_database_tool(database_name) for database_name in self.database_names
-        ))
-        self.database_tools_initalized.set()
-
-    async def register_database_tool(self, database_name: str):
+    def register_database_tool(self, dataset_config: DatasetConfig) -> DirectoryDatabase | None:
         if not self.enable_tool_calls:
             self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             return
-
-        from .database import DirectoryDatabase
-
-        database_api = await DirectoryDatabase.from_directory(database_name)
+        
+        database_name = dataset_config.name
+        database_api = DirectoryDatabase.from_directory(dataset_config.name)
 
         async def get_entry_as_str(entry_id: int):
             dataset_entry = await database_api.get_entry(entry_id)
@@ -314,6 +303,7 @@ class PixiClient:
             ),
             description=f"fetch and retrieve relevent information from the content of the {database_name} database based on a query."
         )
+        return database_api
 
     def register_mediawiki_tools(self, url: str, wiki_name: str):
         if not self.enable_tool_calls:
@@ -500,6 +490,8 @@ class PixiClient:
                 try:
                     await message.typing()
                     await asyncio.sleep(3)
+                except ssl.SSLError:
+                    self.logger.warning("SSLError accrued while sending typing status")
                 except Exception:
                     self.logger.exception("an error accrued while sending typing status")
             noncall_result = await task
@@ -525,10 +517,6 @@ class PixiClient:
         if the response is successful, it will save the conversation instance and return True.
         if the response fails after all retries, it will return False.
         """
-
-        if not self.database_tools_initalized.is_set():
-            await self.__register_database_tools()
-            await self.database_tools_initalized.wait()
 
         async def rearrage_predicate(msg: ChatMessage):
             msg_channel_id = msg.origin.environment.chat_id if msg.origin else None

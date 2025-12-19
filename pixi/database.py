@@ -5,7 +5,6 @@ import json
 import os
 import re
 
-import aiofiles
 import httpx
 import numpy as np
 import openai
@@ -134,7 +133,7 @@ class DirectoryDatabase:
         return entry
 
     @classmethod
-    async def from_directory(cls, directory: str):
+    def from_directory(cls, directory: str):
         assert directory
 
         full_dir = cls.get_dataset_directory(directory)
@@ -145,8 +144,8 @@ class DirectoryDatabase:
 
         data = dict()
         for file in glob(str(full_dir / "*.zst")):
-            async with aiofiles.open(file, mode='rb') as f:
-                json_data = zstandard.decompress(await f.read())
+            with open(file, mode='rb') as f:
+                json_data = zstandard.decompress(f.read())
                 entry_data = json.loads(json_data)
                 entry = DatasetEntry(
                     title=entry_data['title'],
@@ -168,7 +167,7 @@ class DirectoryDatabase:
             if os.path.isfile(file):
                 os.remove(file)
 
-    async def save(self):
+    def save(self):
         assert self.dataset, "dataset is not initialized, nothing to save"
 
         full_dir = DirectoryDatabase.get_dataset_directory(self.directory)
@@ -177,14 +176,14 @@ class DirectoryDatabase:
 
         for entry in self.dataset.data.values():
             entry_hash = self.get_entry_hash(entry).hexdigest()
-            async with aiofiles.open(full_dir / f"{entry_hash}.zst", mode='wb') as f:
+            with open(full_dir / f"{entry_hash}.zst", mode='wb') as f:
                 json_data = json.dumps(dict(
                     title=entry.title,
                     content=entry.content,
                     id=entry.id,
                     source=entry.source or ""
                 ), ensure_ascii=False)
-                await f.write(zstandard.compress(json_data.encode("utf-8")))
+                f.write(zstandard.compress(json_data.encode("utf-8")))
 
     def get_entry_hash(self, entry: DatasetEntry):
         return hashlib.sha256(
