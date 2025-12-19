@@ -19,7 +19,6 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 ## Requirements
 
 - Python>=3.10
-- aiofiles
 - argparse
 - dotenv
 - openai
