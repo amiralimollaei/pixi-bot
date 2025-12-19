@@ -78,8 +78,6 @@ class PixiClient:
 
         self.reflection_api = ReflectionAPI(platform=platform)
 
-        self.__register_builtin_commands()
-
         self.gif_api = None
         if PixiFeatures.EnableGIFSearch in features:
             try:
@@ -87,6 +85,8 @@ class PixiClient:
             except KeyError:
                 self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
 
+        self.__register_builtin_commands()
+        
         # TODO: add configurable wikis
         if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features:
             self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
@@ -156,9 +156,9 @@ class PixiClient:
             assert reference.origin is not None
             message: ReflectionMessageBase = reference.origin
 
-            wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
+            #wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
 
-            await self.typing_delay(message, wait_time)
+            #await self.typing_delay(message, wait_time)
             await message.send(value)
 
         self.register_command(
@@ -167,6 +167,32 @@ class PixiClient:
             func=send_command,
             description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
         )
+        if self.gif_api is not None:
+            async def send_gif(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
+                if not value:
+                    return
+                assert self.gif_api is not None
+
+                assert reference.origin is not None
+                message: ReflectionMessageBase = reference.origin
+                
+                resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
+                results = []
+                for gif_content in resp.get("results", []):
+                    results.append(dict(
+                        content_description=gif_content.get("content_description", ""),
+                        content_rating=gif_content.get("content_rating", ""),
+                        url=gif_content.get("media", [])[0].get("gif", {}).get("url", "")
+                    ))
+                if results:
+                    await message.send(results[0]["url"])
+
+            self.register_command(
+                name="send_gif",
+                field_name="gif description",
+                func=send_gif,
+                description="sends a gif as a distinct chat message, it automatically finds a gif based on the description. gif description must be in English."
+            )
 
         async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
             assert reference.origin is not None
@@ -396,40 +422,6 @@ class PixiClient:
             ),
             description="Fetches the last `n` message from a text channel"
         )
-
-        if self.gif_api is not None:
-            async def search_gif(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, locale: str):
-                assert self.gif_api is not None
-                resp: dict = await self.gif_api.search(query, locale=locale, limit=10)  # type: ignore
-                results = []
-                for gif_content in resp.get("results", []):
-                    results.append(dict(
-                        content_description=gif_content.get("content_description", ""),
-                        content_rating=gif_content.get("content_rating", ""),
-                        url=gif_content.get("media", [])[0].get("gif", {}).get("url", "")
-                    ))
-                return results
-
-            self.register_tool(
-                name="search_gif",
-                func=search_gif,
-                parameters=dict(
-                    type="object",
-                    properties={
-                        "query": {
-                            "type": "string",
-                            "description": "The search string.",
-                        },
-                        "locale": {
-                            "type": "string",
-                            "description": "specify default language to interpret search string; xx is ISO 639-1 language code, _YY (optional) is 2-letter ISO 3166-1 country code",
-                        },
-                    },
-                    required=["query", "locale"],
-                    additionalProperties=False
-                ),
-                description="searches the internet for the most relevent GIFs based on a query, to send a gif send the GIF's URL as a distinct chat message."
-            )
 
     def __register_builtin_slash_commands(self):
         async def notes_slash_command(message: ReflectionMessageBase):
