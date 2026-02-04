@@ -569,6 +569,8 @@ class PixiClient:
             return
 
         message_text = message.content
+        if message_text is None:
+            message_text = ""
 
         # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
@@ -613,7 +615,8 @@ class PixiClient:
             reply_optimization = -1
             instance_messages = instance.get_messages()
             matching_messages = [
-                msg.content for msg in instance_messages if msg.content is not None and reply_message_text in msg.content]
+                msg.content for msg in instance_messages if msg.content is not None and reply_message_text in msg.content
+            ]
             if matching_messages:
                 if instance_messages[-1].content in matching_messages:
                     reply_optimization = 2
