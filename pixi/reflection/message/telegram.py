@@ -24,7 +24,7 @@ class TelegramReflectionMessage(ReflectionMessageBase):
     def from_origin(cls, message: telegram.Message) -> 'TelegramReflectionMessage':
         user = message.from_user
         assert user is not None
-        content = message.text_markdown_v2
+        content = message.text_markdown_v2 or message.caption_markdown_v2
         chat = message.chat
         chat_type = chat_type = ChatType.UNKNOWN
         match chat.type:
