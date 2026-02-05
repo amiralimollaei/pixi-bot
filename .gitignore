@@ -179,7 +179,6 @@ storage/
 
 # test files
 test.py
-*.sh
 last-request.json
 
 # database files
