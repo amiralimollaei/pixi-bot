@@ -15,11 +15,11 @@ async def main():
             text=content,
             source="EntrySource"
         )
-    await DirectoryDatabase("DatasetName", dataset=dataset).save()
+    DirectoryDatabase("DatasetName", dataset=dataset).save()
 
     # load a directory database and query from it
 
-    database = await DirectoryDatabase.from_directory("DatasetName")
+    database = DirectoryDatabase.from_directory("DatasetName")
     matches = await database.search("quasi-connectivity")
     for match in matches:
         print(match)
