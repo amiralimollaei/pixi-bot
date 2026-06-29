@@ -41,10 +41,10 @@ class ImageCache(MediaCache):
             frame.reformat(width=int(iw * scale), height=int(ih * scale), format='yuvj420p').save(tmp_out.name)
 
             tmp_out.seek(0)
-            audio_bytes = tmp_out.read()
+            image_bytes = tmp_out.read()
 
         return CompressedMedia(
             mime_type=self.mime_type,
-            bytes=audio_bytes,
+            bytes=image_bytes,
             format=self.format
         )
