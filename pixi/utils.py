@@ -60,9 +60,12 @@ class CoroutineQueueExecutor:
 def exists(value, allow_empty_string=False):
     if value is None:
         return False
+    
+    if isinstance(value, bool):
+        return value
 
     if isinstance(value, (int, float)):
-        return True
+        return value != 0
 
     if isinstance(value, str):
         return value != "" or (value == "" and allow_empty_string)

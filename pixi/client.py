@@ -5,6 +5,9 @@ import json
 import logging
 import ssl
 
+import openai
+import httpx
+
 from .typing import AsyncPredicate, Optional
 from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory, PredicateCommand, PredicateTool
 from .agents import AgentBase, RetrievalAgent
@@ -60,6 +63,10 @@ class PixiClient:
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
         self.features = features
+
+        # Verify models and API connectivity at startup
+        self.verify_models()
+
         self.enable_tool_calls = PixiFeatures.EnableToolCalling in features
         self.log_tool_calls = PixiFeatures.EnableToolLogging in features
         self.datasets = []
@@ -115,6 +122,50 @@ class PixiClient:
         self.reflection_api.register_on_message_event(self.on_message)
 
         self.logger.info(f"Pixi finished initalizing!")
+
+    def verify_models(self):
+        """
+        Verifies that the configured models exist on the API server and that the API is reachable.
+        Logs a warning for any configured model IDs not found in the API's model list.
+        Raises RuntimeError if the API is unreachable.
+        """
+        self.logger.info(f"Verifying API connectivity and model availability at {self.auth.base_url}...")
+
+        try:
+            session = openai.OpenAI(
+                api_key=self.auth.api_key,
+                base_url=self.auth.base_url,
+                http_client=httpx.Client(trust_env=False),
+            )
+            models_page = session.models.list()
+            available_models = {model.id for model in models_page}
+            self.logger.info(f"Found {len(available_models)} model(s) available.")
+
+            # Collect all configured model IDs
+            configured_models: dict[str, str] = {}
+            configured_models["main"] = self.model.id
+            if self.helper_model:
+                configured_models["helper"] = self.helper_model.id
+            if self.embedding_model:
+                configured_models["embedding"] = self.embedding_model.id
+
+            for role, model_id in configured_models.items():
+                if model_id not in available_models:
+                    raise RuntimeError(f"{role} model \"{model_id}\" was not found in the list of available models on the API server.")
+
+        except openai.APIConnectionError as e:
+            raise RuntimeError(
+                f"Failed to connect to API at {self.auth.base_url}: {e}"
+            ) from e
+        except openai.AuthenticationError as e:
+            raise RuntimeError(
+                f"Failed to authenticate to API at {self.auth.base_url}: {e}"
+            ) from e
+        except openai.APIError as e:
+            self.logger.warning(
+                f"API responded with an error when listing models (status={e.code}), "
+                "model verification will be skipped. This is expected for some OpenAI-compatible backends."
+            )
 
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
