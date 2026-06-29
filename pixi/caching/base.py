@@ -25,7 +25,7 @@ class CompressedMedia:
         return b64encode(self.bytes).decode("utf-8")
 
     def to_data_url(self):
-        return "data:image/jpeg;base64," + self.to_base64()
+        return f"data:{self.mime_type};base64,{self.to_base64()}"
 
 
 class MediaCache:
