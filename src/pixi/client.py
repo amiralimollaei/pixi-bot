@@ -531,14 +531,13 @@ class PixiClient:
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
         return await self.chatbot_factory.get_or_create(identifier)
 
-    async def pixi_resp(self, instance: AsyncChatbotInstance, chat_message: ChatMessage, allow_ignore: bool = True):
-        assert chat_message.origin
-        message: ReflectionMessageBase = chat_message.origin
+    async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessage):
+        assert reference_message.origin
+        message: ReflectionMessageBase = reference_message.origin
 
         channel_id = message.environment.chat_id
 
         try:
-            instance.add_message(chat_message)
             # concurrent_channel_stream_call handles overlapping requests automatically
             # killing tasks that are not done and restarting the request every time untill
             # one task finishes before the next request
@@ -550,8 +549,7 @@ class PixiClient:
             # TODO: find a solution to the above
             task = await instance.concurrent_channel_stream_call(
                 channel_id=str(channel_id),
-                reference_message=chat_message,
-                allow_ignore=allow_ignore
+                reference_message=reference_message,
             )
             while not task.done():
                 try:
@@ -566,18 +564,11 @@ class PixiClient:
                 self.logger.warning(f"{noncall_result=}")
         except Exception:
             self.logger.exception(f"Unknown error while responding to a message in {instance.id}.")
-            await message.send(Messages.UNKNOWN_ERROR)
+            #await message.send(Messages.UNKNOWN_ERROR)
 
-        responded = True  # TODO: track the command usage and check if the message is responded to
-        if not responded:
-            if not allow_ignore:
-                raise RuntimeError("there was no response to a message while ignoring a message is not allowed.")
-            else:
-                self.logger.warning("there was no response to the message while ignoring a message is allowed.")
+        return instance.action_taken()
 
-        return responded
-
-    async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 3):
+    async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 10):
         """
         create a copy of all messages in the conversation instance and try to respond to the message.
         if the response fails, it will retry up to `num_retry` times.
@@ -599,23 +590,26 @@ class PixiClient:
         assert chat_message.instance_id
         identifier = chat_message.instance_id
 
+
         instance = await self.get_conversation_instance(identifier)
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
 
+        instance.add_message(chat_message)
         messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
             try:
-                ok = await self.pixi_resp(instance, chat_message)
-            except Exception:
-                self.logger.exception("There was an error in `pixi_resp`")
-                ok = False
-            if ok:
+                responded = await self.pixi_resp(instance, reference_message = chat_message)
                 instance.save()
-                self.logger.debug("responded to a message and saved the conversation.")
-                return True
-            else:
-                self.logger.warning(f"Retrying ({i}/{num_retry})")
+                if responded:
+                    self.logger.info("model responded to a message.")
+                    return True
+                else:
+                    self.logger.warning("model didn't respond to a message. (invalid, requesting a response)")
+                    # ask the model to respond again
+                    instance.add_message("[SYSTEM]: You didn't send anything to the user, if this is intentional use the SEND command with an empty message.")
+            except Exception:
+                self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
 
     def is_environment_allowed(self, identifier: str) -> bool:

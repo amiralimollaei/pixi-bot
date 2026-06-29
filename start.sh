@@ -7,6 +7,7 @@ uv sync --all-extras
 uv run pixi-cli \
     --platform $PIXI_PLATFORM \
     --model $PIXI_MODEL \
+    --embedding-model $PIXI_EMBEDDING_MODEL \
     --tool-logging \
     --wiki-search \
     --gif-search \

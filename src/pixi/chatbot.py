@@ -75,7 +75,7 @@ class AsyncChatbotInstance(AsyncChatClient):
                  resource_folder: str | None = None,
                  **client_kwargs,
                  ):
-        
+
         super().__init__(**client_kwargs)
 
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -105,7 +105,9 @@ class AsyncChatbotInstance(AsyncChatClient):
         # runtime states
         self.realtime_data = dict()
         self.is_notes_visible = False
+        self.actions_since_last_message = 0
         self.command_manager = AsyncCommandManager()
+        self.command_manager.on_action = self.on_action
 
         if not self.messages:
             self.add_message(ChatMessage(
@@ -116,15 +118,23 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
 
+    def on_action(self, name: str):
+        if name.lower() in ["send", "react", "gif"]:
+            self.actions_since_last_message += 1
+
+    def action_taken(self) -> bool:
+        return self.actions_since_last_message > 0
+
     def add_command(self, name: str, field_name: str, func: AsyncFunction, description: Optional[str] = None):
         self.command_manager.add_command(name, field_name, func, description)
 
     def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
         """
         Add a message to the conversation, and adds a reference to the bot to the messages as well.
-        
+
         if message is a string, tries to determine the role of the message based on the last message recieved.
         """
+        self.actions_since_last_message = 0
         if isinstance(message, str):
             message = ChatMessage(default_role, message, bot=self.bot)
 
@@ -140,21 +150,21 @@ class AsyncChatbotInstance(AsyncChatClient):
     def get_realtime_data(self):
         return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
-    def get_system_prompt(self, allow_ignore: bool = True):
+    def get_system_prompt(self):
         return self.system_prompt_template.format(
             persona=self.persona,
-            allow_ignore=allow_ignore,
+            allow_ignore=True,
             examples=self.examples,
             realtime=self.get_realtime_data(),
             commands=self.command_manager.get_prompt()
         )
 
-    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage, allow_ignore: bool = True):
+    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage):
         assert channel_id, "channel_id is None"
 
         async def stream_call_task():
             try:
-                await self.stream_call(reference_message, allow_ignore)
+                await self.stream_call(reference_message)
             except asyncio.CancelledError:
                 self.logger.warning(
                     f"stream_call task was cancelled inside {reference_message.instance_id} in channel {channel_id}"
@@ -171,7 +181,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         return task
 
     async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
-        self.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
+        self.set_system(self.get_system_prompt())
 
         non_response = "".join([char async for char in self.command_manager.stream_commands(
             stream=self.stream_completion(),
@@ -197,7 +207,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             f.write(json.dumps(self.to_dict(), ensure_ascii=False))
 
     def load(self, not_found_ok: bool = True):
-        # load is called on every chatbot instance after they are created, in case you must load an 
+        # load is called on every chatbot instance after they are created, in case you must load an
         # existing instance, you should set not_found_ok to false.
 
         try:
@@ -211,14 +221,13 @@ class AsyncChatbotInstance(AsyncChatClient):
             if not not_found_ok:
                 raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
         except Exception:
-                self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
-                
+            self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
 
 
 class CachedAsyncChatbotFactory:
     def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
         self.hash_prefix = hash_prefix

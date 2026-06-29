@@ -1,6 +1,7 @@
 import logging
 
 from dataclasses import dataclass
+from typing import Callable
 
 from .utils import CoroutineQueueExecutor
 from .typing import AsyncFunction, Optional, Iterator, Generator, AsyncIterator, AsyncGenerator
@@ -35,7 +36,8 @@ class AsyncCommandManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         
         self.commands: dict[str, AsyncCommand] = dict()
-
+        self.on_action: Callable[[str]] | None = None
+    
     def _add_command(self, command: AsyncCommand):
         assert command is not None
         self.commands.update({command.name.lower(): command})
@@ -50,7 +52,7 @@ class AsyncCommandManager:
             function=function,
             description=description,
         ))
-
+    
     def get_prompt(self):
         return "\n".join(["- "+func.get_syntax() for name, func in self.commands.items()])
 
@@ -64,6 +66,9 @@ class AsyncCommandManager:
         else:
             command_name = command_content
             command_data = None
+        
+        if self.on_action:
+            self.on_action(command_name)
 
         maybe_command_fn = self.commands.get(command_name.lower())
         if maybe_command_fn is None:
