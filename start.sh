@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source .env
+
 # Run the main entry point
 uv sync --all-extras
 uv run pixi-cli \
