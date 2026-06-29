@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import asdict
 import asyncio
 import json
@@ -547,7 +548,7 @@ class PixiClient:
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
 
-        messages_checkpoint = instance.get_messages().copy()
+        messages_checkpoint = deepcopy(instance.get_messages())
         for i in range(num_retry):
             try:
                 ok = await self.pixi_resp(instance, chat_message)
