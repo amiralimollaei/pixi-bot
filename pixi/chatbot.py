@@ -93,11 +93,14 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
 
         # load resources
-        self.persona = AssistantPersona.from_dict(
-            json.load(open_resource("persona.json", "r"))
-        )
-        self.system_prompt_template: str = open_resource("system.md", "r").read()
-        self.examples: str = open_resource("examples.txt", "r").read()
+        with open_resource("persona.json", "r") as f:
+            self.persona = AssistantPersona.from_dict(
+                json.load(f)
+            )
+        with open_resource("system.md", "r") as f:
+            self.system_prompt_template: str = f.read()
+        with open_resource("examples.txt", "r") as f:
+            self.examples: str = f.read()
 
         # runtime states
         self.realtime_data = dict()
@@ -193,19 +196,23 @@ class AsyncChatbotInstance(AsyncChatClient):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write(json.dumps(self.to_dict(), ensure_ascii=False))
 
-    def load(self, not_found_ok: bool = False):
-        if os.path.isfile(self.path):
-            try:
-                data = json.load(open(self.path, "r", encoding="utf-8"))
-                self.hash_prefix = data.get("prefix")
-                self.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
-            except json.decoder.JSONDecodeError:
-                self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
-        else:
+    def load(self, not_found_ok: bool = True):
+        # load is called on every chatbot instance after they are created, in case you must load an 
+        # existing instance, you should set not_found_ok to false.
+
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.hash_prefix = data.get("prefix")
+            self.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
+        except json.decoder.JSONDecodeError:
+            self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
+        except FileNotFoundError:
             if not_found_ok:
-                self.logger.info(f"Unable to find the instance save file {self.path}`, using default values.")
-            else:
                 raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
+        except Exception:
+                self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
+                
 
 
 class CachedAsyncChatbotFactory:
