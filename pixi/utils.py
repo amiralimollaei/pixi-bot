@@ -24,7 +24,7 @@ class CoroutineQueueExecutor:
                     self.logger.exception("Coroutine resulted in an error")
                 finally:
                     self._queue.task_done()
-            except asyncio.CancelledError, asyncio.QueueShutDown:
+            except (asyncio.CancelledError, asyncio.QueueShutDown):
                 break
 
     async def add_to_queue(self, t: CoroutineType):
