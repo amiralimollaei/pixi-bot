@@ -19,7 +19,6 @@ from .database import AsyncEmbeddingDatabase, DirectoryDatabase
 
 # constants
 
-COMMAND_PREFIXES = ["!pixi", "!pix", "!p"]
 COMMAND_KEYWORDS = ["pixi", "پیکسی"]
 
 
@@ -30,8 +29,9 @@ def remove_prefixes(text: str):
     Removes only the first prefix via the list of COMMAND_PREFIXES
     """
     text = text.strip()
-    for prefix in COMMAND_PREFIXES:
-        text = text.removeprefix(prefix)
+    for command_keyword in COMMAND_KEYWORDS:
+        for i in range(len(command_keyword)-1):
+            text = text.removeprefix("!" + command_keyword[:len(command_keyword)-i])
     return text
 
 
@@ -584,7 +584,7 @@ class PixiClient:
             if keyword in message_text.lower():
                 is_keyword_present = True
                 break
-        is_prefixed = message_text.lower().startswith(tuple(COMMAND_PREFIXES))
+        is_prefixed = message_text.lower().startswith(tuple(["!" + k for k in COMMAND_KEYWORDS]))
         environment_id = message.environment_id
 
         if not (message.is_inside_dm() or bot_mentioned or is_prefixed or is_keyword_present):
