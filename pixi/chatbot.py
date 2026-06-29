@@ -208,7 +208,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         except json.decoder.JSONDecodeError:
             self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         except FileNotFoundError:
-            if not_found_ok:
+            if not not_found_ok:
                 raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
         except Exception:
                 self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
