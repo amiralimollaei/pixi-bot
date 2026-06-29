@@ -6,6 +6,9 @@ from typing import Sequence
 
 import httpx
 from openai import AsyncOpenAI, APIError
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from openai._streaming import AsyncStream
 
 from .enums import ChatRole
 from .utils import CoroutineQueueExecutor, clean_dict, exists, format_time_ago
@@ -316,12 +319,8 @@ class AsyncChatClient:
         self.system_prompt = None
         self.tools: dict = {}
         self.rearrange_predicate = None
-
-    # Hotfix: create a new session every time to avoid issues with cancelling requests and connection errors
-
-    @property
-    def session(self):
-        return AsyncOpenAI(
+        
+        self.session = AsyncOpenAI(
             api_key=self.auth.api_key,
             base_url=self.auth.base_url,
             # don't use proxies from environment variables
@@ -387,7 +386,7 @@ class AsyncChatClient:
     def get_messages(self):
         return self.messages
 
-    async def create_chat_completion(self, stream: bool = False, enable_timestamps: bool = True):
+    async def stream_chat_completion(self, enable_timestamps: bool = True) -> AsyncStream[ChatCompletionChunk]:
         openai_messages: list = await self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
         kwargs = dict(
             model=self.model.id,
@@ -397,7 +396,7 @@ class AsyncChatClient:
             max_tokens=1024,
             parallel_tool_calls=True,
             # reasoning_effort="high",
-            stream=stream,
+            stream=True,
         )
         # If tools are registered, add them to the request
         if self.tools:
@@ -555,63 +554,66 @@ class AsyncChatClient:
             last_function_call_index = None
             response = ""
             finish_reason = None
-            async for event in await self.create_chat_completion(stream=True):
-                if event.choices is None or len(event.choices) == 0:
-                    continue
-                choice = event.choices[0]
+            async with await self.stream_chat_completion() as stream:
+                async for event in stream:
+                    if event.choices is None or len(event.choices) == 0:
+                        continue
+                    choice = event.choices[0]
 
-                if exists(_tool_calls := choice.delta.tool_calls):
-                    for tool_call in _tool_calls:
-                        function = tool_call.function
-                        function_index = tool_call.index
-                        function_id = tool_call.id
-                        function_name = function.name
-                        function_arguments = function.arguments
-                        if prev_function_call := partial_function_calls.get(function_index):
-                            if function_arguments:
-                                new_function_arguments = (prev_function_call.arguments or "") + function_arguments
+                    if (_tool_calls := choice.delta.tool_calls):
+                        for tool_call in _tool_calls:
+                            function = tool_call.function
+                            function_index = tool_call.index
+                            function_id = tool_call.id
+                            function_name = function.name if function else None
+                            function_arguments = function.arguments if function else None
+                            if prev_function_call := partial_function_calls.get(function_index):
+                                if function_arguments:
+                                    new_function_arguments = (prev_function_call.arguments or "") + function_arguments
+                                else:
+                                    new_function_arguments = prev_function_call.arguments
+                                partial_function_calls[function_index] = PartialFunctionCall(
+                                    name=prev_function_call.name,
+                                    arguments=new_function_arguments,
+                                    index=function_index,
+                                    id=prev_function_call.id
+                                )
                             else:
-                                new_function_arguments = prev_function_call.arguments
-                            partial_function_calls[function_index] = PartialFunctionCall(
-                                name=prev_function_call.name,
-                                arguments=new_function_arguments,
-                                index=function_index,
-                                id=prev_function_call.id
-                            )
-                        else:
+                                if verbose:
+                                    print(f"Function: {function_name}", end="")
+                                assert function_name
+                                assert function_id
+                                partial_function_calls[function_index] = PartialFunctionCall(
+                                    name=function_name,
+                                    arguments=function_arguments,
+                                    index=function_index,
+                                    id=function_id
+                                )
+                            # if the model is producing a new function call, we can assume the function call is finished generating
+                            if last_function_call_index is not None and function_index != last_function_call_index:
+                                function_call = partial_function_calls.pop(function_index).to_function_call()
+                                # runs the tool call without blocking and in correct order
+                                await tool_call_queue.add_to_queue(execute_tool_task(function_call))
+                            last_function_call_index = function_index
                             if verbose:
-                                print(f"Function: {function_name}", end="")
-                            partial_function_calls[function_index] = PartialFunctionCall(
-                                name=function_name,
-                                arguments=function_arguments,
-                                index=function_index,
-                                id=function_id
-                            )
-                        # if the model is producing a new function call, we can assume the function call is finished generating
-                        if last_function_call_index is not None and function_index != last_function_call_index:
-                            function_call = partial_function_calls.pop(function_index).to_function_call()
-                            # runs the tool call without blocking and in correct order
-                            await tool_call_queue.add_to_queue(execute_tool_task(function_call))
-                        last_function_call_index = function_index
+                                print(function_arguments, end="")
+
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+
+                    if content := choice.delta.content:
                         if verbose:
-                            print(function_arguments, end="")
+                            print(content, end="", flush=True)
+                        response += content
+                        # now yields the response character by character for easier parsing
+                        for char in content:
+                            yield char
 
-                if choice.finish_reason:
-                    finish_reason = choice.finish_reason
+                    if verbose and hasattr(choice.delta, "reasoning_content") and (reasoning_content := choice.delta.reasoning_content): # pyright: ignore[reportAttributeAccessIssue]
+                        print(reasoning_content, end="", flush=True)
 
-                if content := choice.delta.content:
-                    if verbose:
-                        print(content, end="", flush=True)
-                    response += content
-                    # now yields the response character by character for easier parsing
-                    for char in content:
-                        yield char
-
-                if verbose and hasattr(choice.delta, "reasoning_content") and (reasoning_content := choice.delta.reasoning_content):
-                    print(reasoning_content, end="", flush=True)
-
-            if verbose:
-                print()
+                if verbose:
+                    print()
 
         function_calls = [f.to_function_call() for f in partial_function_calls.values()]
         del partial_function_calls
