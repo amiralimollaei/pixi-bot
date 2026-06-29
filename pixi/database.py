@@ -2,6 +2,7 @@ import dataclasses
 from glob import glob
 import hashlib
 import json
+import logging
 import os
 import re
 
@@ -341,6 +342,7 @@ class SmartSplitter:
 
 class AsyncEmbeddingDatabase:
     def __init__(self, auth: OpenAIAuthConfig, model: OpenAIEmbeddingModelConfig):
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.auth = auth
         self.model = model
 
@@ -412,6 +414,11 @@ class AsyncEmbeddingDatabase:
                 results.append(EmbeddingCache(text=input_text, dim=self.model.dimension))
             except FileNotFoundError:
                 # cache miss
+                missed_inputs.append(input_text)
+                continue
+            except Exception:
+                self.logger.exception("Error loading embedding cache")
+                # cache error
                 missed_inputs.append(input_text)
                 continue
 
