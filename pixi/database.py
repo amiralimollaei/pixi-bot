@@ -11,7 +11,7 @@ import openai
 import zstandard
 
 from .utils import PixiPaths
-from .caching import EmbedingCache
+from .caching import EmbeddingCache
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
 
 
@@ -205,7 +205,7 @@ class EmbeddedDocumentReference:
 
 @dataclasses.dataclass(frozen=True)
 class EmbeddedDocumentPiece:
-    data: EmbedingCache
+    data: EmbeddingCache
     reference: EmbeddedDocumentReference
 
     @property
@@ -358,7 +358,7 @@ class AsyncEmbeddingDatabase:
     async def add_document_piece(self, input: str | list[str], reference: EmbeddedDocumentReference):
         embeddings = await self.embed(input)
 
-        if isinstance(embeddings, EmbedingCache):
+        if isinstance(embeddings, EmbeddingCache):
             embeddings = [embeddings]
 
         for embedding in embeddings:
@@ -406,10 +406,10 @@ class AsyncEmbeddingDatabase:
             was_unbatched = True
 
         missed_inputs = []
-        results: list[EmbedingCache] = []
+        results: list[EmbeddingCache] = []
         for input_text in input:
             try:
-                results.append(EmbedingCache(text=input_text, dim=self.model.dimension))
+                results.append(EmbeddingCache(text=input_text, dim=self.model.dimension))
             except FileNotFoundError:
                 # cache miss
                 missed_inputs.append(input_text)
@@ -426,7 +426,7 @@ class AsyncEmbeddingDatabase:
             )
 
             for embedding_data, embedding_text in zip(embedding_response.data, missed_inputs):
-                results.append(EmbedingCache(
+                results.append(EmbeddingCache(
                     text=embedding_text,
                     dim=self.model.dimension,
                     vec=np.array(embedding_data.embedding, dtype="float16"),
@@ -436,7 +436,7 @@ class AsyncEmbeddingDatabase:
 
     def similarity(
         self,
-        query: EmbedingCache,
+        query: EmbeddingCache,
         document: EmbeddedDocumentPiece,
         epsilon: float = 1e-6,
     ) -> float:
@@ -450,7 +450,7 @@ class AsyncEmbeddingDatabase:
 
         return float(q_dot_docs / norm_coeff)
 
-    def search(self, query: EmbedingCache, best_n: int = 10):
+    def search(self, query: EmbeddingCache, best_n: int = 10):
         matches: list[DocumentPieceMatch] = []
         for document_piece in self.dataset:
             similarity_score = self.similarity(query, document_piece)

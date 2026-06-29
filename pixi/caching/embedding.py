@@ -7,7 +7,7 @@ import numpy as np
 from ..utils import PixiPaths
 
 
-class EmbedingCache:
+class EmbeddingCache:
     """
     Automatically caches the embedding vectors if initialized with `vec` and automatically
     loads the cahced embedding vectors if not initialized with `vec`, raises OSError if the
@@ -31,7 +31,7 @@ class EmbedingCache:
 
     @property
     def hash_hexdigest(self):
-        return hashlib.sha256(str(dict(text=self.text, dim=self.dim)).encode("utf-8")).hexdigest()
+        return hashlib.sha256(f"{self.text}@{self.dim}".encode("utf-8")).hexdigest()
 
     @staticmethod
     def get_save_path(hash: str):

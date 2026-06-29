@@ -439,7 +439,8 @@ class AsyncChatClient:
         for cutoff_index, message in enumerate(messages):
             role = message.role
             context = message.content or ""
-            # TODO: better handle images and audio
+            # TODO: better approximate images
+            # TODO: audio should be approximated with a function of it's duration
             request_size += len(role) + len(context) + 1024 * len(message.audio) + 1024 * len(message.images)
             # approximate size of the message in tokens, assuming 4 characters per token
             if request_size > self.model.max_context * 4:
@@ -448,15 +449,15 @@ class AsyncChatClient:
             cutoff_index = None
 
         if cutoff_index:
+            self.logger.warning("LLM ran out of context, older context will be forgotten.")
             if cutoff_index == 0:
-                self.logger.warning("No messages fit in the request, cutting off the first message.")
+                self.logger.warning("First message can't fit in the model context, this is probaby a bug.")
                 message_cut = messages[0]
-                assert message_cut.content, "Message content must not be empty, this is a bug."
+                assert message_cut.content, "Message content must not be empty."
                 message_cut.content = "(This message was cut off due to length limitations)\n\n" + \
-                    message_cut.content[:request_size-system_prompt_size -
-                                        200]  # cut off the message to fit in the request
-            self.logger.warning("unable to fit all messages in one request.")
-            messages = messages[-(cutoff_index-1):]
+                    message_cut.content[:request_size-system_prompt_size -200]
+            else:
+                messages = messages[-(cutoff_index-1):]
         return messages
 
     async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>"):

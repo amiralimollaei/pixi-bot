@@ -26,6 +26,10 @@ COMMAND_KEYWORDS = ["pixi", "پیکسی"]
 # helper functions
 
 def remove_prefixes(text: str):
+    """
+    Removes only the first prefix via the list of COMMAND_PREFIXES
+    """
+    text = text.strip()
     for prefix in COMMAND_PREFIXES:
         text = text.removeprefix(prefix)
     return text
@@ -97,7 +101,6 @@ class PixiClient:
             for wiki_config in wikis:
                 self.logger.info(f" - {wiki_config.name}: {wiki_config.url}")
                 self.register_mediawiki_tools(url=wiki_config.url, wiki_name=wiki_config.name)
-            self.register_mediawiki_tools(url="https://minecraft.wiki/", wiki_name="minecraft")
 
         if platform == Platform.DISCORD and self.enable_tool_calls:
             self.__register_discord_specific_tools()
@@ -189,7 +192,7 @@ class PixiClient:
                     results.append(dict(
                         content_description=gif_content.get("content_description", ""),
                         content_rating=gif_content.get("content_rating", ""),
-                        url=gif_content.get("media", [])[0].get("gif", {}).get("url", "")
+                        url=gif_content.get("media", [{}])[0].get("gif", {}).get("url", "")
                     ))
                 if results:
                     await message.send(results[0]["url"])
@@ -345,7 +348,9 @@ class PixiClient:
         async def query_wiki_content(instance: AsyncChatbotInstance, reference: ChatMessage, titles: str, query: str):
             if not titles:
                 return "no result: no page specified"
-            if (_titles := titles.split("|")) is None:
+            
+            _titles = [t for t in titles.split("|") if t]
+            if not _titles:
                 return "no result: no page specified"
 
             context = await asyncio.gather(*[

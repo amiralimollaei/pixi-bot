@@ -19,7 +19,10 @@ class CoroutineQueueExecutor:
     async def __execute_queue(self):
         await self.execute_lock.acquire()
         while len(self.tasks) > 0:
-            await self.tasks[0]
+            try:
+                await self.tasks[0]
+            except Exception:
+                self.logger.exception("Coroutine resulted in an error")
             del self.tasks[0]
         self.execute_lock.release()
 

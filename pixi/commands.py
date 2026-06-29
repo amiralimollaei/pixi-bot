@@ -56,10 +56,8 @@ class AsyncCommandManager:
 
     async def execute_command(self, command_str: str, reference_message: Optional[ChatMessage] = None):
         command_content = command_str[1:-1]
-        seperator_idx = None
-        if ":" in command_str:
-            seperator_idx = command_content.index(":")
-
+        
+        seperator_idx = command_content.index(":") if ":" in command_content else None
         if seperator_idx:
             command_name = command_content[:seperator_idx].strip()
             command_data = command_content[seperator_idx+1:].strip()
@@ -69,7 +67,7 @@ class AsyncCommandManager:
 
         maybe_command_fn = self.commands.get(command_name.lower())
         if maybe_command_fn is None:
-            self.logger.error(f"The command `{command_name}` is not implemented.")
+            self.logger.error(f"Model tried to use the command \"{command_name}\", which is not implemented.")
             return
 
         return await maybe_command_fn(reference_message, command_data)

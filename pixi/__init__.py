@@ -90,7 +90,6 @@ def main():
     parser.add_argument(
         "--pixi-directory", "-pd",
         type=str,
-        choices=[p.name.lower() for p in Platform],
         default="~/.pixi/",
         help="The root directory for configuration files, addons, userdata, assets and cache, defaults to \"~/.pixi/\""
     )

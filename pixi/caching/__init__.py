@@ -17,6 +17,6 @@ else:
     from .imagecache import ImageCache
 
 try:
-    from .embedding import EmbedingCache
+    from .embedding import EmbeddingCache
 except ImportError:
     logger.warning("please install `numpy` to use embedding vector caching features")
