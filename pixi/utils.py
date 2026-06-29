@@ -12,42 +12,47 @@ class CoroutineQueueExecutor:
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.max_queue_size = max_queue_size
-        self.tasks: list[CoroutineType] = []
-        self.execute_lock = asyncio.Lock()
-        self.execute_task = None
+        self._queue: asyncio.Queue[CoroutineType] = asyncio.Queue(maxsize=max_queue_size)
 
-    async def __execute_queue(self):
-        await self.execute_lock.acquire()
-        while len(self.tasks) > 0:
+    async def _worker(self):
+        while True:
             try:
-                await self.tasks[0]
-            except Exception:
-                self.logger.exception("Coroutine resulted in an error")
-            del self.tasks[0]
-        self.execute_lock.release()
+                coro = await self._queue.get()
+                try:
+                    await coro
+                except Exception:
+                    self.logger.exception("Coroutine resulted in an error")
+                finally:
+                    self._queue.task_done()
+            except asyncio.CancelledError, asyncio.QueueShutDown:
+                break
 
     async def add_to_queue(self, t: CoroutineType):
-        self.tasks.append(t)
-        # if execute_lock is not acquired, we are not executing anything
-        # in that case we should start executing the tasks
-        if not self.execute_lock.locked():
-            self.execute_task = asyncio.create_task(self.__execute_queue())
+        await self._queue.put(t)
 
     async def __aenter__(self):
-        self.execute_task = None
-        if self.execute_lock.locked():
-            self.execute_lock.release()
+        # drain any tasks left over from a previous use
+        if not self._queue.empty():
+            remaining = []
+            while not self._queue.empty():
+                try:
+                    remaining.append(self._queue.get_nowait())
+                    self._queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            self.logger.warning(f"Coroutine never awaited: {remaining}")
 
-        if len(self.tasks) > 0:
-            self.logger.warning(f"Corotine never avaited: {self.tasks}")
-
-        self.tasks = []
-
+        self._worker_task = asyncio.create_task(self._worker())
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        if self.execute_task:
-            await self.execute_task
+        await self._queue.join()
+        self._worker_task.cancel()
+        try:
+            await self._worker_task
+        except asyncio.CancelledError:
+            pass
+
 
 # helpers
 
