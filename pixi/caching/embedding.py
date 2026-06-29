@@ -26,8 +26,9 @@ class EmbeddingCache:
             self.load()
         else:
             # caches the vector
-            os.makedirs(cache_dir, exist_ok=True)
-            self.save()
+            if not os.path.exists(self.get_save_path(self.hash_hexdigest)):
+                os.makedirs(cache_dir, exist_ok=True)
+                self.save()
 
     @property
     def hash_hexdigest(self):
