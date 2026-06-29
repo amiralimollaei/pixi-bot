@@ -3,4 +3,4 @@ services:
     build: .
     env_file:
       - .env
-    container_name: pixi-server
+    container_name: pixi-bot

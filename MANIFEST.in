@@ -1,1 +1,1 @@
-recursive-include pixi/resources *
+recursive-include src/pixi/resources *
