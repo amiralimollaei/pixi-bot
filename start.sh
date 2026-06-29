@@ -9,5 +9,4 @@ uv run pixi-cli \
     --wiki-search \
     --gif-search \
     --mediawiki-wikis minecraft=https://minecraft.wiki/ wikipedia=https://www.wikipedia.org/w/ \
-    --embedding-model BAAI/bge-m3-multi \
     $PIXI_EXTRA_ARGS

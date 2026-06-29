@@ -1,4 +1,3 @@
-from copy import deepcopy
 from dataclasses import asdict
 import asyncio
 import json
@@ -139,7 +138,12 @@ class PixiClient:
             )
             models_page = session.models.list()
             available_models = {model.id for model in models_page}
-            self.logger.info(f"Found {len(available_models)} model(s) available.")
+            if available_models:
+                self.logger.info(f"Found {len(available_models)} model(s) available:")
+                for model in available_models:
+                    self.logger.info(" - " + model)
+            else:
+                raise RuntimeError("No model available on the API server.")
 
             # Collect all configured model IDs
             configured_models: dict[str, str] = {}
@@ -599,7 +603,7 @@ class PixiClient:
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
 
-        messages_checkpoint = deepcopy(instance.get_messages())
+        messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
             try:
                 ok = await self.pixi_resp(instance, chat_message)
