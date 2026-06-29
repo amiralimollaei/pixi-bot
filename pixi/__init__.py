@@ -156,7 +156,7 @@ def main():
         "--embedding-model-dimension", "-ed",
         type=int,
         default=768,
-        help="Dimention to use for the embedding model, Default is '768`."
+        help="Dimension to use for the embedding model, Default is '768`."
     )
     parser.add_argument(
         "--embedding-model-min-size", "-emin",

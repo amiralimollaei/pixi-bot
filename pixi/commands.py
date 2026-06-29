@@ -57,10 +57,10 @@ class AsyncCommandManager:
     async def execute_command(self, command_str: str, reference_message: Optional[ChatMessage] = None):
         command_content = command_str[1:-1]
         
-        seperator_idx = command_content.index(":") if ":" in command_content else None
-        if seperator_idx:
-            command_name = command_content[:seperator_idx].strip()
-            command_data = command_content[seperator_idx+1:].strip()
+        separator_idx = command_content.index(":") if ":" in command_content else None
+        if separator_idx:
+            command_name = command_content[:separator_idx].strip()
+            command_data = command_content[separator_idx+1:].strip()
         else:
             command_name = command_content
             command_data = None

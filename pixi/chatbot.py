@@ -170,12 +170,12 @@ class AsyncChatbotInstance(AsyncChatClient):
     async def stream_call(self, reference_message: ChatMessage, allow_ignore: bool = True):
         self.set_system(self.get_system_prompt(allow_ignore=allow_ignore))
 
-        non_responce = "".join([char async for char in self.command_manager.stream_commands(
+        non_response = "".join([char async for char in self.command_manager.stream_commands(
             stream=self.stream_completion(),
             reference_message=reference_message
         )])
 
-        return non_responce.strip() or None
+        return non_response.strip() or None
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible

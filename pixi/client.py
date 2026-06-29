@@ -113,7 +113,7 @@ class PixiClient:
 
         self.reflection_api.register_on_message_event(self.on_message)
 
-        self.logger.info(f"Pixi finised initalizing!")
+        self.logger.info(f"Pixi finished initalizing!")
 
     def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
         if not self.enable_tool_calls:
@@ -502,9 +502,9 @@ class PixiClient:
                     await message.typing()
                     await asyncio.sleep(3)
                 except ssl.SSLError:
-                    self.logger.warning("SSLError accrued while sending typing status")
+                    self.logger.warning("SSLError occurred while sending typing status")
                 except Exception:
-                    self.logger.exception("an error accrued while sending typing status")
+                    self.logger.exception("an error occurred while sending typing status")
             noncall_result = await task
             if noncall_result:
                 self.logger.warning(f"{noncall_result=}")
