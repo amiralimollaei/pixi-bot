@@ -4,7 +4,7 @@ from typing import Optional
 
 import numpy as np
 
-from ..utils import PixiPaths
+from ..storage.paths import PixiPaths
 
 
 class EmbeddingCache:

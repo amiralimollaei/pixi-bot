@@ -1,40 +1,38 @@
-from dataclasses import asdict
 import asyncio
 import json
 import logging
 import ssl
+from dataclasses import asdict
 
-import openai
 import httpx
+import openai
 
-from .typing import AsyncPredicate, Optional
-from .chatbot import AsyncChatbotInstance, CachedAsyncChatbotFactory, PredicateCommand, PredicateTool
+from .addon import AddonManager
 from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
-from .chatting import ChatMessage
-from .enums import ChatRole, Messages, Platform
-from .reflection import ReflectionAPI, ReflectionMessageBase
-from .addon import AddonManager
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig, MediaWikiConfig
+from .chatting import (ActionContext, ActionEntry, AsyncChatbotInstance,
+                       CachedAsyncChatbotFactory, ChatMessage, ToolContext, ToolEntry)
+from .config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                     OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
+                     OpenAILanguageModelConfig, PixiFeatures)
 from .database import AsyncEmbeddingDatabase, DirectoryDatabase
-
+from .enums import ChatRole, Platform
+from .reflection import ReflectionAPI, AbstractMessage
+from .typing import AsyncPredicate, Optional
 
 # constants
 
-COMMAND_KEYWORDS = ["pixi", "پیکسی"]
+SUMMON_KEYWORDS = ["pixi", "پیکسی"]
 
 
 # helper functions
 
 def remove_prefixes(text: str):
-    """
-    Removes only the first prefix via the list of COMMAND_PREFIXES
-    """
     text = text.strip()
-    for command_keyword in COMMAND_KEYWORDS:
-        for i in range(len(command_keyword)-1):
-            text = text.removeprefix("!" + command_keyword[:len(command_keyword)-i])
+    for keyword in SUMMON_KEYWORDS:
+        for i in range(len(keyword)-1):
+            text = text.removeprefix("!" + keyword[:len(keyword)-i])
     return text
 
 
@@ -95,7 +93,7 @@ class PixiClient:
             except KeyError:
                 self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
 
-        self.__register_builtin_commands()
+        self.__register_builtin_actions()
         
         if self.enable_tool_calls and datasets:
             self.logger.info(f"registering {len(datasets)} dataset(s):")
@@ -176,7 +174,7 @@ class PixiClient:
             self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
-        self.chatbot_factory.register_tool(PredicateTool(
+        self.chatbot_factory.register_tool(ToolEntry(
             name=name,
             func=func,
             parameters=parameters,
@@ -184,8 +182,8 @@ class PixiClient:
             predicate=predicate
         ))
 
-    def register_command(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None):
-        self.chatbot_factory.register_command(PredicateCommand(
+    def register_action(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None):
+        self.chatbot_factory.register_action(ActionEntry(
             name=name,
             func=func,
             field_name=field_name,
@@ -197,7 +195,7 @@ class PixiClient:
         return agent(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
-        async def checked_function(message: ReflectionMessageBase):
+        async def checked_function(message: AbstractMessage):
             environment_id = message.environment_id
             if not self.is_environment_allowed(environment_id):
                 self.logger.warning(
@@ -207,41 +205,38 @@ class PixiClient:
             await function(message)
         self.reflection_api.register_slash_command(name, checked_function, description)
 
-    async def typing_delay(self, message: ReflectionMessageBase, delay: float):
+    async def typing_delay(self, message: AbstractMessage, delay: float):
         delay_served = 0.0
         while delay_served < delay:
             await message.typing()
             await asyncio.sleep(3.0)
             delay_served += 3.0
 
-    def __register_builtin_commands(self):
-        async def send_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-            if not value:
+    def __register_builtin_actions(self):
+        async def send_action(ctx: ActionContext, value: str):
+            if not value or ctx.reference_message is None:
                 return
-
-            assert reference.origin is not None
-            message: ReflectionMessageBase = reference.origin
+            assert ctx.reference_message.origin is not None
+            message: AbstractMessage = ctx.reference_message.origin
 
             #wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
-
             #await self.typing_delay(message, wait_time)
             await message.send(value)
 
-        self.register_command(
+        self.register_action(
             name="send",
             field_name="message",
-            func=send_command,
-            description="sends a text as a distinct chat message, you MUST use this command to send a response, otherwise the user WILL NOT SEE it and your response will be IGNORED."
+            func=send_action,
+            description="sends a message in the current chat"
         )
         if self.gif_api is not None:
-            async def send_gif(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-                if not value:
+            async def send_gif_action(ctx: ActionContext, value: str):
+                if not value or ctx.reference_message is None:
                     return
-                assert self.gif_api is not None
-
-                assert reference.origin is not None
-                message: ReflectionMessageBase = reference.origin
+                assert ctx.reference_message.origin is not None
+                message: AbstractMessage = ctx.reference_message.origin
                 
+                assert self.gif_api is not None
                 resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
                 results = []
                 for gif_content in resp.get("results", []):
@@ -253,40 +248,44 @@ class PixiClient:
                 if results:
                     await message.send(results[0]["url"])
 
-            self.register_command(
+            self.register_action(
                 name="send_gif",
                 field_name="gif description",
-                func=send_gif,
-                description="sends a gif as a distinct chat message, it automatically finds a gif based on the description. gif description must be in English."
+                func=send_gif_action,
+                description="sends a gif in the current chat, the gif is chosen based on the provided description (description must be in English)"
             )
 
-        async def note_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-            assert reference.origin is not None
-            message: ReflectionMessageBase = reference.origin
+        async def note_action(ctx: ActionContext, value: str):
+            if not value or ctx.reference_message is None:
+                return
+            assert ctx.reference_message.origin is not None
+            message: AbstractMessage = ctx.reference_message.origin
 
-            if instance.is_notes_visible:
+            if ctx.parent_instance and ctx.parent_instance.is_notes_visible:
                 await message.send(f"> thoughts: {value}")
 
-        self.register_command(
+        self.register_action(
             name="note",
             field_name="thoughts",
-            func=note_command,
-            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you Must do this before each message, thoughts should be at least 50 words"
+            func=note_action,
+            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words"
         )
 
-        async def react_command(instance: AsyncChatbotInstance, reference: ChatMessage, value: str):
-            assert reference.origin is not None
-            message: ReflectionMessageBase = reference.origin
+        async def react_action(ctx: ActionContext, value: str):
+            if not value or ctx.reference_message is None:
+                return
+            assert ctx.reference_message.origin is not None
+            message: AbstractMessage = ctx.reference_message.origin
 
             try:
                 await message.add_reaction(value)
             except Exception:
                 self.logger.exception(f"Failed to add reaction {value} to message {message.id}")
 
-        self.register_command(
+        self.register_action(
             name="react",
             field_name="emoji",
-            func=react_command,
+            func=react_action,
             description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
 
@@ -302,7 +301,7 @@ class PixiClient:
             dataset_entry = await database_api.get_entry(entry_id)
             return json.dumps(asdict(dataset_entry), ensure_ascii=False)
 
-        async def search_database(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
+        async def search_database(ctx: ToolContext, keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
 
         self.register_tool(
@@ -322,7 +321,7 @@ class PixiClient:
             description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
         )
 
-        async def query_database(instance: AsyncChatbotInstance, reference: ChatMessage, query: str, ids: str):
+        async def query_database(ctx: ToolContext, query: str, ids: str):
             if ids is None:
                 return "no result: no id specified"
 
@@ -381,7 +380,7 @@ class PixiClient:
             page_content, title = await wiki_api.get_plaintext(title.strip())
             return (page_content, title)
 
-        async def search_wiki(instance: AsyncChatbotInstance, reference: ChatMessage, keyword: str):
+        async def search_wiki(ctx: ToolContext, keyword: str):
             return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
 
         self.register_tool(
@@ -401,7 +400,7 @@ class PixiClient:
             description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
         )
 
-        async def query_wiki_content(instance: AsyncChatbotInstance, reference: ChatMessage, titles: str, query: str):
+        async def query_wiki_content(ctx: ToolContext, titles: str, query: str):
             if not titles:
                 return "no result: no page specified"
             
@@ -456,7 +455,7 @@ class PixiClient:
             self.logger.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
 
-        async def fetch_channel_history(instance: AsyncChatbotInstance, reference: ChatMessage, channel_id: str, n: int):
+        async def fetch_channel_history(ctx: ToolContext, channel_id: str, n: int):
             return await self.reflection_api.fetch_channel_history(int(channel_id), n=n)
 
         self.register_tool(
@@ -481,7 +480,7 @@ class PixiClient:
         )
 
     def __register_builtin_slash_commands(self):
-        async def notes_slash_command(message: ReflectionMessageBase):
+        async def notes_slash_command(message: AbstractMessage):
             if not await self.reflection_api.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
@@ -495,7 +494,7 @@ class PixiClient:
                 self.logger.exception(f"Failed to toggle notes")
                 await message.send("Failed to toggle notes.")
 
-        async def reset_slash_command(message: ReflectionMessageBase):
+        async def reset_slash_command(message: AbstractMessage):
             if not await self.reflection_api.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
@@ -511,7 +510,7 @@ class PixiClient:
             # for some reason event handlers in telegram are order dependent, meaning we should
             # run register_on_message_event after all slash commands are registered or else the
             # slash commands will not work.
-            async def start_command(message: ReflectionMessageBase):
+            async def start_command(message: AbstractMessage):
                 await message.send("Hiiiii, how's it going?")
 
             self.register_slash_command(name="start", function=start_command)
@@ -533,7 +532,7 @@ class PixiClient:
 
     async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessage):
         assert reference_message.origin
-        message: ReflectionMessageBase = reference_message.origin
+        message: AbstractMessage = reference_message.origin
 
         channel_id = message.environment.chat_id
 
@@ -607,7 +606,7 @@ class PixiClient:
                 else:
                     self.logger.warning("model didn't respond to a message. (invalid, requesting a response)")
                     # ask the model to respond again
-                    instance.add_message("[SYSTEM]: You didn't send anything to the user, if this is intentional use the SEND command with an empty message.")
+                    instance.add_message("[SYSTEM]: You didn't respond to the user, if this is intentional use the SEND action with an empty message instead.")
             except Exception:
                 self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
@@ -618,7 +617,7 @@ class PixiClient:
         """
         return self.environment_filter.is_allowed(identifier)
 
-    async def on_message(self, message: ReflectionMessageBase):
+    async def on_message(self, message: AbstractMessage):
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return
@@ -627,14 +626,14 @@ class PixiClient:
         if message_text is None:
             message_text = ""
 
-        # Check if the message is a command, a reply to the bot, a DM, or mentions the bot
+        # Check if the message contains a summon word, a reply to the bot, a DM, or mentions the bot
         bot_mentioned = self.reflection_api.is_bot_mentioned(message)
         is_keyword_present = False
-        for keyword in COMMAND_KEYWORDS:
+        for keyword in SUMMON_KEYWORDS:
             if keyword in message_text.lower():
                 is_keyword_present = True
                 break
-        is_prefixed = message_text.lower().startswith(tuple(["!" + k for k in COMMAND_KEYWORDS]))
+        is_prefixed = message_text.lower().startswith(tuple(["!" + k for k in SUMMON_KEYWORDS]))
         environment_id = message.environment_id
 
         if not (message.is_inside_dm() or bot_mentioned or is_prefixed or is_keyword_present):
@@ -649,10 +648,10 @@ class PixiClient:
 
         instance = await self.chatbot_factory.get_or_create(environment_id)
 
-        attached_images = None
+        attached_images = []
         if self.accept_images:
             attached_images = await message.fetch_images()
-        attached_audio = None
+        attached_audio = []
         if self.accept_audio:
             attached_audio = await message.fetch_audio()
 

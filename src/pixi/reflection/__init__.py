@@ -1,9 +1,9 @@
 import logging
 from typing import Callable
 
-from .message import ReflectionMessageBase
-from ..enums import Platform, ChatType
 from ..caching.base import MediaCache
+from ..enums import ChatType, Platform
+from .message import AbstractMessage
 
 
 class ReflectionAPI:
@@ -12,7 +12,7 @@ class ReflectionAPI:
         
         assert type(platform) == Platform
         self.platform = platform
-        self.reflection_message_cls: type[ReflectionMessageBase] | None = None
+        self.reflection_message_cls: type[AbstractMessage] | None = None
 
         self.logger.debug(f"initializing ReflectionAPI for {self.platform}...")
         try:
@@ -20,13 +20,13 @@ class ReflectionAPI:
                 case Platform.DISCORD:
                     from .discord import DiscordReflectionAPI
                     self._ref = DiscordReflectionAPI()
-                    from .message.discord import DiscordReflectionMessage
-                    self.reflection_message_cls = DiscordReflectionMessage
+                    from .message.discord import DiscordMessageImpl
+                    self.reflection_message_cls = DiscordMessageImpl
                 case Platform.TELEGRAM:
                     from .telegram import TelegramReflectionAPI
                     self._ref = TelegramReflectionAPI()
-                    from .message.telegram import TelegramReflectionMessage
-                    self.reflection_message_cls = TelegramReflectionMessage
+                    from .message.telegram import TelegramMessageImpl
+                    self.reflection_message_cls = TelegramMessageImpl
                 case _:
                     raise RuntimeError(f"ReflectionAPI unknown platform {self.platform}.")
         except ImportError:
@@ -49,7 +49,7 @@ class ReflectionAPI:
     def get_thread_info(self, thread) -> dict:
         return self._ref.get_thread_info(thread)
 
-    def get_realtime_data(self, message: ReflectionMessageBase) -> dict:
+    def get_realtime_data(self, message: AbstractMessage) -> dict:
         data = dict(
             platform=self.platform,
             chat_info=message.get_chat_info()
@@ -66,19 +66,19 @@ class ReflectionAPI:
     def can_read_history(self, channel) -> bool:
         return self._ref.can_read_history(channel)
 
-    def __typecheck_reflectionmessage(self, message: ReflectionMessageBase):
+    def __typecheck_reflectionmessage(self, message: AbstractMessage):
         assert self.reflection_message_cls is not None
         assert isinstance(message, self.reflection_message_cls)
 
-    def is_message_from_the_bot(self, message: ReflectionMessageBase) -> bool:
+    def is_message_from_the_bot(self, message: AbstractMessage) -> bool:
         self.__typecheck_reflectionmessage(message)
         return self._ref.is_message_from_the_bot(message)  # pyright: ignore[reportArgumentType]
 
-    def is_bot_mentioned(self, message: ReflectionMessageBase) -> bool:
+    def is_bot_mentioned(self, message: AbstractMessage) -> bool:
         self.__typecheck_reflectionmessage(message)
         return self._ref.is_bot_mentioned(message)  # pyright: ignore[reportArgumentType]
 
-    async def is_dm_or_admin(self, message: ReflectionMessageBase) -> bool:
+    async def is_dm_or_admin(self, message: AbstractMessage) -> bool:
         self.__typecheck_reflectionmessage(message)
         return await self._ref.is_dm_or_admin(message)  # pyright: ignore[reportArgumentType]
 

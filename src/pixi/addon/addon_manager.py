@@ -4,7 +4,7 @@ import glob
 import logging
 import importlib.util
 
-from ..utils import PixiPaths
+from ..storage.paths import PixiPaths
 
 class AddonManager:
     def __init__(self, bot):

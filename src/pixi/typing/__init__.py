@@ -1,4 +1,4 @@
-from typing import Any, Callable, Coroutine, Optional, Iterator, Generator, AsyncIterator, AsyncGenerator
+from typing import (Any, AsyncGenerator, AsyncIterator, Callable, Coroutine,
+                    Generator, Iterator, Optional)
 
-AsyncFunction = Callable[..., Coroutine[Any, Any, Any]]
 AsyncPredicate = Callable[..., Coroutine[Any, Any, bool]]

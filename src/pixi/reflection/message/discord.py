@@ -1,8 +1,10 @@
 import logging
+
 import discord
 
-from . import ReflectionMessageBase, ReflectionMessageAuthor, ReflectionEnvironment, ChatType, Platform
 from ...caching.base import MediaCache
+from . import (ChatType, Platform, ReflectionEnvironment,
+               ReflectionMessageAuthor, AbstractMessage)
 
 ImageCache = None
 AudioCache = None
@@ -16,11 +18,11 @@ except ImportError:
     pass
 
 
-class DiscordReflectionMessage(ReflectionMessageBase):
+class DiscordMessageImpl(AbstractMessage):
     origin: discord.Message | discord.Interaction
 
     @classmethod
-    def from_origin(cls, message: discord.Message | discord.Interaction) -> 'DiscordReflectionMessage':
+    def from_origin(cls, message: discord.Message | discord.Interaction) -> 'DiscordMessageImpl':
         user = None
         content = ""
         if isinstance(message, discord.Message):
@@ -49,7 +51,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
             forum_id=message.guild.id if message.guild else -1,
             is_forum=message.guild is not None
         )
-        return DiscordReflectionMessage(
+        return DiscordMessageImpl(
             content=content,
             author=ReflectionMessageAuthor(
                 id=user.id,
@@ -64,7 +66,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
             origin=message
         )
 
-    async def send(self, content: str) -> 'DiscordReflectionMessage':
+    async def send(self, content: str) -> 'DiscordMessageImpl':
         if isinstance(self.origin, discord.Message):
             return self.from_origin(await self.origin.channel.send(content))
         elif isinstance(self.origin, discord.Interaction):
@@ -73,7 +75,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
         else:
             raise TypeError(f"unknown origin of type {type(self.origin)}")
 
-    async def edit(self, content: str) -> 'DiscordReflectionMessage':
+    async def edit(self, content: str) -> 'DiscordMessageImpl':
         if isinstance(self.origin, discord.Message):
             return self.from_origin(await self.origin.edit(content=content))
         elif isinstance(self.origin, discord.Interaction):
@@ -94,7 +96,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
     async def typing(self):
         channel = self.origin.channel
         if channel and hasattr(channel, "typing"):
-            return await channel.typing()  # pyright: ignore[reportAttributeAccessIssue]
+            await channel.typing()  # pyright: ignore[reportAttributeAccessIssue]
 
     async def fetch_images(self) -> list[MediaCache]:
         if isinstance(self.origin, discord.Interaction):
@@ -124,7 +126,7 @@ class DiscordReflectionMessage(ReflectionMessageBase):
                 attachments.append(AudioCache(await attachment.read()))
         return attachments
 
-    async def fetch_refrences(self) -> 'DiscordReflectionMessage | None':
+    async def fetch_refrences(self) -> 'DiscordMessageImpl | None':
         origin: discord.Message | discord.Interaction = self.origin
         if isinstance(origin, discord.Interaction):
             return
@@ -132,10 +134,10 @@ class DiscordReflectionMessage(ReflectionMessageBase):
         if ref is None:
             return
         if ref.cached_message:
-            return DiscordReflectionMessage.from_origin(ref.cached_message)
+            return DiscordMessageImpl.from_origin(ref.cached_message)
         if ref.message_id is None:
             return
-        return DiscordReflectionMessage.from_origin(await origin.channel.fetch_message(ref.message_id))
+        return DiscordMessageImpl.from_origin(await origin.channel.fetch_message(ref.message_id))
 
     async def add_reaction(self, emoji: str):
         origin: discord.Message | discord.Interaction = self.origin

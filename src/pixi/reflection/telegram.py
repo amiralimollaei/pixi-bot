@@ -1,16 +1,16 @@
-import logging
 import asyncio
+import logging
 import os
 from typing import Callable
 
 import telegram
-from telegram.constants import ChatType, ChatMemberStatus
-from telegram.ext import Application, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram.constants import ChatMemberStatus, ChatType
+from telegram.ext import (Application, CommandHandler, ContextTypes,
+                          MessageHandler, filters)
 
-
-from .message.telegram import TelegramReflectionMessage
 from ..caching.base import MediaCache, UnsupportedMediaException
-from ..enums import Platform, Messages
+from ..enums import Messages, Platform
+from .message.telegram import TelegramMessageImpl
 
 ImageCache = None
 try:
@@ -43,7 +43,7 @@ class TelegramReflectionAPI:
         async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             assert message is not None
-            message = TelegramReflectionMessage.from_origin(message)
+            message = TelegramMessageImpl.from_origin(message)
             if message is not None:
                 if asyncio.iscoroutinefunction(function):
                     return await function(message)
@@ -59,7 +59,7 @@ class TelegramReflectionAPI:
         async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             assert message is not None
-            message = TelegramReflectionMessage.from_origin(message)
+            message = TelegramMessageImpl.from_origin(message)
             if message is not None:
                 if asyncio.iscoroutinefunction(function):
                     return await function(message)
@@ -67,27 +67,27 @@ class TelegramReflectionAPI:
                     return function(message)
         self.application.add_handler(CommandHandler(name, slash_command))
 
-    def get_guild_info(self, message: TelegramReflectionMessage) -> dict:
+    def get_guild_info(self, message: TelegramMessageImpl) -> dict:
         return dict()
 
-    def get_thread_info(self, message: TelegramReflectionMessage) -> dict:
+    def get_thread_info(self, message: TelegramMessageImpl) -> dict:
         return dict()
 
     def can_read_history(self, channel) -> bool:
         return True
 
-    def is_message_from_the_bot(self, message: TelegramReflectionMessage) -> bool:
+    def is_message_from_the_bot(self, message: TelegramMessageImpl) -> bool:
         origin: telegram.Message = message.origin
         assert origin.from_user is not None, "from_user is None"
         return origin.get_bot().id == origin.from_user.id
 
-    def is_bot_mentioned(self, message: TelegramReflectionMessage):
+    def is_bot_mentioned(self, message: TelegramMessageImpl):
         reply_message = message.origin.reply_to_message
         if reply_message is not None and reply_message.from_user is not None and self.application.bot.id == reply_message.from_user.id:
             return True 
         return message.content is not None and f"@{self.application.bot.username}" in message.content
 
-    async def is_dm_or_admin(self, message: TelegramReflectionMessage) -> bool:
+    async def is_dm_or_admin(self, message: TelegramMessageImpl) -> bool:
         if message.environment.chat_type == ChatType.PRIVATE:
             return True
         # Check if user has admin permissions to use the bot commands

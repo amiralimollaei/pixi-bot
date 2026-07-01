@@ -3,9 +3,12 @@ __author__ = "amiralimollaei"
 import os
 from pathlib import Path
 
-from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig, PixiFeatures, IdFilter, DatasetConfig, MediaWikiConfig
+from .config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                     OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
+                     OpenAILanguageModelConfig, PixiFeatures)
 from .enums import Platform
-from .utils import PixiPaths, Ansi, copy_default_resources, load_dotenv
+from .storage.paths import PixiPaths, copy_default_resources
+from .utils import Ansi, load_dotenv
 
 
 def run(
@@ -24,7 +27,8 @@ def run(
     PixiPaths.set_root(pixi_directory)
     copy_default_resources()
 
-    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
+    from .client import \
+        PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
 
     PixiClient(
         platform=platform,
@@ -40,9 +44,8 @@ def run(
 
 
 def main():
-    import logging
-
     import argparse
+    import logging
 
     # injecting colors into the default logger
 

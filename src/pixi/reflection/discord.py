@@ -1,16 +1,15 @@
-from dataclasses import asdict
-import logging
 import asyncio
+import logging
 import os
+from dataclasses import asdict
 from typing import IO, Any, Callable
 
 import discord
 from discord import app_commands
 
-from .message.discord import DiscordReflectionMessage
-
 from ..caching.base import MediaCache, UnsupportedMediaException
 from ..enums import Platform
+from .message.discord import DiscordMessageImpl
 
 ImageCache = None
 try:
@@ -46,10 +45,10 @@ class DiscordReflectionAPI:
         assert self.token
         self.bot.run(self.token, log_handler=None)
 
-    def register_on_message_event(self, function: Callable[[DiscordReflectionMessage], Any]):
+    def register_on_message_event(self, function: Callable[[DiscordMessageImpl], Any]):
         @self.bot.event
         async def on_message(message):
-            message = DiscordReflectionMessage.from_origin(message)
+            message = DiscordMessageImpl.from_origin(message)
             if asyncio.iscoroutinefunction(function):
                 return await function(message)
             else:
@@ -58,10 +57,10 @@ class DiscordReflectionAPI:
     def register_slash_command(self, name: str, function: Callable, description: str | None = None):
         @self.bot.tree.command(name=name, description=description)  # pyright: ignore[reportArgumentType]
         async def slash_command(interaction: discord.Interaction):
-            message = DiscordReflectionMessage.from_origin(interaction)
+            message = DiscordMessageImpl.from_origin(interaction)
             await function(message)
 
-    def get_guild_info(self, message: DiscordReflectionMessage) -> dict:
+    def get_guild_info(self, message: DiscordMessageImpl) -> dict:
         guild: discord.Guild | None = message.origin.guild
         if guild is None:
             return dict()
@@ -110,7 +109,7 @@ class DiscordReflectionAPI:
             } for m in guild.members]
         }
 
-    def get_thread_info(self, message: DiscordReflectionMessage) -> dict:
+    def get_thread_info(self, message: DiscordMessageImpl) -> dict:
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin, discord.Interaction):
             return dict()
@@ -136,19 +135,19 @@ class DiscordReflectionAPI:
                 return False
         return True
 
-    def is_message_from_the_bot(self, message: DiscordReflectionMessage) -> bool:
+    def is_message_from_the_bot(self, message: DiscordMessageImpl) -> bool:
         bot_user = self.bot.user
         assert bot_user is not None, "bot_user is None"
         return message.author.id == bot_user.id
 
-    def is_bot_mentioned(self, message: DiscordReflectionMessage) -> bool:
+    def is_bot_mentioned(self, message: DiscordMessageImpl) -> bool:
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin, discord.Interaction):
             return False
         bot_user = self.bot.user
         return bot_user is not None and bot_user in origin.mentions
 
-    async def is_dm_or_admin(self, message: DiscordReflectionMessage) -> bool:
+    async def is_dm_or_admin(self, message: DiscordMessageImpl) -> bool:
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin.channel, discord.DMChannel):
             return True
@@ -208,7 +207,7 @@ class DiscordReflectionAPI:
         messages = []
         # TODO: check channel type
         async for message in channel.history(limit=int(n)):  # type: ignore
-            message = DiscordReflectionMessage.from_origin(message)
+            message = DiscordMessageImpl.from_origin(message)
             messages.append(dict(
                 from_user=message.author.display_name or "unknown",
                 message_text=message.content,

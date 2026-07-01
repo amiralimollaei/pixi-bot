@@ -3,7 +3,7 @@ from typing import Optional
 
 import av
 
-from ..utils import PixiPaths
+from ..storage.paths import PixiPaths
 from .base import MediaCache, CompressedMedia
 
 

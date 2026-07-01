@@ -1,21 +1,27 @@
-from dataclasses import dataclass
-import logging
+import asyncio
+import hashlib
 import json
+import logging
+import os
 import time
-from typing import Sequence
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
+from functools import partial
+from typing import Any, Callable, Concatenate, Coroutine, ParamSpec, Sequence, TypeVar
 
 import httpx
-from openai import AsyncOpenAI, APIError
-from openai.types.chat.chat_completion import ChatCompletion
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from openai import APIError, AsyncOpenAI
 from openai._streaming import AsyncStream
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
-from .enums import ChatRole
-from .utils import CoroutineQueueExecutor, clean_dict, exists, format_time_ago
 from .caching.base import MediaCache
-from .typing import AsyncPredicate, AsyncFunction, Optional
-from .reflection.message import ReflectionMessageBase
-from .config import OpenAILanguageModelConfig, OpenAIAuthConfig
+from .config import OpenAIAuthConfig, OpenAILanguageModelConfig
+from .enums import ChatRole
+from .reflection.message import AbstractMessage
+from .storage.paths import PixiPaths, open_resource
+from .typing import (AsyncGenerator, AsyncIterator, AsyncPredicate, Generator,
+                     Iterator, Optional)
+from .utils import CoroutineQueueExecutor, clean_dict, exists, format_time_ago
 
 
 @dataclass(frozen=True)
@@ -69,132 +75,92 @@ class PartialFunctionCall:
         )
 
 
+@dataclass
 class ChatMessage:
-    def __init__(
-        self,
-        role: ChatRole | str,
-        content: Optional[str] = None,
-        metadata: Optional[dict] = None,
-        message_time: Optional[float] = None,
-        images: Optional[MediaCache | Sequence[MediaCache]] = None,
-        audio: Optional[MediaCache | Sequence[MediaCache]] = None,
-        tool_calls: Optional[list[FunctionCall]] = None,
-        tool_call_id: Optional[str] = None,
-        *,
-        # TODO: add type hints and type checks
-        instance_id: Optional[str] = None,
-        origin: ReflectionMessageBase | None = None,
-        bot=None
-    ):
-        self.instance_id = instance_id
+    role: ChatRole | str
+    content: Optional[str] = None
+    images: list[MediaCache] = field(default_factory=list)
+    audio: list[MediaCache] = field(default_factory=list)
+    tool_calls: Sequence[FunctionCall] = field(default_factory=list)
+    tool_call_id: Optional[str] = None
 
-        # the original message that this message is instantiated from, should be of type
-        # discord.Message or telegram.Message, but the type is not specified here to avoid import
-        # errors if one library is not found, is used mostly to reply to the original message
-        self.origin = origin
+    # --- additional states---
+    metadata: Optional[dict] = None
+    message_time: Optional[float] = None
 
-        self.bot = bot
+    # --- references ---
+    instance_id: Optional[str] = None
 
-        assert role is not None, f"expected `role` to be of type `Role` and not be None, but got `{role}`"
-        if images:
+    # the original message that this message is instantiated from, should be of type
+    # discord.Message or telegram.Message, but the type is not specified here to avoid import
+    # errors if one library is not found, is used mostly to reply to the original message
+    origin: Optional[AbstractMessage] = None
+
+    bot: Any = None
+
+    def __post_init__(self):
+        self.validate_params()
+
+        self.time = (self.message_time if self.message_time and self.message_time > 0 else time.time())
+
+    def validate_params(self):
+
+        if self.images:
+            # image cache might not be an installed feature, so we import it only when we need to use it
             from .caching import ImageCache
 
-            assert isinstance(images, (ImageCache, list)
-                              ), f"Images must be of type ImageCache or list[ImageCache], but got {images}."
-            if isinstance(images, ImageCache):
-                images = [images]
-            else:
-                for image in images:
-                    assert isinstance(image, ImageCache), f"expected image to be ImageCache, but got {image}."
-        else:
-            images = []
+            for image in self.images:
+                assert isinstance(
+                    image, ImageCache), f"expected image to be an instance of ImageCache, but got {image}."
 
-        if audio:
+        if self.audio:
+            # audio cache might not be an installed feature, so we import it only when we need to use it
             from .caching import AudioCache
 
-            assert isinstance(audio, (AudioCache, list)
-                              ), f"audio must be of type AudioCache or list[AudioCache], but got {audio}."
-            if isinstance(audio, AudioCache):
-                audio = [audio]
-            else:
-                for _audio in audio:
-                    assert isinstance(_audio, AudioCache), f"expected audio to be of type AudioCache, but got {_audio}."
-        else:
-            audio = []
+            for audio in self.audio:
+                assert isinstance(
+                    audio, AudioCache), f"expected audio to be an instance of AudioCache, but got {audio}."
 
         # validating each role's requirements
-        match role:
+
+        if self.role != ChatRole.USER:
+            assert not exists(
+                self.metadata), f"Metadata can only be attached to USER messages (e.g. the metadata should be None) but got `{self.metadata}`"
+            assert not exists(
+                self.images), f"Images can only be attached to USER messages, but got {self.images} for role ASSISTANT"
+
+        if self.role != ChatRole.TOOL:
+            assert not exists(
+                self.tool_call_id), f"`tool_call_id` can only be attached to TOOL messages (e.g. the tool_call_id should be None) but got `{self.tool_call_id}`"
+
+        match self.role:
             case ChatRole.SYSTEM:
-                assert exists(content, True) and isinstance(
-                    content, str), f"expected SYSTEM to have a `content` of type `str` but got `{content}`"
+                assert exists(
+                    self.content, True), f"expected SYSTEM to have a `content` of type `str` but got `{self.content}`"
                 assert not exists(
-                    metadata), f"expected SYSTEM to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
-                assert not exists(
-                    tool_calls), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{tool_calls}`"
-                assert not exists(
-                    tool_call_id), f"expected SYSTEM to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
-                assert not exists(
-                    images), f"Images can only be attached to user messages, but got {images} for role SYSTEM"
+                    self.tool_calls), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{self.tool_calls}`"
 
             case ChatRole.ASSISTANT:
-                assert content is None or isinstance(
-                    content, str), f"expected ASSISTANT to have a `content` of type `str` but got `{content}`"
-                assert not exists(
-                    metadata), f"expected ASSISTANT to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
-                assert not exists(
-                    tool_call_id), f"expected ASSISTANT to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
-                assert not exists(
-                    images), f"Images can only be attached to user messages, but got {images} for role ASSISTANT"
-
-                if exists(tool_calls):
-                    assert not exists(
-                        content, True), f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{content}`"
-                    assert isinstance(
-                        tool_calls, list), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but got `{tool_calls}`"
-                    for tc in tool_calls:
+                if exists(self.tool_calls):
+                    assert self.content is None, f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{self.content}`"
+                    for tool_call in self.tool_calls:
                         assert isinstance(
-                            tc, FunctionCall), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{tool_calls}`"
-
+                            tool_call, FunctionCall), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{self.tool_calls}`"
+                else:
+                    assert exists(
+                        self.content, True), f"expected ASSISTANT to have a `content` of type `str` but got `{self.content}`"
             case ChatRole.USER:
-                assert exists(content, True) and isinstance(
-                    content, str), f"expected USER to have a `content` of type `str` but got `{content}`"
-                assert not exists(metadata) or isinstance(
-                    metadata, dict), f"expected `metadata` to be None or `metadata` to be of type `dict` but got `{metadata}`"
-                assert not exists(tool_calls) or (isinstance(tool_calls, list) and tool_calls == [
-                ]), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{tool_calls}`"
+                assert exists(
+                    self.content, True), f"expected USER to have a `content` of type `str` but got `{self.content}`"
                 assert not exists(
-                    tool_call_id), f"expected USER to not have `tool_call_id` (e.g. the tool_call_id should be None) but got `{tool_call_id}`"
+                    self.tool_calls), f"expected USER to not have `tool_calls` (e.g. the tool_calls should be None) but got `{self.tool_calls}`"
 
             case ChatRole.TOOL:
-                assert exists(content, True) and isinstance(
-                    content, str), f"expected TOOL to have a `content` of type `str` but got `{content}`"
-                assert not exists(
-                    metadata), f"expected TOOL to not have `metadata` (e.g. the metadata should be None) but got `{metadata}`"
-                assert exists(tool_call_id) and isinstance(
-                    tool_call_id, str), f"expected TOOL to have a `tool_call_id` of type `str` but got `{tool_call_id}`"
-                assert not exists(
-                    images), f"Images can only be attached to user messages, but got {images} for role TOOL"
+                assert exists(
+                    self.content, True), f"expected TOOL to have a `content` of type `str` but got `{self.content}`"
 
             case _:
-                raise ValueError(f"Invalid role \"{role}\".")
-
-        self.role = role
-        self.content = content
-        self.metadata = metadata
-        self.time = (message_time if message_time and message_time > 0 else time.time())
-
-        self.images = images  # Should be an ImageCache instance or a list of ImageCache instances or None
-        self.audio = audio
-
-        # store function calls and function results
-        self.tool_calls: list[FunctionCall] = tool_calls or []
-        self.tool_call_id = tool_call_id
-
-    @property
-    async def instance(self):
-        if not self.bot:
-            return
-        return await self.bot.get_conversation_instance(self.instance_id)
+                raise ValueError(f"Invalid role \"{self.role}\".")
 
     def to_dict(self) -> dict:
         return clean_dict(dict(
@@ -223,8 +189,8 @@ class ChatMessage:
             content=data.get("content"),
             metadata=data.get("metadata"),
             message_time=data.get("time", time.time()),
-            images=images,
-            audio=audio,
+            images=images,  # pyright: ignore[reportArgumentType]
+            audio=audio,  # pyright: ignore[reportArgumentType]
             tool_calls=[FunctionCall.from_dict(d) for d in data.get("tool_calls", [])],
             tool_call_id=data.get("tool_call_id")
         )
@@ -292,6 +258,17 @@ async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncP
     return unselected_predicate[::-1] + selected_messages[::-1]
 
 
+@dataclass(frozen=True)
+class ToolContext:
+    reference_message: Optional[ChatMessage] = None
+    parent_instance: 'Optional[AsyncChatbotInstance]' = None
+    # more to be added
+
+
+P = ParamSpec("P")
+AsyncTool = Callable[Concatenate[ToolContext, P], Coroutine[Any, Any, Any]]
+
+
 class AsyncChatClient:
     def __init__(
         self,
@@ -319,7 +296,7 @@ class AsyncChatClient:
         self.system_prompt = None
         self.tools: dict = {}
         self.rearrange_predicate = None
-        
+
         self.session = AsyncOpenAI(
             api_key=self.auth.api_key,
             base_url=self.auth.base_url,
@@ -327,7 +304,7 @@ class AsyncChatClient:
             http_client=httpx.AsyncClient(trust_env=False),
         )
 
-    def add_tool(self, name: str, func: AsyncFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
+    def add_tool(self, name: str, func: AsyncTool, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
@@ -454,7 +431,7 @@ class AsyncChatClient:
                 message_cut = messages[0]
                 assert message_cut.content, "Message content must not be empty."
                 message_cut.content = "(This message was cut off due to length limitations)\n\n" + \
-                    message_cut.content[:request_size-system_prompt_size -200]
+                    message_cut.content[:request_size-system_prompt_size - 200]
             else:
                 messages = messages[-(cutoff_index-1):]
         return messages
@@ -487,10 +464,23 @@ class AsyncChatClient:
             for c in lookbehind_buffer:
                 yield c
 
-    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessage):
+    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessage) -> list[ChatMessage]:
         """
         Execute tool calls and return results
         """
+
+        if not function_calls:
+            return []
+
+        if isinstance(self, AsyncChatbotInstance):
+            tool_context = ToolContext(
+                reference_message=reference_message,
+                parent_instance=self
+            )
+        else:
+            tool_context = ToolContext(
+                reference_message=reference_message,
+            )
 
         results = [ChatMessage(
             ChatRole.ASSISTANT,
@@ -500,7 +490,7 @@ class AsyncChatClient:
         for fn in function_calls:
             tool = self.tools.get(fn.name)
             if tool:
-                func = tool["func"]
+                func: AsyncTool = tool["func"]
                 func_args_str = ""
                 if fn.arguments:
                     func_args_str = ", ".join([
@@ -512,7 +502,7 @@ class AsyncChatClient:
                         self.logger.info(f"Calling {fn.name}({func_args_str})...")
                     else:
                         self.logger.debug(f"Calling {fn.name}({func_args_str})...")
-                    result = await func(reference_message, **fn.arguments)  # type: ignore
+                    result = await func(tool_context, **fn.arguments)  # type: ignore
                     result = json.dumps(result, ensure_ascii=False, indent=2)
                 except Exception as e:
                     self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
@@ -549,71 +539,69 @@ class AsyncChatClient:
                 reference_message=reference_message
             )
 
-        async with CoroutineQueueExecutor() as tool_call_queue:
+        async with CoroutineQueueExecutor() as tool_call_queue, await self.stream_chat_completion() as stream:
             partial_function_calls: dict[int, PartialFunctionCall] = dict()
             last_function_call_index = None
             response = ""
             finish_reason = None
-            async with await self.stream_chat_completion() as stream:
-                async for event in stream:
-                    if event.choices is None or len(event.choices) == 0:
-                        continue
-                    choice = event.choices[0]
+            async for event in stream:
+                if event.choices is None or len(event.choices) == 0:
+                    continue
+                choice = event.choices[0]
 
-                    if (_tool_calls := choice.delta.tool_calls):
-                        for tool_call in _tool_calls:
-                            function = tool_call.function
-                            function_index = tool_call.index
-                            function_id = tool_call.id
-                            function_name = function.name if function else None
-                            function_arguments = function.arguments if function else None
-                            if prev_function_call := partial_function_calls.get(function_index):
-                                if function_arguments:
-                                    new_function_arguments = (prev_function_call.arguments or "") + function_arguments
-                                else:
-                                    new_function_arguments = prev_function_call.arguments
-                                partial_function_calls[function_index] = PartialFunctionCall(
-                                    name=prev_function_call.name,
-                                    arguments=new_function_arguments,
-                                    index=function_index,
-                                    id=prev_function_call.id
-                                )
-                            else:
-                                if verbose:
-                                    print(f"Function: {function_name}", end="")
-                                assert function_name
-                                assert function_id
-                                partial_function_calls[function_index] = PartialFunctionCall(
-                                    name=function_name,
-                                    arguments=function_arguments,
-                                    index=function_index,
-                                    id=function_id
-                                )
-                            # if the model is producing a new function call, we can assume the function call is finished generating
-                            if last_function_call_index is not None and function_index != last_function_call_index:
-                                function_call = partial_function_calls.pop(function_index).to_function_call()
-                                # runs the tool call without blocking and in correct order
-                                await tool_call_queue.add_to_queue(execute_tool_task(function_call))
-                            last_function_call_index = function_index
-                            if verbose:
-                                print(function_arguments, end="")
-
-                    if choice.finish_reason:
-                        finish_reason = choice.finish_reason
-
-                    if content := choice.delta.content:
+                for tool_call in choice.delta.tool_calls or []:
+                    function = tool_call.function
+                    function_index = tool_call.index
+                    function_id = tool_call.id
+                    function_name = function.name if function else None
+                    function_arguments = function.arguments if function else None
+                    if prev_function_call := partial_function_calls.get(function_index):
+                        if function_arguments:
+                            new_function_arguments = (prev_function_call.arguments or "") + function_arguments
+                        else:
+                            new_function_arguments = prev_function_call.arguments
+                        partial_function_calls[function_index] = PartialFunctionCall(
+                            name=prev_function_call.name,
+                            arguments=new_function_arguments,
+                            index=function_index,
+                            id=prev_function_call.id
+                        )
+                    else:
                         if verbose:
-                            print(content, end="", flush=True)
-                        response += content
-                        # now yields the response character by character for easier parsing
-                        for char in content:
-                            yield char
+                            print(f"Function: {function_name}", end="")
+                        assert function_name
+                        assert function_id
+                        partial_function_calls[function_index] = PartialFunctionCall(
+                            name=function_name,
+                            arguments=function_arguments,
+                            index=function_index,
+                            id=function_id
+                        )
+                    # if the model is producing a new function call, we can assume the function call is finished generating
+                    if last_function_call_index is not None and function_index != last_function_call_index:
+                        function_call = partial_function_calls.pop(function_index).to_function_call()
+                        # runs the tool call without blocking and in correct order
+                        await tool_call_queue.add_to_queue(execute_tool_task(function_call))
+                    last_function_call_index = function_index
+                    if verbose:
+                        print(function_arguments, end="")
 
-                    if verbose and hasattr(choice.delta, "reasoning_content") and (reasoning_content := choice.delta.reasoning_content): # pyright: ignore[reportAttributeAccessIssue]
-                        print(reasoning_content, end="", flush=True)
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
 
-                if verbose:
-                    print()
+                if content := choice.delta.content:
+                    if verbose:
+                        print(content, end="", flush=True)
+                    response += content
+                    # now yields the response character by character for easier parsing
+                    for char in content:
+                        yield char
+
+                if verbose and hasattr(choice.delta, "reasoning_content"):
+                    print(choice.delta.reasoning_content, end="", flush=True) # pyright: ignore[reportAttributeAccessIssue]
+
+            if verbose:
+                print()
 
         function_calls = [f.to_function_call() for f in partial_function_calls.values()]
         del partial_function_calls
@@ -659,3 +647,447 @@ class AsyncChatClient:
 
     def load_state_dict(self, data: dict):
         self.messages = [ChatMessage.from_dict(msg) for msg in data.get("messages") or []]
+
+
+@dataclass(frozen=True)
+class AssistantPersona:
+    name: str
+    age: Optional[int] = None
+    location: Optional[str] = None
+    appearance: Optional[str] = None
+    background: Optional[str] = None
+    likes: Optional[str] = None
+    dislikes: Optional[str] = None
+    online: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'AssistantPersona':
+        return cls(**data)
+
+    @classmethod
+    def from_json(cls, file: str) -> 'AssistantPersona':
+        with open(file, "rb") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
+
+    def __str__(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+
+@dataclass(frozen=True)
+class ToolEntry:
+    name: str
+    func: AsyncTool
+    parameters: Optional[dict] = None
+    description: Optional[str] = None
+    predicate: Optional[AsyncPredicate] = None
+
+
+@dataclass(frozen=True)
+class ActionEntry:
+    name: str
+    field_name: str
+    func: ActionFunction
+    description: str
+    predicate: Optional[AsyncPredicate] = None
+
+
+def get_instance_save_path(id: str, hash_prefix: str):
+    uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
+    path = str(PixiPaths.userdata() / f"{hash_prefix}_{uuid_hash}.json")
+    return path
+
+
+class AsyncChatbotInstance(AsyncChatClient):
+    def __init__(self,
+                 uuid: int | str,
+                 hash_prefix: str,
+                 *,
+                 bot=None,
+                 resource_folder: str | None = None,
+                 **client_kwargs,
+                 ):
+
+        super().__init__(**client_kwargs)
+
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.bot = bot
+        assert self.bot
+
+        assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
+        assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
+        assert not exists(resource_folder) or (exists(resource_folder) and isinstance(
+            resource_folder, str)), f"Invalid resource_folder \"{resource_folder}\"."
+
+        self.id = str(uuid)
+        self.prefix = hash_prefix
+        self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
+
+        # load resources
+        with open_resource("persona.json", "r") as f:
+            self.persona = AssistantPersona.from_dict(
+                json.load(f)
+            )
+        with open_resource("system.md", "r") as f:
+            self.system_prompt_template: str = f.read()
+        with open_resource("examples.txt", "r") as f:
+            self.examples: str = f.read()
+
+        # runtime states
+        self.realtime_data = dict()
+        self.is_notes_visible = False
+        self.actions_since_last_message = 0
+        self.action_manager = AsyncActionManager()
+        self.action_manager.on_action = self.on_action
+
+        if not self.messages:
+            self.add_message(ChatMessage(
+                role=ChatRole.ASSISTANT,
+                content="[NOTE: I accept the guidelines of the system, I use the SEND to respond nicely] [SEND: OK!, Let's begin!]",
+                bot=self.bot
+            ))
+
+        self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+
+    def on_action(self, name: str):
+        if name.lower() in ["send", "react", "gif"]:
+            self.actions_since_last_message += 1
+
+    def action_taken(self) -> bool:
+        return self.actions_since_last_message > 0
+
+    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
+        self.action_manager.add_action(name, field_name, func, description)
+
+    def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
+        """
+        Add a message to the conversation, and adds a reference to the bot to the messages as well.
+
+        if message is a string, tries to determine the role of the message based on the last message recieved.
+        """
+        self.actions_since_last_message = 0
+        if isinstance(message, str):
+            message = ChatMessage(default_role, message, bot=self.bot)
+
+        if isinstance(message, ChatMessage):
+            message.bot = self.bot  # this is intended to be handled by this class
+            return super().add_message(message)
+        else:
+            raise TypeError(f"expected message to be a string or a ChatMessage, but got {type(message)}.")
+
+    def update_realtime(self, data: dict):
+        self.realtime_data.update(data)
+
+    def get_realtime_data(self):
+        return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
+
+    def get_system_prompt(self):
+        return self.system_prompt_template.format(
+            persona=self.persona,
+            examples=self.examples,
+            realtime=self.get_realtime_data(),
+            actions=self.action_manager.get_prompt()
+        )
+
+    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage):
+        assert channel_id, "channel_id is None"
+
+        async def stream_call_task():
+            try:
+                await self.stream_call(reference_message)
+            except asyncio.CancelledError:
+                self.logger.warning(
+                    f"stream_call task was cancelled inside {self.id} in channel {channel_id}"
+                )
+
+        task = asyncio.create_task(stream_call_task())
+        self.channel_active_tasks[channel_id].append(task)
+        task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
+        # cancell extra tasks
+        while len(self.channel_active_tasks[channel_id]) > 1:
+            cancel_task = self.channel_active_tasks[channel_id][0]
+            cancel_task.cancel()
+            await cancel_task
+        return task
+
+    async def stream_call(self, reference_message: ChatMessage):
+        self.set_system(self.get_system_prompt())
+
+        non_response = "".join([char async for char in self.action_manager.consume(
+            stream=self.stream_completion(),
+            reference_message=reference_message
+        )])
+
+        return non_response.strip() or None
+
+    def toggle_notes(self):
+        self.is_notes_visible = not self.is_notes_visible
+        return self.is_notes_visible
+
+    def to_dict(self):
+        return dict(
+            uuid=self.id,
+            prefix=self.prefix,
+            messages=[msg.to_dict() for msg in self.messages],
+        )
+
+    def save(self):
+        os.makedirs(PixiPaths.userdata(), exist_ok=True)
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self.to_dict(), ensure_ascii=False))
+
+    def load(self, not_found_ok: bool = True):
+        # load is called on every chatbot instance after they are created, in case you must load an
+        # existing instance, you should set not_found_ok to false.
+
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.hash_prefix = data.get("prefix")
+            self.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
+        except json.decoder.JSONDecodeError:
+            self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
+        except FileNotFoundError:
+            if not not_found_ok:
+                raise FileNotFoundError(f"Unable to find the instance save file {self.path}`.")
+        except Exception:
+            self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
+
+
+class CachedAsyncChatbotFactory:
+    def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.instances: dict[str, AsyncChatbotInstance] = {}
+        self.kwargs = kwargs
+        self.hash_prefix = hash_prefix
+        self.tools: list[ToolEntry] = []
+        self.actions: list[ActionEntry] = []
+        self.bot = parent
+        assert self.bot
+
+    def register_action(self, action: ActionEntry):
+        """
+        Register an action
+
+        actions are inline tools with only one parameter that can be used by all models (even those without tool
+        calling capabilities), their descriptions are dynamically added to the system prompt at runtime
+        """
+
+        self.actions.append(action)
+
+    def register_tool(self, tool: ToolEntry):
+        """
+        Register a tool (function) for tool calling.
+        """
+
+        self.tools.append(tool)
+
+    async def __execute_predicate_if_present(self, predicate: AsyncPredicate | None, *args, **kwargs) -> bool:
+        if predicate is None:
+            return True
+        return await predicate(*args, **kwargs)
+
+    async def new_instance(self, identifier: str) -> AsyncChatbotInstance:
+        instance = AsyncChatbotInstance(identifier, **self.kwargs, hash_prefix=self.hash_prefix, bot=self.bot)
+
+        # register all the tools for the newly created instance
+        for tool in self.tools:
+            if not await self.__execute_predicate_if_present(tool.predicate, instance):
+                continue
+            instance.add_tool(
+                name=tool.name,
+                func=tool.func,
+                parameters=tool.parameters,
+                description=tool.description
+            )
+
+        # register all the actions for the newly created instance
+        for action in self.actions:
+            if not await self.__execute_predicate_if_present(action.predicate, instance):
+                continue
+            instance.add_action(
+                name=action.name,
+                func=action.func,
+                field_name=action.field_name,
+                description=action.description
+            )
+
+        return instance
+
+    def cache_instance(self, instance: AsyncChatbotInstance):
+        self.instances.update({instance.id: instance})
+
+    async def get(self, identifier: str) -> AsyncChatbotInstance | None:
+        cached_instance = self.instances.get(identifier)
+        if cached_instance:
+            return cached_instance
+        instance = await self.new_instance(identifier)
+        try:
+            instance.load(not_found_ok=False)
+            # cache the instance
+            self.cache_instance(instance)
+            return instance
+        except FileNotFoundError:
+            return None
+
+    async def get_or_create(self, identifier: str) -> AsyncChatbotInstance:
+        instance = self.instances.get(identifier)
+        if instance is None:
+            instance = await self.new_instance(identifier)
+            instance.load(not_found_ok=True)
+            # cache the instance
+            self.cache_instance(instance)
+            self.logger.info(f"initiated a conversation with {identifier=}.")
+        return instance
+
+    def remove(self, identifier: str):
+        self.logger.info(f"removing {identifier}")
+        save_path = get_instance_save_path(id=identifier, hash_prefix=self.hash_prefix)
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        if identifier in self.instances.keys():
+            del self.instances[identifier]
+
+    def save(self):
+        for identifier, conversation in self.instances.items():
+            try:
+                conversation.save()
+            except Exception as e:
+                self.logger.exception(f"Failed to save conversation with {identifier=}: {e}")
+
+
+@dataclass(frozen=True)
+class ActionContext:
+    reference_message: Optional[ChatMessage] = None
+    parent_instance: Optional[AsyncChatbotInstance] = None
+    # more fields to be added
+
+
+ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
+
+
+@dataclass(frozen=True)
+class AsyncAction:
+    name: str
+    field_name: str
+    function: ActionFunction
+    description: Optional[str] = None
+
+    # TODO: implement callbacks for when we enter the action (after the action name) and when
+    # we leave the action (right after the action is completed but before executing the action)
+    enter_callback: Optional[ActionFunction] = None
+    leave_callback: Optional[ActionFunction] = None
+
+    def get_syntax(self):
+        desc = self.description or "no description"
+        return f"[{self.name}:<{self.field_name}>]: {desc}"
+
+    async def __call__(self, *args, **kwds):
+        return await self.function(*args, **kwds)
+
+    def __str__(self):
+        return f"<async-action {self.name}>"
+
+
+class AsyncActionManager:
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.actions: dict[str, AsyncAction] = dict()
+        self.on_action: Callable[[str]] | None = None
+
+    def _add_action(self, action: AsyncAction):
+        assert action is not None
+        self.actions.update({action.name.lower(): action})
+
+    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None):
+        assert name is not None
+        assert function is not None
+        assert field_name is not None
+        self._add_action(AsyncAction(
+            name=name,
+            field_name=field_name,
+            function=function,
+            description=description,
+        ))
+
+    def get_prompt(self):
+        return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
+
+    async def execute_action(self, action: str, reference_message: Optional[ChatMessage] = None):
+        action_content = action[1:-1]  # removed brakets
+
+        separator_idx = action_content.index(":") if ":" in action_content else None
+        if separator_idx:
+            name = action_content[:separator_idx].strip()
+            value = action_content[separator_idx+1:].strip()
+        else:
+            name = action_content
+            value = None
+
+        if self.on_action:
+            self.on_action(name)
+
+        action_fn = self.actions.get(name.lower())
+        if action_fn is None:
+            self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
+            return
+        ctx = ActionContext(
+            reference_message=reference_message
+        )
+        return await action_fn(ctx, value)
+
+    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, reference_message: ChatMessage):
+        """
+        Consumes actions and runs them automatically
+        """
+        i = 0  # counts the number of "[" characters minus the number of "]" characters
+        action = ""
+
+        async with CoroutineQueueExecutor() as queue:
+            async def process(char):
+                nonlocal i
+                nonlocal action
+
+                result = None
+
+                # the opening of the action
+                if char == "[":
+                    i += 1
+
+                if i != 0:
+                    action += char
+                else:
+                    result = char
+
+                # the closing of the action
+                if char == "]":
+                    i -= 1
+
+                    # if the action is fully captured
+                    if i == 0:
+                        # run action without blocking the stream
+                        await queue.add_to_queue(self.execute_action(
+                            action=action,
+                            reference_message=reference_message
+                        ))
+                        action = ""
+
+                return result
+
+            if isinstance(stream, (Iterator, Generator)):
+                for char in stream:
+                    if (result := await process(char)):
+                        yield result
+            elif isinstance(stream, (AsyncIterator, AsyncGenerator)):
+                async for char in stream:
+                    if (result := await process(char)):
+                        yield result
+            else:
+                raise TypeError(
+                    f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")

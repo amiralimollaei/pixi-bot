@@ -1,9 +1,12 @@
 import logging
-import telegram
-from telegram.constants import ChatAction, ChatType as TChatType
 
-from . import ReflectionMessageBase, ReflectionMessageAuthor, ReflectionEnvironment, ChatType, Platform
+import telegram
+from telegram.constants import ChatAction
+from telegram.constants import ChatType as TChatType
+
 from ...caching.base import MediaCache
+from . import (ChatType, Platform, ReflectionEnvironment,
+               ReflectionMessageAuthor, AbstractMessage)
 
 ImageCache = None
 AudioCache = None
@@ -17,11 +20,11 @@ except ImportError:
     pass
 
 
-class TelegramReflectionMessage(ReflectionMessageBase):
+class TelegramMessageImpl(AbstractMessage):
     origin: telegram.Message
 
     @classmethod
-    def from_origin(cls, message: telegram.Message) -> 'TelegramReflectionMessage':
+    def from_origin(cls, message: telegram.Message) -> 'TelegramMessageImpl':
         user = message.from_user
         assert user is not None
         content = message.text_markdown_v2 or message.caption_markdown_v2
@@ -36,7 +39,7 @@ class TelegramReflectionMessage(ReflectionMessageBase):
                 chat_type = ChatType.GROUP
             case TChatType.CHANNEL:
                 chat_type = ChatType.TEXT
-        return TelegramReflectionMessage(
+        return TelegramMessageImpl(
             content=content,
             author=ReflectionMessageAuthor(
                 id=user.id,
@@ -57,10 +60,10 @@ class TelegramReflectionMessage(ReflectionMessageBase):
             origin=message
         )
 
-    async def send(self, content: str) -> 'TelegramReflectionMessage':
+    async def send(self, content: str) -> 'TelegramMessageImpl':
         return self.from_origin(await self.origin.chat.send_message(content))
 
-    async def edit(self, content: str) -> 'TelegramReflectionMessage | None':
+    async def edit(self, content: str) -> 'TelegramMessageImpl | None':
         new_origin = await self.origin.edit_text(text=content)
         if isinstance(new_origin, telegram.Message):
             return self.from_origin(new_origin)
@@ -70,7 +73,7 @@ class TelegramReflectionMessage(ReflectionMessageBase):
         await self.origin.delete()
 
     async def typing(self):
-        return await self.origin.chat.send_chat_action(ChatAction.TYPING)
+        await self.origin.chat.send_chat_action(ChatAction.TYPING)
 
     async def fetch_images(self) -> list[MediaCache]:
         origin: telegram.Message = self.origin
@@ -121,9 +124,9 @@ class TelegramReflectionMessage(ReflectionMessageBase):
             attachments.append(AudioCache(bytes(audio_bytes)))
         return attachments
 
-    async def fetch_refrences(self) -> 'TelegramReflectionMessage | None':
+    async def fetch_refrences(self) -> 'TelegramMessageImpl | None':
         ref = self.origin.reply_to_message
-        return TelegramReflectionMessage.from_origin(ref) if ref else None
+        return TelegramMessageImpl.from_origin(ref) if ref else None
 
     async def add_reaction(self, emoji: str):
         await self.origin.set_reaction(emoji)

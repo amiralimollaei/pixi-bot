@@ -1,19 +1,19 @@
 import dataclasses
-from glob import glob
 import hashlib
 import json
 import logging
 import os
 import re
+from glob import glob
 
 import httpx
 import numpy as np
 import openai
 import zstandard
 
-from .utils import PixiPaths
 from .caching import EmbeddingCache
 from .config import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
+from .storage.paths import PixiPaths
 
 
 @dataclasses.dataclass(frozen=True)

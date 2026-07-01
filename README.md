@@ -13,7 +13,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - **Image Support:** Can recieve, compress and cache all image formats.
 - **Audio Support:** Can recieve, compress and cache all audio formats.
 - **Configurable:** Easily modify the bot's persona and behavior.
-- **Addon Support:** Easily add new commands, tools, or other integrations (WIP, API is unstable and documentation is pending).
+- **Addon Support:** Easily add new actions, tools, or other integrations (WIP, API is unstable and documentation is pending).
 - **Dotenv Support:** Securely manage API keys and tokens with environment variables.
 
 ## Requirements

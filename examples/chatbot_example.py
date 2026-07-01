@@ -18,34 +18,34 @@ if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
     instance = AsyncChatbotInstance(0, "test")
 
-    async def psudo_send_command(text):
+    async def psudo_send_action(text):
         print("LLM: " + text)
 
-    async def psudo_note_command(text):
+    async def psudo_note_action(text):
         print("Thoughts: " + text)
 
-    async def psudo_yeet_command(text):
+    async def psudo_yeet_action(text):
         print("Yeet: " + text)
 
-    instance.add_command(
+    instance.add_action(
         name="send",
         field_name="message",
-        func=psudo_send_command,
+        func=psudo_send_action,
         description="sends a message"
     )
-    instance.add_command(
+    instance.add_action(
         name="note",
         field_name="thoughts",
-        func=psudo_note_command,
+        func=psudo_note_action,
         description="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
     )
-    instance.add_command(
+    instance.add_action(
         name="yeet",
         field_name="object",
-        func=psudo_yeet_command,
+        func=psudo_yeet_action,
         description="yeets the object"
     )
 
-    print(instance.command_manager.get_prompt())
+    print(instance.action_manager.get_prompt())
 
     asyncio.run(main())

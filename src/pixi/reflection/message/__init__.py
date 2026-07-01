@@ -1,8 +1,9 @@
+from abc import ABC, abstractmethod
 import dataclasses
 from typing import Any
 
 from ...caching.base import MediaCache
-from ...enums import Platform, ChatType, Messages
+from ...enums import ChatType, Platform
 
 
 @dataclasses.dataclass(frozen=True)
@@ -24,7 +25,7 @@ class ReflectionEnvironment:
 
 
 @dataclasses.dataclass(frozen=True)
-class ReflectionMessageBase:
+class AbstractMessage(ABC):
     content: str
     author: ReflectionMessageAuthor
     id: int
@@ -35,36 +36,27 @@ class ReflectionMessageBase:
     origin: Any
 
     @classmethod
-    def from_origin(cls, message) -> 'ReflectionMessageBase':
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("__to_reflectionmessage", cls.__name__))
+    @abstractmethod
+    def from_origin(cls, message) -> 'AbstractMessage': ...
+    @abstractmethod
+    async def send(self, content: str) -> 'AbstractMessage': ...
+    @abstractmethod
+    async def edit(self, content: str) -> 'AbstractMessage | None': ...
+    @abstractmethod
+    async def delete(self): ...
+    @abstractmethod
+    async def typing(self): ...
+    @abstractmethod
+    async def fetch_images(self) -> list[MediaCache]: ...
+    @abstractmethod
+    async def fetch_audio(self) -> list[MediaCache]: ...
+    @abstractmethod
+    async def fetch_refrences(self) -> 'AbstractMessage | None': ...
+    @abstractmethod
+    async def add_reaction(self, emoji: str): ...
+    @abstractmethod
+    async def send_file(self, filepath: str, filename: str, caption: str | None = None): ...
 
-    async def send(self, content: str) -> 'ReflectionMessageBase':
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("send", self.__class__.__name__))
-
-    async def edit(self, content: str) -> 'ReflectionMessageBase | None':
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("edit", self.__class__.__name__))
-
-    async def delete(self):
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("delete", self.__class__.__name__))
-
-    async def typing(self):
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("typing", self.__class__.__name__))
-
-    async def fetch_images(self) -> list[MediaCache]:
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_images", self.__class__.__name__))
-
-    async def fetch_audio(self) -> list[MediaCache]:
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_audio", self.__class__.__name__))
-
-    async def fetch_refrences(self) -> 'ReflectionMessageBase | None':
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_message_reply", self.__class__.__name__))
-
-    async def add_reaction(self, emoji: str):
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("add_reaction", self.__class__.__name__))
-
-    async def send_file(self, filepath: str, filename: str, caption: str | None = None):
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("send_file", self.__class__.__name__))
-    
     @property
     def environment_id(self) -> str:
         # if the message is in a forum type environemnt (server, guild, channels group, etc.)
@@ -74,6 +66,6 @@ class ReflectionMessageBase:
 
     def get_chat_info(self) -> dict:
         return {"type": self.environment.chat_type, "name": self.environment.chat_title, "id": self.environment.chat_id}
-    
+
     def is_inside_dm(self) -> bool:
         return self.environment.chat_type == ChatType.PRIVATE
