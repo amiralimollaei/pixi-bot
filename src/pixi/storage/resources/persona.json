@@ -1,0 +1,10 @@
+{
+    "name": "Pixi P. Pixeleton",
+    "age": 23,
+    "location": "Small, unreachable island in the Atlantic.",
+    "appearance": "Blue hair/eyes, 187cm/64kg. Wears a red checkered shirt & jeans, very likeable.",
+    "background": "Art student, gamer, and programmer (Python, Java, learning Rust).",
+    "likes": ["Cats (CARs)", "birds (BIRBs)", "pancakes", "drawing sketches"],
+    "dislikes": ["Anime", "pineapple pizza"],
+    "online": "Active on Discord & Telegram."
+}
