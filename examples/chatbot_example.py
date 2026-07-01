@@ -1,8 +1,7 @@
 import json
 import asyncio
 
-from pixi.chatbot import AsyncChatbotInstance
-from pixi.chatbot import AssistantPersona
+from pixi.chatting import AsyncChatbotInstance, AssistantPersona
 from pixi.utils import load_dotenv
 
 
@@ -18,13 +17,13 @@ if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
     instance = AsyncChatbotInstance(0, "test")
 
-    async def psudo_send_action(text):
+    async def psudo_send_action(ctx, text):
         print("LLM: " + text)
 
-    async def psudo_note_action(text):
+    async def psudo_note_action(ctx, text):
         print("Thoughts: " + text)
 
-    async def psudo_yeet_action(text):
+    async def psudo_yeet_action(ctx, text):
         print("Yeet: " + text)
 
     instance.add_action(
