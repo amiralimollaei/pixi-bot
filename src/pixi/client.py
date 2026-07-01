@@ -12,13 +12,14 @@ from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import (ActionContext, ActionEntry, AsyncChatbotInstance,
-                       CachedAsyncChatbotFactory, ChatMessage, ToolContext, ToolEntry)
+                       CachedAsyncChatbotFactory, ChatMessage, ToolContext,
+                       ToolEntry)
 from .config import (DatasetConfig, IdFilter, MediaWikiConfig,
                      OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
                      OpenAILanguageModelConfig, PixiFeatures)
 from .database import AsyncEmbeddingDatabase, DirectoryDatabase
 from .enums import ChatRole, Platform
-from .reflection import ReflectionAPI, AbstractMessage
+from .reflection import AbstractMessage, ReflectionAPI
 from .typing import AsyncPredicate, Optional
 
 # constants
@@ -68,7 +69,7 @@ class PixiClient:
         self.log_tool_calls = PixiFeatures.EnableToolLogging in features
         self.datasets = []
         self.environment_filter = environment_filter
-    
+
         self.accept_images = PixiFeatures.EnableImageSupport in features
         self.accept_audio = PixiFeatures.EnableAudioSupport in features
         if (self.accept_images or self.accept_audio) and not SUPPORTS_MEDIA_CACHING:
@@ -94,13 +95,13 @@ class PixiClient:
                 self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
 
         self.__register_builtin_actions()
-        
+
         if self.enable_tool_calls and datasets:
             self.logger.info(f"registering {len(datasets)} dataset(s):")
             for dataset_config in datasets:
                 self.logger.info(f" - {dataset_config.name}")
                 self.datasets.append(self.register_database_tool(dataset_config))
-        
+
         if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features and wikis:
             self.logger.info(f"registering {len(wikis)} wiki(s):")
             for wiki_config in wikis:
@@ -153,7 +154,8 @@ class PixiClient:
 
             for role, model_id in configured_models.items():
                 if model_id not in available_models:
-                    raise RuntimeError(f"{role} model \"{model_id}\" was not found in the list of available models on the API server.")
+                    raise RuntimeError(
+                        f"{role} model \"{model_id}\" was not found in the list of available models on the API server.")
 
         except openai.APIConnectionError as e:
             raise RuntimeError(
@@ -182,13 +184,14 @@ class PixiClient:
             predicate=predicate
         ))
 
-    def register_action(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None):
+    def register_action(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None, is_visible: bool = True):
         self.chatbot_factory.register_action(ActionEntry(
             name=name,
             func=func,
             field_name=field_name,
             description=description,
-            predicate=predicate
+            is_visible=is_visible,
+            predicate=predicate,
         ))
 
     def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs) -> AgentBase:
@@ -219,8 +222,8 @@ class PixiClient:
             assert ctx.reference_message.origin is not None
             message: AbstractMessage = ctx.reference_message.origin
 
-            #wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
-            #await self.typing_delay(message, wait_time)
+            # wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
+            # await self.typing_delay(message, wait_time)
             await message.send(value)
 
         self.register_action(
@@ -235,7 +238,7 @@ class PixiClient:
                     return
                 assert ctx.reference_message.origin is not None
                 message: AbstractMessage = ctx.reference_message.origin
-                
+
                 assert self.gif_api is not None
                 resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
                 results = []
@@ -268,7 +271,8 @@ class PixiClient:
             name="note",
             field_name="thoughts",
             func=note_action,
-            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words"
+            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words",
+            is_visible=False,
         )
 
         async def react_action(ctx: ActionContext, value: str):
@@ -293,7 +297,7 @@ class PixiClient:
         if not self.enable_tool_calls:
             self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             return
-        
+
         database_name = dataset_config.name
         database_api = DirectoryDatabase.from_directory(dataset_config.name)
 
@@ -403,7 +407,7 @@ class PixiClient:
         async def query_wiki_content(ctx: ToolContext, titles: str, query: str):
             if not titles:
                 return "no result: no page specified"
-            
+
             _titles = [t for t in titles.split("|") if t]
             if not _titles:
                 return "no result: no page specified"
@@ -563,9 +567,9 @@ class PixiClient:
                 self.logger.warning(f"{noncall_result=}")
         except Exception:
             self.logger.exception(f"Unknown error while responding to a message in {instance.id}.")
-            #await message.send(Messages.UNKNOWN_ERROR)
+            # await message.send(Messages.UNKNOWN_ERROR)
 
-        return instance.action_taken()
+        return instance.action_manager.is_visible_actions_taken()
 
     async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 10):
         """
@@ -589,7 +593,6 @@ class PixiClient:
         assert chat_message.instance_id
         identifier = chat_message.instance_id
 
-
         instance = await self.get_conversation_instance(identifier)
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
@@ -598,7 +601,7 @@ class PixiClient:
         messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
             try:
-                responded = await self.pixi_resp(instance, reference_message = chat_message)
+                responded = await self.pixi_resp(instance, reference_message=chat_message)
                 instance.save()
                 if responded:
                     self.logger.info("model responded to a message.")
@@ -606,7 +609,8 @@ class PixiClient:
                 else:
                     self.logger.warning("model didn't respond to a message. (invalid, requesting a response)")
                     # ask the model to respond again
-                    instance.add_message("[SYSTEM]: You didn't respond to the user, if this is intentional use the SEND action with an empty message instead.")
+                    instance.add_message(
+                        "[SYSTEM]: You didn't respond to the user, if this is intentional use the SEND action with an empty message instead.")
             except Exception:
                 self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)

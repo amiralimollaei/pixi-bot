@@ -269,6 +269,150 @@ P = ParamSpec("P")
 AsyncTool = Callable[Concatenate[ToolContext, P], Coroutine[Any, Any, Any]]
 
 
+@dataclass(frozen=True)
+class ActionContext:
+    reference_message: Optional[ChatMessage] = None
+    parent_instance: 'Optional[AsyncChatbotInstance]' = None
+    # more fields to be added
+
+
+ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
+
+
+@dataclass(frozen=True)
+class AsyncAction:
+    name: str
+    field_name: str
+    function: ActionFunction
+    description: Optional[str] = None
+    is_visible: bool = True  # whether or not the action has a visible effect from the user's perspective
+
+    # TODO: implement callbacks for when we enter the action (after the action name) and when
+    # we leave the action (right after the action is completed but before executing the action)
+    enter_callback: Optional[ActionFunction] = None
+    leave_callback: Optional[ActionFunction] = None
+
+    def get_syntax(self):
+        desc = self.description or "no description"
+        return f"[{self.name}:<{self.field_name}>]: {desc}"
+
+    async def call(self, *args, **kwds):
+        return await self.function(*args, **kwds)
+
+    def __str__(self):
+        return f"<async-action {self.name}>"
+
+
+class AsyncActionManager:
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.actions: dict[str, AsyncAction] = dict()
+        self.on_action: Callable[[str]] | None = None
+        self.visible_actions_taken = 0
+
+    def _add_action(self, action: AsyncAction):
+        assert action is not None
+        self.actions.update({action.name.lower(): action})
+
+    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None, is_visible: bool = True):
+        assert name
+        assert field_name
+        assert function is not None
+        self._add_action(AsyncAction(
+            name=name,
+            field_name=field_name,
+            function=function,
+            description=description,
+            is_visible=is_visible
+        ))
+
+    def get_prompt(self):
+        return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
+
+    async def execute_action(self, action: str, reference_message: Optional[ChatMessage] = None):
+        action_content = action[1:-1]  # removed brakets
+
+        separator_idx = action_content.index(":") if ":" in action_content else None
+        if separator_idx:
+            name = action_content[:separator_idx].strip()
+            value = action_content[separator_idx+1:].strip()
+        else:
+            name = action_content
+            value = None
+
+        if self.on_action:
+            self.on_action(name)
+
+        action_meta = self.actions.get(name.lower())
+        if action_meta is None:
+            self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
+            return
+        ctx = ActionContext(
+            reference_message=reference_message
+        )
+        try:
+            await action_meta.call(ctx, value)
+            if action_meta.is_visible:
+                self.visible_actions_taken += 1
+        except Exception:
+            logging.exception("an error accured during action")
+
+    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, reference_message: ChatMessage):
+        """
+        Consumes actions and runs them automatically
+        """
+        i = 0  # counts the number of "[" characters minus the number of "]" characters
+        action = ""
+        self.visible_actions_taken = 0
+
+        async with CoroutineQueueExecutor() as queue:
+            async def process(char):
+                nonlocal i
+                nonlocal action
+
+                result = None
+
+                # the opening of the action
+                if char == "[":
+                    i += 1
+
+                if i != 0:
+                    action += char
+                else:
+                    result = char
+
+                # the closing of the action
+                if char == "]":
+                    i -= 1
+
+                    # if the action is fully captured
+                    if i == 0:
+                        # run action without blocking the stream
+                        await queue.add_to_queue(self.execute_action(
+                            action=action,
+                            reference_message=reference_message
+                        ))
+                        action = ""
+
+                return result
+
+            if isinstance(stream, (Iterator, Generator)):
+                for char in stream:
+                    if (result := await process(char)):
+                        yield result
+            elif isinstance(stream, (AsyncIterator, AsyncGenerator)):
+                async for char in stream:
+                    if (result := await process(char)):
+                        yield result
+            else:
+                raise TypeError(
+                    f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")
+
+    def is_visible_actions_taken(self) -> bool:
+        return self.visible_actions_taken > 0
+
+
 class AsyncChatClient:
     def __init__(
         self,
@@ -303,6 +447,7 @@ class AsyncChatClient:
             # don't use proxies from environment variables
             http_client=httpx.AsyncClient(trust_env=False),
         )
+        self.action_manager = AsyncActionManager()
 
     def add_tool(self, name: str, func: AsyncTool, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
@@ -324,6 +469,9 @@ class AsyncChatClient:
             )
         )
 
+    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
+        self.action_manager.add_action(name, field_name, func, description)
+
     def set_rearrange_predicate(self, predicate: AsyncPredicate):
         """
         Set a predicate function to rearrange messages based on a specific condition.
@@ -333,9 +481,20 @@ class AsyncChatClient:
 
         self.rearrange_predicate = predicate
 
-    def set_system(self, prompt: str):
+    def set_system(self, prompt: Optional[str]):
         assert prompt is not None and prompt != ""
         self.system_prompt = prompt
+
+    def get_system_prompt(self):
+        return (self.system_prompt or "") + "\n\nActions:\n" + self.action_manager.get_prompt()
+
+    async def stream_call(self, reference_message: ChatMessage):
+        non_response = "".join([char async for char in self.action_manager.consume(
+            stream=self.stream_completion(),
+            reference_message=reference_message
+        )])
+
+        return non_response.strip() or None
 
     def add_message(self, message: ChatMessage | str) -> ChatMessage:
         assert message is not None
@@ -692,6 +851,7 @@ class ActionEntry:
     field_name: str
     func: ActionFunction
     description: str
+    is_visible: bool = True
     predicate: Optional[AsyncPredicate] = None
 
 
@@ -741,8 +901,6 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.realtime_data = dict()
         self.is_notes_visible = False
         self.actions_since_last_message = 0
-        self.action_manager = AsyncActionManager()
-        self.action_manager.on_action = self.on_action
 
         if not self.messages:
             self.add_message(ChatMessage(
@@ -752,16 +910,6 @@ class AsyncChatbotInstance(AsyncChatClient):
             ))
 
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
-
-    def on_action(self, name: str):
-        if name.lower() in ["send", "react", "gif"]:
-            self.actions_since_last_message += 1
-
-    def action_taken(self) -> bool:
-        return self.actions_since_last_message > 0
-
-    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
-        self.action_manager.add_action(name, field_name, func, description)
 
     def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
         """
@@ -785,6 +933,7 @@ class AsyncChatbotInstance(AsyncChatClient):
     def get_realtime_data(self):
         return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
+    # override system prompt from the base class
     def get_system_prompt(self):
         return self.system_prompt_template.format(
             persona=self.persona,
@@ -813,16 +962,6 @@ class AsyncChatbotInstance(AsyncChatClient):
             cancel_task.cancel()
             await cancel_task
         return task
-
-    async def stream_call(self, reference_message: ChatMessage):
-        self.set_system(self.get_system_prompt())
-
-        non_response = "".join([char async for char in self.action_manager.consume(
-            stream=self.stream_completion(),
-            reference_message=reference_message
-        )])
-
-        return non_response.strip() or None
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible
@@ -959,135 +1098,3 @@ class CachedAsyncChatbotFactory:
                 conversation.save()
             except Exception as e:
                 self.logger.exception(f"Failed to save conversation with {identifier=}: {e}")
-
-
-@dataclass(frozen=True)
-class ActionContext:
-    reference_message: Optional[ChatMessage] = None
-    parent_instance: Optional[AsyncChatbotInstance] = None
-    # more fields to be added
-
-
-ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
-
-
-@dataclass(frozen=True)
-class AsyncAction:
-    name: str
-    field_name: str
-    function: ActionFunction
-    description: Optional[str] = None
-
-    # TODO: implement callbacks for when we enter the action (after the action name) and when
-    # we leave the action (right after the action is completed but before executing the action)
-    enter_callback: Optional[ActionFunction] = None
-    leave_callback: Optional[ActionFunction] = None
-
-    def get_syntax(self):
-        desc = self.description or "no description"
-        return f"[{self.name}:<{self.field_name}>]: {desc}"
-
-    async def __call__(self, *args, **kwds):
-        return await self.function(*args, **kwds)
-
-    def __str__(self):
-        return f"<async-action {self.name}>"
-
-
-class AsyncActionManager:
-    def __init__(self):
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-        self.actions: dict[str, AsyncAction] = dict()
-        self.on_action: Callable[[str]] | None = None
-
-    def _add_action(self, action: AsyncAction):
-        assert action is not None
-        self.actions.update({action.name.lower(): action})
-
-    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None):
-        assert name is not None
-        assert function is not None
-        assert field_name is not None
-        self._add_action(AsyncAction(
-            name=name,
-            field_name=field_name,
-            function=function,
-            description=description,
-        ))
-
-    def get_prompt(self):
-        return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
-
-    async def execute_action(self, action: str, reference_message: Optional[ChatMessage] = None):
-        action_content = action[1:-1]  # removed brakets
-
-        separator_idx = action_content.index(":") if ":" in action_content else None
-        if separator_idx:
-            name = action_content[:separator_idx].strip()
-            value = action_content[separator_idx+1:].strip()
-        else:
-            name = action_content
-            value = None
-
-        if self.on_action:
-            self.on_action(name)
-
-        action_fn = self.actions.get(name.lower())
-        if action_fn is None:
-            self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
-            return
-        ctx = ActionContext(
-            reference_message=reference_message
-        )
-        return await action_fn(ctx, value)
-
-    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, reference_message: ChatMessage):
-        """
-        Consumes actions and runs them automatically
-        """
-        i = 0  # counts the number of "[" characters minus the number of "]" characters
-        action = ""
-
-        async with CoroutineQueueExecutor() as queue:
-            async def process(char):
-                nonlocal i
-                nonlocal action
-
-                result = None
-
-                # the opening of the action
-                if char == "[":
-                    i += 1
-
-                if i != 0:
-                    action += char
-                else:
-                    result = char
-
-                # the closing of the action
-                if char == "]":
-                    i -= 1
-
-                    # if the action is fully captured
-                    if i == 0:
-                        # run action without blocking the stream
-                        await queue.add_to_queue(self.execute_action(
-                            action=action,
-                            reference_message=reference_message
-                        ))
-                        action = ""
-
-                return result
-
-            if isinstance(stream, (Iterator, Generator)):
-                for char in stream:
-                    if (result := await process(char)):
-                        yield result
-            elif isinstance(stream, (AsyncIterator, AsyncGenerator)):
-                async for char in stream:
-                    if (result := await process(char)):
-                        yield result
-            else:
-                raise TypeError(
-                    f"expected `stream` to be an Iterator, Generator, AsyncIterator or AsyncGenerator but got `{type(stream)}`!")
