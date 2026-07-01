@@ -548,15 +548,17 @@ class AsyncChatClient:
         if len(self.messages) == 0:
             return list()
 
-        messages = self.enforce_approximate_context_limit(self.messages.copy())
+        system_prompt = self.get_system_prompt()
+        messages = self.enforce_approximate_context_limit(system_prompt, self.messages.copy())
 
         openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
         # add system prompt before to the last user message message to ensure it is in the
         # model's context but also don't disrupt the conversation or tool calling
-        if exists(self.system_prompt):
+        
+        if exists(system_prompt):
             system_message = ChatMessage(
                 role=ChatRole.SYSTEM,
-                content=self.system_prompt
+                content=system_prompt
             ).to_openai_dict(timestamps=enable_timestamps)
 
             insert_index = 0
@@ -568,8 +570,8 @@ class AsyncChatClient:
             openai_messages.insert(insert_index, system_message)
         return openai_messages
 
-    def enforce_approximate_context_limit(self, messages: list[ChatMessage]):
-        system_prompt_size = len(self.system_prompt) if self.system_prompt else 0
+    def enforce_approximate_context_limit(self, system_prompt: str, messages: list[ChatMessage]):
+        system_prompt_size = len(system_prompt) if system_prompt else 0
         request_size = system_prompt_size
         for cutoff_index, message in enumerate(messages):
             role = message.role
