@@ -258,7 +258,7 @@ async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncP
     return unselected_predicate[::-1] + selected_messages[::-1]
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     reference_message: Optional[ChatMessage] = None
     parent_instance: 'Optional[AsyncChatbotInstance]' = None
@@ -269,7 +269,7 @@ P = ParamSpec("P")
 AsyncTool = Callable[Concatenate[ToolContext, P], Coroutine[Any, Any, Any]]
 
 
-@dataclass(frozen=True)
+@dataclass
 class ActionContext:
     reference_message: Optional[ChatMessage] = None
     parent_instance: 'Optional[AsyncChatbotInstance]' = None
@@ -304,12 +304,13 @@ class AsyncAction:
 
 
 class AsyncActionManager:
-    def __init__(self):
+    def __init__(self, context: Optional[ActionContext] = None):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.actions: dict[str, AsyncAction] = dict()
         self.on_action: Callable[[str]] | None = None
         self.visible_actions_taken = 0
+        self.context = context or ActionContext()
 
     def _add_action(self, action: AsyncAction):
         assert action is not None
@@ -349,7 +350,8 @@ class AsyncActionManager:
             self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
             return
         ctx = ActionContext(
-            reference_message=reference_message
+            reference_message=reference_message,
+            parent_instance=self.context.parent_instance
         )
         try:
             await action_meta.call(ctx, value)
@@ -420,7 +422,7 @@ class AsyncChatClient:
         model: OpenAILanguageModelConfig,
         messages: Optional[list[ChatMessage]] = None,
         log_tool_calls: bool = False,
-        enforce_system_header: bool = False,
+        enforce_system_header: bool = False
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -447,7 +449,6 @@ class AsyncChatClient:
             # don't use proxies from environment variables
             http_client=httpx.AsyncClient(trust_env=False),
         )
-        self.action_manager = AsyncActionManager()
 
     def add_tool(self, name: str, func: AsyncTool, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
@@ -469,9 +470,6 @@ class AsyncChatClient:
             )
         )
 
-    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
-        self.action_manager.add_action(name, field_name, func, description)
-
     def set_rearrange_predicate(self, predicate: AsyncPredicate):
         """
         Set a predicate function to rearrange messages based on a specific condition.
@@ -486,15 +484,7 @@ class AsyncChatClient:
         self.system_prompt = prompt
 
     def get_system_prompt(self):
-        return (self.system_prompt or "") + "\n\nActions:\n" + self.action_manager.get_prompt()
-
-    async def stream_call(self, reference_message: ChatMessage):
-        non_response = "".join([char async for char in self.action_manager.consume(
-            stream=self.stream_completion(),
-            reference_message=reference_message
-        )])
-
-        return non_response.strip() or None
+        return (self.system_prompt or "")
 
     def add_message(self, message: ChatMessage | str) -> ChatMessage:
         assert message is not None
@@ -554,7 +544,7 @@ class AsyncChatClient:
         openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
         # add system prompt before to the last user message message to ensure it is in the
         # model's context but also don't disrupt the conversation or tool calling
-        
+
         if exists(system_prompt):
             system_message = ChatMessage(
                 role=ChatRole.SYSTEM,
@@ -625,6 +615,11 @@ class AsyncChatClient:
             for c in lookbehind_buffer:
                 yield c
 
+    def create_tool_context(self, reference_message: ChatMessage):
+        return ToolContext(
+            reference_message=reference_message,
+        )
+
     async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessage) -> list[ChatMessage]:
         """
         Execute tool calls and return results
@@ -633,15 +628,9 @@ class AsyncChatClient:
         if not function_calls:
             return []
 
-        if isinstance(self, AsyncChatbotInstance):
-            tool_context = ToolContext(
-                reference_message=reference_message,
-                parent_instance=self
-            )
-        else:
-            tool_context = ToolContext(
-                reference_message=reference_message,
-            )
+        tool_context = self.create_tool_context(
+            reference_message=reference_message
+        )
 
         results = [ChatMessage(
             ChatRole.ASSISTANT,
@@ -911,7 +900,16 @@ class AsyncChatbotInstance(AsyncChatClient):
                 bot=self.bot
             ))
 
+        # actions
+        self.action_manager = AsyncActionManager(
+            context=ActionContext(parent_instance=self)
+        )
+
+        # async states
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+
+    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
+        self.action_manager.add_action(name, field_name, func, description)
 
     def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
         """
@@ -935,6 +933,13 @@ class AsyncChatbotInstance(AsyncChatClient):
     def get_realtime_data(self):
         return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
+    def create_tool_context(self, reference_message: ChatMessage):
+        context = super().create_tool_context(
+            reference_message = reference_message
+        )
+        context.parent_instance = self
+        return context
+    
     # override system prompt from the base class
     def get_system_prompt(self):
         return self.system_prompt_template.format(
@@ -943,6 +948,14 @@ class AsyncChatbotInstance(AsyncChatClient):
             realtime=self.get_realtime_data(),
             actions=self.action_manager.get_prompt()
         )
+
+    async def stream_call(self, reference_message: ChatMessage):
+        non_response = "".join([char async for char in self.action_manager.consume(
+            stream=self.stream_completion(),
+            reference_message=reference_message
+        )])
+
+        return non_response.strip() or None
 
     async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage):
         assert channel_id, "channel_id is None"
