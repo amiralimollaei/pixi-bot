@@ -222,7 +222,9 @@ class ChatMessage:
                     content_dict.append(dict(
                         input_audio=dict(
                             data=audio.to_base64(),
-                            format="wav"  # for some reason this value is not used by the API is required to be mp3 or wav
+                            # for some reason this value is required to be mp3 or wav, but
+                            # not used for decoding the audio, so we can send any format
+                            format="wav"
                         ),
                         type="input_audio",
                     ))

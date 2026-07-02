@@ -45,6 +45,7 @@ class AudioCache(MediaCache):
             output_file = av.open(
                 tmp_out.name,
                 mode="w",
+                format="adts",
             )
             output_stream = output_file.add_stream(
                 "aac",
@@ -53,13 +54,28 @@ class AudioCache(MediaCache):
                 layout='mono'
             )
 
+            # Create a resampler to convert input audio to the cache format
+            resampler = av.AudioResampler(
+                format=output_stream.codec_context.format,
+                layout=output_stream.codec_context.layout,
+                rate=output_stream.codec_context.sample_rate,
+            )
+
             duration = 0.0
             for frame in input_file.decode(input_stream):
-                duration += (frame.duration or 0.0) / frame.rate
-                for packet in output_stream.encode(frame):
-                    output_file.mux(packet)
+                # Resample the frame to match the output stream's format
+                resampled_frames = resampler.resample(frame)
+                for resampled_frame in resampled_frames:
+                    duration += (resampled_frame.duration or 0.0) / resampled_frame.rate
+                    for packet in output_stream.encode(resampled_frame):
+                        output_file.mux(packet)
                 if duration > CACHE_MAX_DURATION:
                     break
+
+            # Flush the resampler (pass None to flush any buffered audio)
+            for resampled_frame in resampler.resample(None):
+                for packet in output_stream.encode(resampled_frame):
+                    output_file.mux(packet)
 
             # Flush the stream
             for packet in output_stream.encode(None):
