@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import ssl
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 import httpx
 import openai
@@ -21,6 +21,7 @@ from .database import AsyncEmbeddingDatabase, DirectoryDatabase
 from .enums import ChatRole, Platform
 from .reflection import AbstractMessage, ReflectionAPI
 from .typing import AsyncPredicate, Optional
+from .utils import format_time_later
 
 # constants
 
@@ -216,6 +217,79 @@ class PixiClient:
             delay_served += 3.0
 
     def __register_builtin_actions(self):
+        @dataclass(frozen=True)
+        class ScheduleData:
+            action: str
+            value: str
+            delay: float
+            id: str
+
+        async def schedule_action(ctx: ActionContext, value: str):
+            if not value:
+                return
+            if ctx.reference_message is None:
+                self.logger.error("reference_message is None")
+                return
+            if ctx.parent_instance is None:
+                self.logger.error("parent_instance is None")
+                return
+
+            try:
+                schedule_data = ScheduleData(**json.loads(value))
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                self.logger.exception(f"Invalid schedule JSON: {e}")
+                return
+
+            if not schedule_data.action or not schedule_data.value or schedule_data.delay is None or not schedule_data.id:
+                self.logger.error("Schedule JSON must include 'action', 'value', 'delay', and 'id' fields.")
+                return
+
+            if not isinstance(schedule_data.delay, (int, float)) or schedule_data.delay <= 0:
+                self.logger.error("'delay' must be a positive number.")
+                return
+
+            instance = ctx.parent_instance
+
+            if instance.schedule_action(
+                action=f"[{schedule_data.action}: {schedule_data.value}]",
+                action_context=ctx,
+                id = schedule_data.id,
+                delay = schedule_data.delay
+            ):
+                self.logger.info(f"scheduled action for {format_time_later(schedule_data.delay)}: {value}")
+            else:
+                self.logger.info(f"schedule action failed: {value}")
+
+        self.register_action(
+            name="schedule",
+            field_name="json",
+            func=schedule_action,
+            description="schedules an action to be executed later, the value for this action is a json with the following schema: {\"action\": <action-name>, \"value\": <action-value>, \"delay\": <delay-in-seconds>, \"id\": <unique-number>}"
+        )
+
+        async def cancel_schedule_action(ctx: ActionContext, value: str):
+            if not value or ctx.reference_message is None:
+                return
+            assert ctx.reference_message.origin is not None
+            message: AbstractMessage = ctx.reference_message.origin
+
+            schedule_id = value.strip()
+            if not schedule_id:
+                self.logger.error("Model did not provide a schedule id to cancel.")
+                return
+
+            if ctx.parent_instance and ctx.parent_instance.cancel_schedule(schedule_id):
+                self.logger.info(f"Cancelled the schedule with id '{schedule_id}'.")
+            else:
+                self.logger.info(f"No schedule found with id '{schedule_id}'.")
+
+        self.register_action(
+            name="cancel_schedule",
+            field_name="id",
+            func=cancel_schedule_action,
+            description="cancels a previously scheduled action by its id (the ID for each schedule should be a unique number)"
+        )
+
         async def send_action(ctx: ActionContext, value: str):
             if not value or ctx.reference_message is None:
                 return
@@ -505,8 +579,11 @@ class PixiClient:
 
             environment_id = message.environment_id
 
+            instance = self.chatbot_factory.instances.get(environment_id)
+            if instance:
+                instance.cancel_all_schedules()
             self.chatbot_factory.remove(environment_id)
-            self.logger.info(f"the conversation in {environment_id} has been reset.")
+            self.logger.info(f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled.")
 
             await message.send("Wha- Where am I?!")
 

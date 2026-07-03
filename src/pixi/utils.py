@@ -1,57 +1,6 @@
-import asyncio
 from enum import StrEnum
 import logging
-import os
-from pathlib import Path
-from types import CoroutineType
-from typing import IO, Sequence
-
-
-class CoroutineQueueExecutor:
-    def __init__(self, max_queue_size: int = 1000):
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-        self.max_queue_size = max_queue_size
-        self._queue: asyncio.Queue[CoroutineType] = asyncio.Queue(maxsize=max_queue_size)
-
-    async def _worker(self):
-        while True:
-            try:
-                coro = await self._queue.get()
-                try:
-                    await coro
-                except Exception:
-                    self.logger.exception("Coroutine resulted in an error")
-                finally:
-                    self._queue.task_done()
-            except (asyncio.CancelledError, asyncio.QueueShutDown):
-                break
-
-    async def add_to_queue(self, t: CoroutineType):
-        await self._queue.put(t)
-
-    async def __aenter__(self):
-        # drain any tasks left over from a previous use
-        if not self._queue.empty():
-            remaining = []
-            while not self._queue.empty():
-                try:
-                    remaining.append(self._queue.get_nowait())
-                    self._queue.task_done()
-                except asyncio.QueueEmpty:
-                    break
-            self.logger.warning(f"Coroutine never awaited: {remaining}")
-
-        self._worker_task = asyncio.create_task(self._worker())
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        await self._queue.join()
-        self._worker_task.cancel()
-        try:
-            await self._worker_task
-        except asyncio.CancelledError:
-            pass
+from typing import Sequence
 
 
 # helpers
@@ -87,7 +36,7 @@ def load_dotenv():
 
 
 # modified from https://stackoverflow.com/a/76636817
-def format_time_ago(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
+def format_time(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
     """Return time difference as human-readable string"""
 
     periods = (
@@ -112,7 +61,19 @@ def format_time_ago(delta: float, min_count: int = 3, max_lenght: int = 2) -> st
                 delta -= seconds_each * how_many
 
     if fmt_list:
-        return " and ".join(fmt_list) + " ago"
+        return " and ".join(fmt_list)
+
+    return "just now"  # less than a second ago
+
+def format_time_ago(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
+    if delta >= min_count:
+        return format_time(delta, min_count, max_lenght) + " ago"
+
+    return "just now"  # less than a second ago
+
+def format_time_later(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
+    if delta >= min_count:
+        return format_time(delta, min_count, max_lenght) + " later"
 
     return "just now"  # less than a second ago
 

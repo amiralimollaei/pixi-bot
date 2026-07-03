@@ -6,11 +6,10 @@ import os
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
-from functools import partial
-from typing import Any, Callable, Concatenate, Coroutine, ParamSpec, Sequence, TypeVar
+from typing import Any, Awaitable, Callable, Concatenate, Coroutine, ParamSpec, Sequence
 
 import httpx
-from openai import APIError, AsyncOpenAI
+from openai import AsyncOpenAI
 from openai._streaming import AsyncStream
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
@@ -18,10 +17,11 @@ from .caching.base import MediaCache
 from .config import OpenAIAuthConfig, OpenAILanguageModelConfig
 from .enums import ChatRole
 from .reflection.message import AbstractMessage
+from .coroutine import AsyncScheduler, CoroutineQueueExecutor
 from .storage.paths import PixiPaths, open_resource
 from .typing import (AsyncGenerator, AsyncIterator, AsyncPredicate, Generator,
                      Iterator, Optional)
-from .utils import CoroutineQueueExecutor, clean_dict, exists, format_time_ago
+from .utils import clean_dict, exists, format_time_ago
 
 
 @dataclass(frozen=True)
@@ -306,13 +306,12 @@ class AsyncAction:
 
 
 class AsyncActionManager:
-    def __init__(self, context: Optional[ActionContext] = None):
+    def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.actions: dict[str, AsyncAction] = dict()
         self.on_action: Callable[[str]] | None = None
         self.visible_actions_taken = 0
-        self.context = context or ActionContext()
 
     def _add_action(self, action: AsyncAction):
         assert action is not None
@@ -333,7 +332,7 @@ class AsyncActionManager:
     def get_prompt(self):
         return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
 
-    async def execute_action(self, action: str, reference_message: Optional[ChatMessage] = None):
+    async def execute_action(self, action: str, action_context: ActionContext):
         action_content = action[1:-1]  # removed brakets
 
         separator_idx = action_content.index(":") if ":" in action_content else None
@@ -351,18 +350,15 @@ class AsyncActionManager:
         if action_meta is None:
             self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
             return
-        ctx = ActionContext(
-            reference_message=reference_message,
-            parent_instance=self.context.parent_instance
-        )
+
         try:
-            await action_meta.call(ctx, value)
+            await action_meta.call(action_context, value)
             if action_meta.is_visible:
                 self.visible_actions_taken += 1
         except Exception:
             logging.exception("an error accured during action")
 
-    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, reference_message: ChatMessage):
+    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, action_context: ActionContext):
         """
         Consumes actions and runs them automatically
         """
@@ -395,7 +391,7 @@ class AsyncActionManager:
                         # run action without blocking the stream
                         await queue.add_to_queue(self.execute_action(
                             action=action,
-                            reference_message=reference_message
+                            action_context=action_context
                         ))
                         action = ""
 
@@ -902,15 +898,36 @@ class AsyncChatbotInstance(AsyncChatClient):
                 bot=self.bot
             ))
 
+        self.scheduler = AsyncScheduler()
+
         # actions
-        self.action_manager = AsyncActionManager(
-            context=ActionContext(parent_instance=self)
-        )
+        self.action_manager = AsyncActionManager()
 
         # async states
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
 
+    def schedule(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]) -> bool:
+        """Convenience wrapper for self.scheduler.schedule."""
+        return self.scheduler.schedule(id, delay, callback)
+
+    def schedule_action(self, action: str, action_context: ActionContext, id: str, delay: float):
+        async def execute_scheduled():
+            await self.action_manager.execute_action(
+                action,
+                action_context=action_context
+            )
+        return self.scheduler.schedule(id=id, delay=delay, callback=execute_scheduled)
+
+    def cancel_schedule(self, id: str) -> bool:
+        """Convenience wrapper for self.scheduler.cancel."""
+        return self.scheduler.cancel(id)
+
+    def cancel_all_schedules(self):
+        """Convenience wrapper for self.scheduler.cancel_all."""
+        self.scheduler.cancel_all()
+
     def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
+        """Convenience wrapper for self.action_manager.add_action"""
         self.action_manager.add_action(name, field_name, func, description)
 
     def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
@@ -937,11 +954,11 @@ class AsyncChatbotInstance(AsyncChatClient):
 
     def create_tool_context(self, reference_message: ChatMessage):
         context = super().create_tool_context(
-            reference_message = reference_message
+            reference_message=reference_message
         )
         context.parent_instance = self
         return context
-    
+
     # override system prompt from the base class
     def get_system_prompt(self):
         return self.system_prompt_template.format(
@@ -954,7 +971,10 @@ class AsyncChatbotInstance(AsyncChatClient):
     async def stream_call(self, reference_message: ChatMessage):
         non_response = "".join([char async for char in self.action_manager.consume(
             stream=self.stream_completion(),
-            reference_message=reference_message
+            action_context=ActionContext(
+                reference_message=reference_message,
+                parent_instance=self
+            )
         )])
 
         return non_response.strip() or None
