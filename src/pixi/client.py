@@ -75,7 +75,7 @@ class PixiClient:
         self.register_pre_startup_hook(self.verify_models)
 
         # Pre-Load all the instances after startup
-        #self.register_post_startup_hook(self.preload_instances)
+        self.register_post_startup_hook(self.preload_instances)
 
         self.enable_tool_calls = PixiFeatures.ToolCalling in features
         self.log_tool_calls = PixiFeatures.ToolLogging in features
