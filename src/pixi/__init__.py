@@ -3,13 +3,12 @@ __author__ = "amiralimollaei"
 import os
 from pathlib import Path
 
-from .model.enums.ansi import AnsiColors
-
 from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            NewsConfig, OpenAIAuthConfig,
                            OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig,
                            PixiFeatures)
 from .model.enums import Platform
+from .model.enums.ansi import AnsiColors
 from .storage.paths import PixiPaths, copy_default_resources
 from .utils import load_dotenv
 

@@ -9,7 +9,7 @@ import httpx
 import openai
 
 from .addon import AddonManager
-from .agents import AgentBase, ChannelSelectorAgent, RetrievalAgent
+from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import (ActionContext, AsyncChatbotInstance,
@@ -125,13 +125,6 @@ class PixiClient:
 
         self.__register_builtin_slash_commands()
 
-        # Initialize channel selector agent for proactive news feature
-        self.channel_selector_agent = None
-        if PixiFeatures.NewsProactive in self.features and self.news_config is not None:
-            self.channel_selector_agent = self.create_agent_instance(
-                agent_cls=ChannelSelectorAgent,
-            )
-
         self.logger.info(f"loading addons...")
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
@@ -139,6 +132,13 @@ class PixiClient:
         self.reflection_api.register_on_message_event(self.on_message)
 
         self.logger.info(f"Pixi finished initalizing!")
+
+    async def preload_instances(self):
+        self.logger.info("Pre-Loading all guilds instances...")
+        for guild in await self.reflection_api.get_available_guilds():
+            instance_id = f"forum#{guild.id}"
+            self.logger.info(f" - \"{guild.name}\" (members: {guild.member_count})")
+            instance = await self.get_conversation_instance(instance_id)
 
     async def verify_models(self):
         """
@@ -395,7 +395,7 @@ class PixiClient:
 
         async def get_entry_as_str(entry_id: int):
             dataset_entry = await database_api.get_entry(entry_id)
-            return json.dumps(asdict(dataset_entry), ensure_ascii=False)
+            return json.dumps(asdict(dataset_entry), ensure_ascii=False, indent=3)
 
         async def search_database(ctx: ToolContext, keyword: str):
             return [asdict(match) for match in await database_api.search(keyword)]
@@ -633,13 +633,12 @@ class PixiClient:
         if (
             PixiFeatures.NewsProactive in self.features
             and self.news_config is not None
-            and self.channel_selector_agent is not None
+            and instance.forum_id is not None
             and instance.news_task is None
         ):
             instance.start_news_background_task(
                 news_config=self.news_config,
                 reflection_api=self.reflection_api,
-                channel_selector_agent=self.channel_selector_agent,
             )
         return instance
     
@@ -846,14 +845,24 @@ class PixiClient:
         """
         self.post_startup_hooks.append(hook)
     
+    async def _post_startup_task(self):
+        await self.reflection_api.wait_until_ready()
+        if self.post_startup_hooks:
+            self.logger.info(f"Running {len(self.post_startup_hooks)} post-startup hook(s)...")
+            results = await asyncio.gather(*(f() for f in self.post_startup_hooks))
+            self.logger.info("All post-startup hooks completed.")
+    
     async def start(self):
         """Start the bot asynchronously, running all startup hooks first."""
         if self.pre_startup_hooks:
-            self.logger.info(f"Running {len(self.pre_startup_hooks)} startup hook(s)...")
+            self.logger.info(f"Running {len(self.pre_startup_hooks)} pre-startup hook(s)...")
             results = await asyncio.gather(*(f() for f in self.pre_startup_hooks))
-            self.logger.info("All startup hooks completed.")
+            self.logger.info("All pre-startup hooks completed.")
+        
+        post_task = asyncio.create_task(self._post_startup_task())
         
         await self.reflection_api.start_async()
+        await post_task
 
     def run(self):
         """Run the bot (blocking with async support for startup hooks)."""

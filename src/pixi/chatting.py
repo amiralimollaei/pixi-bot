@@ -124,7 +124,7 @@ class ChatMessageUtils:
                         "Metadata:",
                         ""
                         "```json",
-                        json.dumps(self.meta.metadata, ensure_ascii=False),
+                        json.dumps(self.meta.metadata, ensure_ascii=False, indent=3),
                         "```"
                     ]
                 content_dict: list[dict] = [dict(type="text", text="\n".join(content))]
@@ -387,7 +387,7 @@ class AsyncChatClient:
             top_p=0.9,
             max_tokens=1024,
             parallel_tool_calls=True,
-            # reasoning_effort="high",
+            reasoning_effort="high",
             stream=True,
         )
         # If tools are registered, add them to the request
@@ -530,7 +530,7 @@ class AsyncChatClient:
                     else:
                         self.logger.debug(f"Calling {fn.name}({func_args_str})...")
                     result = await func(tool_context, **fn.arguments)  # type: ignore
-                    result = json.dumps(result, ensure_ascii=False, indent=2)
+                    result = json.dumps(result, ensure_ascii=False, indent=3)
                 except Exception as e:
                     self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
                     result = f"Tool error: {e}"
@@ -778,7 +778,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.realtime_data.update(data)
 
     def get_realtime_data(self):
-        return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
+        return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False, indent=3)
 
     def create_tool_context(self, reference_message: ChatMessageMeta):
         context = super().create_tool_context(
@@ -830,12 +830,15 @@ class AsyncChatbotInstance(AsyncChatClient):
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
         task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
+        await self.cancel_channel_stream_call_tasks(channel_id)
+        return task
+    
+    async def cancel_channel_stream_call_tasks(self, channel_id: str):
         # cancell extra tasks
         while len(self.channel_active_tasks[channel_id]) > 1:
             cancel_task = self.channel_active_tasks[channel_id][0]
             cancel_task.cancel()
             await cancel_task
-        return task
 
     @property
     def forum_id(self) -> Optional[int]:
@@ -851,7 +854,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             return int(self.id.split("#")[1])
         return None
 
-    def start_news_background_task(self, news_config, reflection_api, channel_selector_agent):
+    def start_news_background_task(self, news_config, reflection_api):
         """Start the proactive news background task for this instance."""
         from .news import NewsBackgroundTask
 
@@ -859,7 +862,6 @@ class AsyncChatbotInstance(AsyncChatClient):
             news_config=news_config,
             reflection_api=reflection_api,
             instance=self,
-            channel_selector_agent=channel_selector_agent,
         )
         self.news_task.start()
 

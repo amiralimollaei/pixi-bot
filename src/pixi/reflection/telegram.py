@@ -43,6 +43,14 @@ class TelegramReflectionAPI:
         await self.application.initialize()
         await self.application.start()
         await self.application.updater.start_polling()  # pyright: ignore[reportOptionalMemberAccess]
+        # Wait until the bot is fully connected and ready
+        if self.application.bot:
+            await self.application.bot.wait_until_ready()  # pyright: ignore[reportAttributeAccessIssue]
+
+    async def wait_until_ready(self):
+        """Wait until the bot is fully connected and ready."""
+        if self.application.bot:
+            await self.application.bot.wait_until_ready()  # pyright: ignore[reportAttributeAccessIssue]
 
     def run(self):
         """Run the Telegram bot (blocking)."""

@@ -45,6 +45,12 @@ class DiscordReflectionAPI:
         """Start the Discord bot asynchronously."""
         assert self.token
         await self.bot.start(self.token)
+        # Wait until the bot is fully ready and cache is populated
+        await self.bot.wait_until_ready()
+
+    async def wait_until_ready(self):
+        """Wait until the bot is fully connected and ready."""
+        await self.bot.wait_until_ready()
 
     def run(self):
         """Run the Discord bot (blocking)."""
@@ -81,20 +87,20 @@ class DiscordReflectionAPI:
                     "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
-                    "connected_listeners": {
-                        "count": len(c.listeners),
-                        "members": [m.display_name for m in c.listeners]
-                    },
+                    #"connected_listeners": {
+                    #    "count": len(c.listeners),
+                    #    "members": [m.display_name for m in c.listeners]
+                    #},
                 } for c in cat.stage_channels],
                 "voice_channels": [{
                     "name": c.name,
                     "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
-                    "connected_members": {
-                        "count": len(c.members),
-                        "members": [m.display_name for m in c.members]
-                    },
+                    #"connected_members": {
+                    #    "count": len(c.members),
+                    #    "members": [m.display_name for m in c.members]
+                    #},
                 } for c in cat.voice_channels],
                 "text_channels": [{
                     "name": c.name,
@@ -109,7 +115,7 @@ class DiscordReflectionAPI:
                     {
                         "name": r.name,
                         "color": '#{:06X}'.format(r.color.value),
-                        "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
+                    #    "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
                     } for r in m.roles
                 ],
             } for m in guild.members]
@@ -239,11 +245,9 @@ class DiscordReflectionAPI:
         """Send a text message to a channel by its ID."""
         channel = await self.bot.fetch_channel(chat_id)
         if channel is None:
-            self.logger.warning(f"Channel {chat_id} not found, cannot send message.")
-            return
+            raise RuntimeError(f"Channel {chat_id} not found, cannot send message.")
         if not hasattr(channel, "send"):
-            self.logger.warning(f"Channel {chat_id} does not support sending messages.")
-            return
+            raise RuntimeError(f"Channel {chat_id} does not support sending messages.")
         try:
             await channel.send(text)  # pyright: ignore[reportAttributeAccessIssue]
         except Exception:

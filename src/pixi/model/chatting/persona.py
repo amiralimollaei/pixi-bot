@@ -28,4 +28,4 @@ class AssistantPersona:
         return cls.from_dict(data)
 
     def __str__(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False)
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=3)

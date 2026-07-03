@@ -1,10 +1,11 @@
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from ..caching.base import MediaCache
 from ..model.enums import Platform
 from .message import AbstractMessage
+
 
 @dataclass(frozen=True)
 class ChannelMeta:
@@ -53,6 +54,10 @@ class ReflectionAPI:
     async def start_async(self):
         """Start the bot asynchronously (non-blocking)."""
         await self._ref.start()
+
+    async def wait_until_ready(self):
+        """Wait until the bot is fully connected and ready."""
+        await self._ref.wait_until_ready()
 
     def register_on_message_event(self, function: Callable):
         return self._ref.register_on_message_event(function)
