@@ -3,7 +3,7 @@ import dataclasses
 from typing import Any
 
 from ...caching.base import MediaCache
-from ...enums import ChatType, Platform
+from ...model.enums import ChatType, Platform
 
 
 @dataclasses.dataclass(frozen=True)

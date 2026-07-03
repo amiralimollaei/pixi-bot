@@ -1,17 +1,8 @@
-from dataclasses import dataclass
 import logging
 from typing import Optional
 
+from ..model.search.wikimedia import WikiMediaSearchResult
 from .api import APIBase
-
-
-@dataclass
-class WikiMediaSearchResult:
-    title: str
-    snippet: Optional[str] = None
-    url: Optional[str] = None
-    description: Optional[str] = None
-    pageid: Optional[str] = None
 
 
 class AsyncWikimediaAPI(APIBase):

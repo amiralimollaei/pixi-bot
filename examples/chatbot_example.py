@@ -29,19 +29,19 @@ if __name__ == "__main__":
     instance.add_action(
         name="send",
         field_name="message",
-        func=psudo_send_action,
+        function=psudo_send_action,
         description="sends a message"
     )
     instance.add_action(
         name="note",
         field_name="thoughts",
-        func=psudo_note_action,
+        function=psudo_note_action,
         description="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
     )
     instance.add_action(
         name="yeet",
         field_name="object",
-        func=psudo_yeet_action,
+        function=psudo_yeet_action,
         description="yeets the object"
     )
 

@@ -1,7 +1,7 @@
 import asyncio
 from glob import glob
 
-from pixi.database import DirectoryDatabase, DocumentDataset
+from pixi.storage.database import DirectoryDatabase, DocumentDataset
 
 
 async def main():

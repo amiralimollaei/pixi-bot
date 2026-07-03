@@ -191,3 +191,6 @@ addons/
 
 # vscode
 .vscode/
+
+# cline
+.clinerules/

@@ -9,7 +9,8 @@ from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
 from ..caching.base import MediaCache, UnsupportedMediaException
-from ..enums import Messages, Platform
+from ..model.enums import Messages, Platform
+from ..reflection import ChannelMeta, GuildMeta
 from .message.telegram import TelegramMessageImpl
 
 ImageCache = None
@@ -35,12 +36,22 @@ class TelegramReflectionAPI:
             .write_timeout(30) \
             .build()
         self.application = application
+        self.known_chats: set[int] = set()
+
+    async def start(self):
+        """Start the Telegram bot asynchronously."""
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling()  # pyright: ignore[reportOptionalMemberAccess]
 
     def run(self):
+        """Run the Telegram bot (blocking)."""
         self.application.run_polling()
 
     def register_on_message_event(self, function: Callable):
         async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+            if update.effective_chat:
+                self.known_chats.add(update.effective_chat.id)
             message = update.message
             assert message is not None
             message = TelegramMessageImpl.from_origin(message)
@@ -133,3 +144,24 @@ class TelegramReflectionAPI:
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_channel_history", self.platform))
+
+    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]:
+        """For Telegram, try to resolve the chat by ID and return it as the only channel."""
+        try:
+            chat = await self.application.bot.get_chat(forum_id)
+            name = chat.title or chat.username or "Group"
+            mention = f"@{chat.username}" if chat.username else None
+            return [ChannelMeta(id=chat.id, name=name, mention=mention)]
+        except Exception:
+            self.logger.exception(f"Failed to fetch chat {forum_id} for forum channels.")
+            return []
+
+    async def send_message(self, chat_id: int, text: str):
+        """Send a text message to a chat by its ID."""
+        try:
+            await self.application.bot.send_message(chat_id=chat_id, text=text)
+        except Exception:
+            self.logger.exception(f"Failed to send message to chat {chat_id}.")
+
+    async def get_available_guilds(self) -> list[GuildMeta]:        
+        return []

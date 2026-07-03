@@ -3,12 +3,15 @@ __author__ = "amiralimollaei"
 import os
 from pathlib import Path
 
-from .config import (DatasetConfig, IdFilter, MediaWikiConfig,
-                     OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
-                     OpenAILanguageModelConfig, PixiFeatures)
-from .enums import Platform
+from .model.enums.ansi import AnsiColors
+
+from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                           NewsConfig, OpenAIAuthConfig,
+                           OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig,
+                           PixiFeatures)
+from .model.enums import Platform
 from .storage.paths import PixiPaths, copy_default_resources
-from .utils import Ansi, load_dotenv
+from .utils import load_dotenv
 
 
 def run(
@@ -19,16 +22,16 @@ def run(
     model: OpenAILanguageModelConfig,
     helper_model: OpenAILanguageModelConfig | None,
     embedding_model: OpenAIEmbeddingModelConfig | None,
-    features: PixiFeatures = PixiFeatures.empty(),
+    features: PixiFeatures = PixiFeatures.default(),
     datasets: list[DatasetConfig] = [],
     wikis: list[MediaWikiConfig] = [],
     environment_filter: IdFilter = IdFilter.allow(),
+    news_config: NewsConfig | None = None,
 ):
     PixiPaths.set_root(pixi_directory)
     copy_default_resources()
 
-    from .client import \
-        PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
+    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
 
     PixiClient(
         platform=platform,
@@ -40,6 +43,7 @@ def run(
         datasets=datasets,
         wikis=wikis,
         environment_filter=environment_filter,
+        news_config=news_config,
     ).run()
 
 
@@ -50,25 +54,25 @@ def main():
     # injecting colors into the default logger
 
     COLORS = {  # (level_color, message_color)
-        logging.DEBUG: (Ansi.BLUE, Ansi.BEIGE),
-        logging.INFO: (Ansi.WHITE, Ansi.WHITE2),
-        logging.WARNING: (Ansi.YELLOW, Ansi.YELLOW2),
-        logging.ERROR: (Ansi.RED, Ansi.RED2),
-        logging.CRITICAL: (Ansi.BOLD + Ansi.RED, Ansi.BOLD + Ansi.RED2)
+        logging.DEBUG: (AnsiColors.BLUE, AnsiColors.BEIGE),
+        logging.INFO: (AnsiColors.WHITE, AnsiColors.WHITE2),
+        logging.WARNING: (AnsiColors.YELLOW, AnsiColors.YELLOW2),
+        logging.ERROR: (AnsiColors.RED, AnsiColors.RED2),
+        logging.CRITICAL: (AnsiColors.BOLD + AnsiColors.RED, AnsiColors.BOLD + AnsiColors.RED2)
     }
 
     orig_factory = logging.getLogRecordFactory()
 
     def record_factory(*args, **kwargs):
         record = orig_factory(*args, **kwargs)
-        level_color, message_color = COLORS.get(record.levelno, (Ansi.GREY, Ansi.WHITE))
+        level_color, message_color = COLORS.get(record.levelno, (AnsiColors.GREY, AnsiColors.WHITE))
         record.level_color = level_color
         record.message_color = message_color
         return record
     logging.setLogRecordFactory(record_factory)
 
     logging.basicConfig(
-        format=f"{Ansi.GREY}[{Ansi.BLUE}%(asctime)s{Ansi.GREY}] {Ansi.GREY}[%(level_color)s%(levelname)s / %(name)s{Ansi.GREY}] %(message_color)s%(message)s{Ansi.END}",
+        format=f"{AnsiColors.GREY}[{AnsiColors.BLUE}%(asctime)s{AnsiColors.GREY}] {AnsiColors.GREY}[%(level_color)s%(levelname)s / %(name)s{AnsiColors.GREY}] %(message_color)s%(message)s{AnsiColors.END}",
         level=logging.INFO,
         force=True,
     )
@@ -175,41 +179,63 @@ def main():
     )
 
     # feature arguments
+    default_features = PixiFeatures.default()
+
     parser.add_argument(
         "--tool-calling",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=PixiFeatures.ToolCalling in default_features,
         help="allows pixi to use built-in and/or plugin tools, tool calling can only be used if the model supports them"
     )
     parser.add_argument(
         "--tool-logging",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=PixiFeatures.ToolLogging in default_features,
         help="verbose logging for tool calls (enabled by default when running with logging level DEBUG)"
     )
     parser.add_argument(
         "--wiki-search",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=PixiFeatures.WikiSearch in default_features,
         help="allows pixi to search any mediawiki compatible Wiki"
     )
     parser.add_argument(
         "--gif-search",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=PixiFeatures.GIFSearch in default_features,
         help="allows pixi to search for gifs online, and send them in chat"
     )
     parser.add_argument(
         "--image-support",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=PixiFeatures.ImageSupport in default_features,
         help="allows pixi to download and process image files"
     )
     parser.add_argument(
         "--audio-support",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=PixiFeatures.AudioSupport in default_features,
         help="allows pixi to download and process audio files"
+    )
+
+    # proactive news arguments
+    parser.add_argument(
+        "--news-feed-url", "-n",
+        type=str,
+        default=None,
+        help="RSS/Atom feed URL for proactive news feature. Enables the news feature if provided."
+    )
+    parser.add_argument(
+        "--news-interval",
+        type=int,
+        default=3600,
+        help="Seconds between news checks for proactive news feature. Default is 3600 (1 hour)."
+    )
+    parser.add_argument(
+        "--news-probability",
+        type=float,
+        default=0.1,
+        help="Probability of sending a proactive news message each check (0.0 to 1.0). Default is 0.1."
     )
 
     # environment filter arguments
@@ -281,17 +307,19 @@ def main():
 
     features = PixiFeatures(0)
     if args.tool_calling:
-        features |= PixiFeatures.EnableToolCalling
+        features |= PixiFeatures.ToolCalling
     if args.tool_logging:
-        features |= PixiFeatures.EnableToolLogging
+        features |= PixiFeatures.ToolLogging
     if args.wiki_search:
-        features |= PixiFeatures.EnableWikiSearch
+        features |= PixiFeatures.WikiSearch
     if args.gif_search:
-        features |= PixiFeatures.EnableGIFSearch
+        features |= PixiFeatures.GIFSearch
     if args.image_support:
-        features |= PixiFeatures.EnableImageSupport
+        features |= PixiFeatures.ImageSupport
     if args.audio_support:
-        features |= PixiFeatures.EnableAudioSupport
+        features |= PixiFeatures.AudioSupport
+    if args.news_feed_url:
+        features |= PixiFeatures.NewsProactive
 
     datasets = []
     for name in args.database_names:
@@ -302,7 +330,7 @@ def main():
         name, url = nameurl.split("=")
         wikis.append(MediaWikiConfig(url=url, name=name))
 
-    if PixiFeatures.EnableWikiSearch in features and not wikis:
+    if PixiFeatures.WikiSearch in features and not wikis:
         wikis = [MediaWikiConfig(
             url="https://www.wikipedia.org/w/",
             name="wikipedia"
@@ -315,6 +343,14 @@ def main():
         else:
             environment_filter = IdFilter.blacklist(args.environment_ids)
 
+    news_config = None
+    if args.news_feed_url:
+        news_config = NewsConfig(
+            feed_url=args.news_feed_url,
+            interval_sec=args.news_interval,
+            probability=args.news_probability,
+        )
+
     return run(
         Platform[args.platform.upper()],
         pixi_directory=args.pixi_directory,
@@ -326,4 +362,5 @@ def main():
         datasets=datasets,
         wikis=wikis,
         environment_filter=environment_filter,
+        news_config=news_config,
     )

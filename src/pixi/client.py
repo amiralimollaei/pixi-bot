@@ -3,23 +3,27 @@ import json
 import logging
 import ssl
 from dataclasses import asdict, dataclass
+from typing import Any, Callable, Coroutine
 
 import httpx
 import openai
 
 from .addon import AddonManager
-from .agents import AgentBase, RetrievalAgent
+from .agents import AgentBase, ChannelSelectorAgent, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
-from .chatting import (ActionContext, ActionEntry, AsyncChatbotInstance,
-                       CachedAsyncChatbotFactory, ChatMessage, ToolContext,
-                       ToolEntry)
-from .config import (DatasetConfig, IdFilter, MediaWikiConfig,
-                     OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
-                     OpenAILanguageModelConfig, PixiFeatures)
-from .database import AsyncEmbeddingDatabase, DirectoryDatabase
-from .enums import ChatRole, Platform
+from .chatting import (ActionContext, AsyncChatbotInstance,
+                       AsyncChatbotInstanceRegistry, AsyncTool, ToolContext)
+from .model.chatting.callbacks import AsyncAction
+from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                           NewsConfig, OpenAIAuthConfig,
+                           OpenAIEmbeddingModelConfig,
+                           OpenAILanguageModelConfig, PixiFeatures)
+from .model.enums import ChatRole, Platform
+from .model.storage.message import ChatMessageMeta
+from .rag.client import AsyncRAGClient
 from .reflection import AbstractMessage, ReflectionAPI
+from .storage.database import DirectoryDatabase
 from .typing import AsyncPredicate, Optional
 from .utils import format_time_later
 
@@ -47,10 +51,11 @@ class PixiClient:
         model: OpenAILanguageModelConfig,
         helper_model: OpenAILanguageModelConfig | None,
         embedding_model: OpenAIEmbeddingModelConfig | None,
-        features: PixiFeatures = PixiFeatures.EnableToolCalling | PixiFeatures.EnableToolLogging,
+        features: PixiFeatures = PixiFeatures.default(),
         datasets: list[DatasetConfig] = [],
         wikis: list[MediaWikiConfig] = [],
         environment_filter: IdFilter = IdFilter.allow(),
+        news_config: Optional[NewsConfig] = None,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info(f"Initalizing Pixi with feature set {features} and platform {platform}...")
@@ -62,23 +67,29 @@ class PixiClient:
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
         self.features = features
+        self.news_config = news_config
+        self.pre_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
+        self.post_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
 
         # Verify models and API connectivity at startup
-        self.verify_models()
+        self.register_pre_startup_hook(self.verify_models)
 
-        self.enable_tool_calls = PixiFeatures.EnableToolCalling in features
-        self.log_tool_calls = PixiFeatures.EnableToolLogging in features
+        # Pre-Load all the instances after startup
+        #self.register_post_startup_hook(self.preload_instances)
+
+        self.enable_tool_calls = PixiFeatures.ToolCalling in features
+        self.log_tool_calls = PixiFeatures.ToolLogging in features
         self.datasets = []
         self.environment_filter = environment_filter
 
-        self.accept_images = PixiFeatures.EnableImageSupport in features
-        self.accept_audio = PixiFeatures.EnableAudioSupport in features
+        self.accept_images = PixiFeatures.ImageSupport in features
+        self.accept_audio = PixiFeatures.AudioSupport in features
         if (self.accept_images or self.accept_audio) and not SUPPORTS_MEDIA_CACHING:
             self.logger.warning("tried to accept audio/images, but media caching features are not available")
             self.accept_images = False
             self.accept_audio = False
 
-        self.chatbot_factory = CachedAsyncChatbotFactory(
+        self.chatbot_factory = AsyncChatbotInstanceRegistry(
             parent=self,
             auth=self.auth,
             model=model,
@@ -89,7 +100,7 @@ class PixiClient:
         self.reflection_api = ReflectionAPI(platform=platform)
 
         self.gif_api = None
-        if PixiFeatures.EnableGIFSearch in features:
+        if PixiFeatures.GIFSearch in features:
             try:
                 self.gif_api = AsyncTenorAPI()
             except KeyError:
@@ -103,7 +114,7 @@ class PixiClient:
                 self.logger.info(f" - {dataset_config.name}")
                 self.datasets.append(self.register_database_tool(dataset_config))
 
-        if self.enable_tool_calls and PixiFeatures.EnableWikiSearch in features and wikis:
+        if self.enable_tool_calls and PixiFeatures.WikiSearch in features and wikis:
             self.logger.info(f"registering {len(wikis)} wiki(s):")
             for wiki_config in wikis:
                 self.logger.info(f" - {wiki_config.name}: {wiki_config.url}")
@@ -114,6 +125,13 @@ class PixiClient:
 
         self.__register_builtin_slash_commands()
 
+        # Initialize channel selector agent for proactive news feature
+        self.channel_selector_agent = None
+        if PixiFeatures.NewsProactive in self.features and self.news_config is not None:
+            self.channel_selector_agent = self.create_agent_instance(
+                agent_cls=ChannelSelectorAgent,
+            )
+
         self.logger.info(f"loading addons...")
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
@@ -122,7 +140,7 @@ class PixiClient:
 
         self.logger.info(f"Pixi finished initalizing!")
 
-    def verify_models(self):
+    async def verify_models(self):
         """
         Verifies that the configured models exist on the API server and that the API is reachable.
         Logs a warning for any configured model IDs not found in the API's model list.
@@ -177,26 +195,26 @@ class PixiClient:
             self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
-        self.chatbot_factory.register_tool(ToolEntry(
+        self.chatbot_factory.register_tool(AsyncTool(
             name=name,
-            func=func,
+            function=func,
             parameters=parameters,
             description=description,
             predicate=predicate
         ))
 
-    def register_action(self, name: str, func, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None, is_visible: bool = True):
-        self.chatbot_factory.register_action(ActionEntry(
+    def register_action(self, name: str, function, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None, is_visible: bool = True):
+        self.chatbot_factory.register_action(AsyncAction(
             name=name,
-            func=func,
+            function=function,
             field_name=field_name,
             description=description,
             is_visible=is_visible,
             predicate=predicate,
         ))
 
-    def create_agent_instance(self, agent: type[AgentBase], **agent_kwargs) -> AgentBase:
-        return agent(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
+    def create_agent_instance[A: AgentBase](self, agent_cls: type[A], **agent_kwargs) -> A:
+        return agent_cls(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
         async def checked_function(message: AbstractMessage):
@@ -253,8 +271,8 @@ class PixiClient:
             if instance.schedule_action(
                 action=f"[{schedule_data.action}: {schedule_data.value}]",
                 action_context=ctx,
-                id = schedule_data.id,
-                delay = schedule_data.delay
+                id=schedule_data.id,
+                delay=schedule_data.delay
             ):
                 self.logger.info(f"scheduled action for {format_time_later(schedule_data.delay)}: {value}")
             else:
@@ -263,7 +281,7 @@ class PixiClient:
         self.register_action(
             name="schedule",
             field_name="json",
-            func=schedule_action,
+            function=schedule_action,
             description="schedules an action to be executed later, the value for this action is a json with the following schema: {\"action\": <action-name>, \"value\": <action-value>, \"delay\": <delay-in-seconds>, \"id\": <unique-number>}"
         )
 
@@ -286,7 +304,7 @@ class PixiClient:
         self.register_action(
             name="cancel_schedule",
             field_name="id",
-            func=cancel_schedule_action,
+            function=cancel_schedule_action,
             description="cancels a previously scheduled action by its id (the ID for each schedule should be a unique number)"
         )
 
@@ -303,7 +321,7 @@ class PixiClient:
         self.register_action(
             name="send",
             field_name="message",
-            func=send_action,
+            function=send_action,
             description="sends a message in the current chat"
         )
         if self.gif_api is not None:
@@ -328,7 +346,7 @@ class PixiClient:
             self.register_action(
                 name="send_gif",
                 field_name="gif description",
-                func=send_gif_action,
+                function=send_gif_action,
                 description="sends a gif in the current chat, the gif is chosen based on the provided description (description must be in English)"
             )
 
@@ -344,7 +362,7 @@ class PixiClient:
         self.register_action(
             name="note",
             field_name="thoughts",
-            func=note_action,
+            function=note_action,
             description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words",
             is_visible=False,
         )
@@ -363,7 +381,7 @@ class PixiClient:
         self.register_action(
             name="react",
             field_name="emoji",
-            func=react_action,
+            function=react_action,
             description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
 
@@ -404,21 +422,21 @@ class PixiClient:
                 return "no result: no id specified"
 
             if self.embedding_model:
-                embedding_database = AsyncEmbeddingDatabase(self.auth, self.embedding_model)
+                rag = AsyncRAGClient(self.auth, self.embedding_model)
                 entries = await asyncio.gather(*[
                     database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
                 for entry in entries:
-                    await embedding_database.add_document(entry.content, entry.title, entry.id)
-                query_embed = await embedding_database.embed(query)
+                    await rag.add_document(entry.content, entry.title, entry.id)
+                query_embed = await rag.embed(query)
                 matches = [
                     asdict(doc_match)
-                    for doc_match in embedding_database.search(query_embed)  # pyright: ignore[reportArgumentType]
+                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
                 ]
                 return matches
             else:
                 agent = self.create_agent_instance(
-                    agent=RetrievalAgent,
+                    agent_cls=RetrievalAgent,
                     context=await asyncio.gather(*[
                         get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
                     ])
@@ -491,18 +509,18 @@ class PixiClient:
             ])
 
             if self.embedding_model:
-                embedding_database = AsyncEmbeddingDatabase(self.auth, self.embedding_model)
+                rag = AsyncRAGClient(self.auth, self.embedding_model)
                 for i, (page, title) in enumerate(context):
-                    await embedding_database.add_document(page, title, i)
-                query_embed = await embedding_database.embed(query)
+                    await rag.add_document(page, title, i)
+                query_embed = await rag.embed(query)
                 matches = [
                     asdict(doc_match)
-                    for doc_match in embedding_database.search(query_embed)  # pyright: ignore[reportArgumentType]
+                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
                 ]
                 return matches
             else:
                 agent = self.create_agent_instance(
-                    agent=RetrievalAgent,
+                    agent_cls=RetrievalAgent,
                     context=[page for page, title in context]
                 )
                 return await agent.execute_query(query)
@@ -582,6 +600,7 @@ class PixiClient:
             instance = self.chatbot_factory.instances.get(environment_id)
             if instance:
                 instance.cancel_all_schedules()
+                instance.stop_news_background_task()
             self.chatbot_factory.remove(environment_id)
             self.logger.info(f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled.")
 
@@ -609,9 +628,22 @@ class PixiClient:
         )
 
     async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
-        return await self.chatbot_factory.get_or_create(identifier)
-
-    async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessage):
+        instance = await self.chatbot_factory.get_or_create(identifier)
+        # Start news background task if feature is enabled and not already running
+        if (
+            PixiFeatures.NewsProactive in self.features
+            and self.news_config is not None
+            and self.channel_selector_agent is not None
+            and instance.news_task is None
+        ):
+            instance.start_news_background_task(
+                news_config=self.news_config,
+                reflection_api=self.reflection_api,
+                channel_selector_agent=self.channel_selector_agent,
+            )
+        return instance
+    
+    async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessageMeta):
         assert reference_message.origin
         message: AbstractMessage = reference_message.origin
 
@@ -648,7 +680,7 @@ class PixiClient:
 
         return instance.action_manager.is_visible_actions_taken()
 
-    async def pixi_resp_retry(self, chat_message: ChatMessage, num_retry: int = 10):
+    async def pixi_resp_retry(self, chat_message: ChatMessageMeta, num_retry: int = 10):
         """
         create a copy of all messages in the conversation instance and try to respond to the message.
         if the response fails, it will retry up to `num_retry` times.
@@ -656,7 +688,7 @@ class PixiClient:
         if the response fails after all retries, it will return False.
         """
 
-        async def rearrage_predicate(msg: ChatMessage):
+        async def rearrage_predicate(msg: ChatMessageMeta):
             msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
             current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
 
@@ -784,7 +816,7 @@ class PixiClient:
                     }
 
         # convert everything into `ChatMessage`
-        role_message = ChatMessage(
+        role_message = ChatMessageMeta(
             role=ChatRole.USER,
             content=message_text,
             metadata=metadata,
@@ -796,5 +828,33 @@ class PixiClient:
         )
         await self.pixi_resp_retry(role_message)
 
+    def register_pre_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
+        """Register an async awaitable to run before the bot connects to Discord/Telegram.
+        
+        The hook will be awaited concurrently before the platform connection starts.
+        This allows running async initialization code (e.g., database migrations,
+        cache warming, API pre-checks) before the bot begins handling messages.
+        """
+        self.pre_startup_hooks.append(hook)
+
+    def register_post_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
+        """Register an async awaitable to run after the bot connects to Discord/Telegram.
+        
+        The hook will be awaited concurrently after the platform connection starts.
+        This allows running async initialization code (e.g., database migrations,
+        cache warming, API pre-checks) after the bot begins handling messages.
+        """
+        self.post_startup_hooks.append(hook)
+    
+    async def start(self):
+        """Start the bot asynchronously, running all startup hooks first."""
+        if self.pre_startup_hooks:
+            self.logger.info(f"Running {len(self.pre_startup_hooks)} startup hook(s)...")
+            results = await asyncio.gather(*(f() for f in self.pre_startup_hooks))
+            self.logger.info("All startup hooks completed.")
+        
+        await self.reflection_api.start_async()
+
     def run(self):
-        self.reflection_api.run()
+        """Run the bot (blocking with async support for startup hooks)."""
+        asyncio.run(self.start())

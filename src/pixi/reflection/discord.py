@@ -1,14 +1,14 @@
 import asyncio
 import logging
 import os
-from dataclasses import asdict
 from typing import IO, Any, Callable
 
 import discord
 from discord import app_commands
 
 from ..caching.base import MediaCache, UnsupportedMediaException
-from ..enums import Platform
+from ..model.enums import Platform
+from ..reflection import ChannelMeta, GuildMeta
 from .message.discord import DiscordMessageImpl
 
 ImageCache = None
@@ -21,7 +21,7 @@ except ImportError:
 class DiscordReflectionAPI:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         self.platform = Platform.DISCORD
 
         self.token = os.getenv("DISCORD_BOT_TOKEN")
@@ -41,7 +41,13 @@ class DiscordReflectionAPI:
 
         self.bot = DiscordClient()
 
+    async def start(self):
+        """Start the Discord bot asynchronously."""
+        assert self.token
+        await self.bot.start(self.token)
+
     def run(self):
+        """Run the Discord bot (blocking)."""
         assert self.token
         self.bot.run(self.token, log_handler=None)
 
@@ -214,3 +220,42 @@ class DiscordReflectionAPI:
             ))
 
         return messages[::-1]
+
+    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]:
+        """Return all text channels in a guild (forum) by its ID."""
+        guild = await self.bot.fetch_guild(forum_id)
+        if guild is None:
+            return []
+        bot_member = await guild.fetch_member(self.bot.user.id)  # pyright: ignore[reportOptionalMemberAccess]
+        return [
+            ChannelMeta(
+                id=c.id, 
+                name=c.name, 
+                mention=c.mention
+            ) for c in await guild.fetch_channels() if (c.permissions_for(bot_member).send_messages and c.id != (guild.id + 1))
+        ]
+
+    async def send_message(self, chat_id: int, text: str):
+        """Send a text message to a channel by its ID."""
+        channel = await self.bot.fetch_channel(chat_id)
+        if channel is None:
+            self.logger.warning(f"Channel {chat_id} not found, cannot send message.")
+            return
+        if not hasattr(channel, "send"):
+            self.logger.warning(f"Channel {chat_id} does not support sending messages.")
+            return
+        try:
+            await channel.send(text)  # pyright: ignore[reportAttributeAccessIssue]
+        except Exception:
+            self.logger.exception(f"Failed to send message to channel {chat_id}.")
+
+    async def get_available_guilds(self) -> list[GuildMeta]:
+        """Return all guilds the bot is currently a member of."""
+        guild_list = []
+        async for guild in self.bot.fetch_guilds():
+            guild_list.append(GuildMeta(
+                id=guild.id,
+                name=guild.name,
+                member_count=guild.member_count,
+            ))
+        return guild_list

@@ -5,220 +5,135 @@ import logging
 import os
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
-from typing import Any, Awaitable, Callable, Concatenate, Coroutine, ParamSpec, Sequence
+from typing import Any, Awaitable, Callable
 
 import httpx
 from openai import AsyncOpenAI
 from openai._streaming import AsyncStream
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
-from .caching.base import MediaCache
-from .config import OpenAIAuthConfig, OpenAILanguageModelConfig
-from .enums import ChatRole
-from .reflection.message import AbstractMessage
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
+from .model.chatting.callbacks import (ActionContext, ActionFunction,
+                                       AsyncAction, AsyncTool, FunctionCall,
+                                       PartialFunctionCall, ToolContext,
+                                       ToolFunction)
+from .model.storage.message import ChatMessageMeta
+from .model.chatting.persona import AssistantPersona
+from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
+from .model.enums import ChatRole
 from .storage.paths import PixiPaths, open_resource
 from .typing import (AsyncGenerator, AsyncIterator, AsyncPredicate, Generator,
                      Iterator, Optional)
 from .utils import clean_dict, exists, format_time_ago
 
 
-@dataclass(frozen=True)
-class FunctionCall:
-    name: str
-    index: int
-    id: str
-    arguments: Optional[dict] = None
+# takes the last N messages in the message list that match a predicate, and moves them to the
+# end of the message list, this is to ensure the LLMs immmediate context is accurate
+async def get_rearranged_messages(messages: list[ChatMessageMeta], predicate: AsyncPredicate, n: int = 5) -> list[ChatMessageMeta]:
+    selected_messages: list[ChatMessageMeta] = []
+    unselected_predicate: list[ChatMessageMeta] = []
+    for msg in messages[::-1]:
+        if await predicate(msg) and len(selected_messages) < n:
+            selected_messages.append(msg)
+        else:
+            unselected_predicate.append(msg)
 
-    def to_dict(self) -> dict:
-        return dict(
-            name=self.name,
-            arguments=self.arguments,
-            index=self.index,
-            id=self.id
-        )
+    return unselected_predicate[::-1] + selected_messages[::-1]
 
-    def to_openai_dict(self) -> dict:
-        return dict(
-            type="function",
-            id=self.id,
-            function=dict(
-                name=self.name,
-                arguments=json.dumps(self.arguments, ensure_ascii=False)
-            )
-        )
+
+class ChatMessageUtils:
+    def __init__(self, meta: ChatMessageMeta):
+        self.meta = meta
+
+        self.validate_params(meta)
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'FunctionCall':
-        return cls(
-            name=data["name"],
-            index=data["index"],
-            id=data["id"],
-            arguments=data.get("arguments", {}),
-        )
+    def from_meta(cls, meta: ChatMessageMeta):
+        return cls(meta)
 
-
-@dataclass
-class PartialFunctionCall:
-    name: str
-    index: int
-    id: str
-    arguments: Optional[str] = None
-
-    def to_function_call(self) -> FunctionCall:
-        return FunctionCall(
-            name=self.name,
-            index=self.index,
-            id=self.id,
-            arguments=json.loads(self.arguments) if self.arguments else {}
-        )
-
-
-@dataclass
-class ChatMessage:
-    role: ChatRole | str
-    content: Optional[str] = None
-    images: list[MediaCache] = field(default_factory=list)
-    audio: list[MediaCache] = field(default_factory=list)
-    tool_calls: Sequence[FunctionCall] = field(default_factory=list)
-    tool_call_id: Optional[str] = None
-
-    # --- additional states---
-    metadata: Optional[dict] = None
-    message_time: Optional[float] = None
-
-    # --- references ---
-    instance_id: Optional[str] = None
-
-    # the original message that this message is instantiated from, should be of type
-    # discord.Message or telegram.Message, but the type is not specified here to avoid import
-    # errors if one library is not found, is used mostly to reply to the original message
-    origin: Optional[AbstractMessage] = None
-
-    bot: Any = None
-
-    def __post_init__(self):
-        self.validate_params()
-
-        self.time = (self.message_time if self.message_time and self.message_time > 0 else time.time())
-
-    def validate_params(self):
-
-        if self.images:
+    @staticmethod
+    def validate_params(meta: ChatMessageMeta):
+        if meta.images:
             # image cache might not be an installed feature, so we import it only when we need to use it
             from .caching import ImageCache
 
-            for image in self.images:
+            for image in meta.images:
                 assert isinstance(
                     image, ImageCache), f"expected image to be an instance of ImageCache, but got {image}."
 
-        if self.audio:
+        if meta.audio:
             # audio cache might not be an installed feature, so we import it only when we need to use it
             from .caching import AudioCache
 
-            for audio in self.audio:
+            for audio in meta.audio:
                 assert isinstance(
                     audio, AudioCache), f"expected audio to be an instance of AudioCache, but got {audio}."
 
         # validating each role's requirements
 
-        if self.role != ChatRole.USER:
+        if meta.role != ChatRole.USER:
             assert not exists(
-                self.metadata), f"Metadata can only be attached to USER messages (e.g. the metadata should be None) but got `{self.metadata}`"
+                meta.metadata), f"Metadata can only be attached to USER messages (e.g. the metadata should be None) but got `{meta.metadata}`"
             assert not exists(
-                self.images), f"Images can only be attached to USER messages, but got {self.images} for role ASSISTANT"
+                meta.images), f"Images can only be attached to USER messages, but got {meta.images} for role ASSISTANT"
 
-        if self.role != ChatRole.TOOL:
+        if meta.role != ChatRole.TOOL:
             assert not exists(
-                self.tool_call_id), f"`tool_call_id` can only be attached to TOOL messages (e.g. the tool_call_id should be None) but got `{self.tool_call_id}`"
+                meta.tool_call_id), f"`tool_call_id` can only be attached to TOOL messages (e.g. the tool_call_id should be None) but got `{meta.tool_call_id}`"
 
-        match self.role:
+        match meta.role:
             case ChatRole.SYSTEM:
                 assert exists(
-                    self.content, True), f"expected SYSTEM to have a `content` of type `str` but got `{self.content}`"
+                    meta.content, True), f"expected SYSTEM to have a `content` of type `str` but got `{meta.content}`"
                 assert not exists(
-                    self.tool_calls), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{self.tool_calls}`"
+                    meta.tool_calls), f"expected SYSTEM to not have `tool_calls` (e.g. the tool_calls should be None) but got `{meta}`"
 
             case ChatRole.ASSISTANT:
-                if exists(self.tool_calls):
-                    assert self.content is None, f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{self.content}`"
-                    for tool_call in self.tool_calls:
+                if exists(meta.tool_calls):
+                    assert meta.content is None, f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{meta.content}`"
+                    for tool_call in meta.tool_calls:
                         assert isinstance(
-                            tool_call, FunctionCall), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{self.tool_calls}`"
+                            tool_call, FunctionCall), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{meta.tool_calls}`"
                 else:
                     assert exists(
-                        self.content, True), f"expected ASSISTANT to have a `content` of type `str` but got `{self.content}`"
+                        meta.content, True), f"expected ASSISTANT to have a `content` of type `str` but got `{meta.content}`"
             case ChatRole.USER:
                 assert exists(
-                    self.content, True), f"expected USER to have a `content` of type `str` but got `{self.content}`"
+                    meta.content, True), f"expected USER to have a `content` of type `str` but got `{meta.content}`"
                 assert not exists(
-                    self.tool_calls), f"expected USER to not have `tool_calls` (e.g. the tool_calls should be None) but got `{self.tool_calls}`"
+                    meta.tool_calls), f"expected USER to not have `tool_calls` (e.g. the tool_calls should be None) but got `{meta.tool_calls}`"
 
             case ChatRole.TOOL:
                 assert exists(
-                    self.content, True), f"expected TOOL to have a `content` of type `str` but got `{self.content}`"
+                    meta.content, True), f"expected TOOL to have a `content` of type `str` but got `{meta.content}`"
 
             case _:
-                raise ValueError(f"Invalid role \"{self.role}\".")
-
-    def to_dict(self) -> dict:
-        return clean_dict(dict(
-            role=self.role,
-            content=self.content,
-            metadata=self.metadata,
-            time=self.time,
-            images=[x.to_dict() for x in self.images or []],
-            audio=[x.to_dict() for x in self.audio or []],
-            tool_calls=[x.to_dict() for x in self.tool_calls or []],
-            tool_call_id=self.tool_call_id
-        ))
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'ChatMessage':
-        images = []
-        if images_cache := data.get("images", []):
-            from .caching import ImageCache
-            images = [ImageCache.from_dict(d) for d in images_cache]
-        audio = []
-        if audio_cache := data.get("audio", []):
-            from .caching import AudioCache
-            audio = [AudioCache.from_dict(d) for d in audio_cache]
-        return cls(
-            role=ChatRole[data["role"].upper()],
-            content=data.get("content"),
-            metadata=data.get("metadata"),
-            message_time=data.get("time", time.time()),
-            images=images,  # pyright: ignore[reportArgumentType]
-            audio=audio,  # pyright: ignore[reportArgumentType]
-            tool_calls=[FunctionCall.from_dict(d) for d in data.get("tool_calls", [])],
-            tool_call_id=data.get("tool_call_id")
-        )
+                raise ValueError(f"Invalid role \"{meta.role}\".")
 
     def to_openai_dict(self, timestamps: bool = True) -> dict:
-        openai_dict = dict(role=self.role.lower())  # ensure role is in lower case
-        match self.role:
+        openai_dict = dict(role=self.meta.role.lower())  # ensure role is in lower case
+        match self.meta.role:
             case ChatRole.USER:
-                content = [f"User: {self.content}"]
+                content = [f"User: {self.meta.content}"]
                 if timestamps:
-                    fmt_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(self.time))
-                    fmt_diff_time = format_time_ago(time.time()-self.time)
+                    fmt_time = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(self.meta.time))
+                    fmt_diff_time = format_time_ago(time.time()-self.meta.time)
                     content.append(f"Sent At: {fmt_time} ({fmt_diff_time})")
-                if self.metadata is not None:
+                if self.meta.metadata is not None:
                     content += [
                         "Metadata:",
                         ""
                         "```json",
-                        json.dumps(self.metadata, ensure_ascii=False),
+                        json.dumps(self.meta.metadata, ensure_ascii=False),
                         "```"
                     ]
                 content_dict: list[dict] = [dict(type="text", text="\n".join(content))]
-                for img in self.images:
+                for img in self.meta.images:
                     content_dict.append(dict(
                         type="image_url",
                         image_url=dict(url=img.to_data_url())
                     ))
-                for audio in self.audio:
+                for audio in self.meta.audio:
                     content_dict.append(dict(
                         input_audio=dict(
                             data=audio.to_base64(),
@@ -230,79 +145,29 @@ class ChatMessage:
                     ))
                 openai_dict.update(dict(content=content_dict))  # type: ignore
             case ChatRole.ASSISTANT:
-                if exists(self.content, True):
-                    openai_dict.update(dict(content=self.content))  # type: ignore
+                if exists(self.meta.content, True):
+                    openai_dict.update(dict(content=self.meta.content))  # type: ignore
                 else:
                     openai_dict.update(dict(
-                        tool_calls=[i.to_openai_dict() for i in self.tool_calls]
+                        tool_calls=[
+                            dict(
+                                type="function",
+                                id=tool.id,
+                                function=dict(
+                                    name=tool.name,
+                                    arguments=json.dumps(tool.arguments, ensure_ascii=False)
+                                )
+                            ) for tool in self.meta.tool_calls
+                        ]
                     ))  # type: ignore
             case ChatRole.TOOL:
                 openai_dict.update(dict(
-                    content=self.content,
-                    tool_call_id=self.tool_call_id
+                    content=self.meta.content,
+                    tool_call_id=self.meta.tool_call_id
                 ))  # type: ignore
             case _:
-                openai_dict.update(dict(content=self.content))  # type: ignore
+                openai_dict.update(dict(content=self.meta.content))  # type: ignore
         return clean_dict(openai_dict)
-
-
-# takes the last N messages in the message list that match a predicate, and moves them to the
-# end of the message list, this is to ensure the LLMs immmediate context is accurate
-async def get_rearranged_messages(messages: list[ChatMessage], predicate: AsyncPredicate, n: int = 5) -> list[ChatMessage]:
-    selected_messages: list[ChatMessage] = []
-    unselected_predicate: list[ChatMessage] = []
-    for msg in messages[::-1]:
-        if await predicate(msg) and len(selected_messages) < n:
-            selected_messages.append(msg)
-        else:
-            unselected_predicate.append(msg)
-
-    return unselected_predicate[::-1] + selected_messages[::-1]
-
-
-@dataclass
-class ToolContext:
-    reference_message: Optional[ChatMessage] = None
-    parent_instance: 'Optional[AsyncChatbotInstance]' = None
-    # more to be added
-
-
-P = ParamSpec("P")
-AsyncTool = Callable[Concatenate[ToolContext, P], Coroutine[Any, Any, Any]]
-
-
-@dataclass
-class ActionContext:
-    reference_message: Optional[ChatMessage] = None
-    parent_instance: 'Optional[AsyncChatbotInstance]' = None
-    # more fields to be added
-
-
-ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
-
-
-@dataclass(frozen=True)
-class AsyncAction:
-    name: str
-    field_name: str
-    function: ActionFunction
-    description: Optional[str] = None
-    is_visible: bool = True  # whether or not the action has a visible effect from the user's perspective
-
-    # TODO: implement callbacks for when we enter the action (after the action name) and when
-    # we leave the action (right after the action is completed but before executing the action)
-    enter_callback: Optional[ActionFunction] = None
-    leave_callback: Optional[ActionFunction] = None
-
-    def get_syntax(self):
-        desc = self.description or "no description"
-        return f"[{self.name}:<{self.field_name}>]: {desc}"
-
-    async def call(self, *args, **kwds):
-        return await self.function(*args, **kwds)
-
-    def __str__(self):
-        return f"<async-action {self.name}>"
 
 
 class AsyncActionManager:
@@ -418,7 +283,7 @@ class AsyncChatClient:
         self,
         auth: OpenAIAuthConfig,
         model: OpenAILanguageModelConfig,
-        messages: Optional[list[ChatMessage]] = None,
+        messages: Optional[list[ChatMessageMeta]] = None,
         log_tool_calls: bool = False,
         enforce_system_header: bool = False
     ):
@@ -432,10 +297,10 @@ class AsyncChatClient:
 
         if messages is not None:
             assert isinstance(messages, list), \
-                f"expected messages to be of type `list[ChatMessage]` or be None, but got `{messages}`"
+                f"expected messages to be of type `list[ChatMessageMeta]` or be None, but got `{messages}`"
             for m in messages:
-                assert isinstance(m, ChatMessage), \
-                    f"expected messages to be of type `list[ChatMessage]` or be None, but at least one element in the list is not of type `ChatMessage`, got `{messages}`"
+                assert isinstance(m, ChatMessageMeta), \
+                    f"expected messages to be of type `list[ChatMessageMeta]` or be None, but at least one element in the list is not of type `ChatMessageMeta`, got `{messages}`"
 
         self.system_prompt = None
         self.tools: dict = {}
@@ -448,16 +313,16 @@ class AsyncChatClient:
             http_client=httpx.AsyncClient(trust_env=False),
         )
 
-    def add_tool(self, name: str, func: AsyncTool, parameters: Optional[dict] = None, description: Optional[str] = None):
+    def add_tool(self, name: str, function: ToolFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
         """
         Register a tool (function) for tool calling.
         name: tool name (string)
-        func: (str) -> Awaitable[None]
+        function: (str) -> Awaitable[None]
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
         self.tools[name] = dict(
-            func=func,
+            function=function,
             schema=dict(
                 type="function",
                 function=dict(
@@ -484,7 +349,7 @@ class AsyncChatClient:
     def get_system_prompt(self):
         return (self.system_prompt or "")
 
-    def add_message(self, message: ChatMessage | str) -> ChatMessage:
+    def add_message(self, message: ChatMessageMeta | str) -> ChatMessageMeta:
         assert message is not None
         if isinstance(message, str):
             role = None
@@ -497,21 +362,24 @@ class AsyncChatClient:
                     role = ChatRole.ASSISTANT
                 case _:
                     role = ChatRole.ASSISTANT
-            message = ChatMessage(role, message)
-        elif not isinstance(message, ChatMessage):
-            raise ValueError(f"expected message to be a ChatMessage or a string, but got {message}.")
+            message = ChatMessageMeta(role, message)
+        elif not isinstance(message, ChatMessageMeta):
+            raise ValueError(f"expected message to be a ChatMessageMeta or a string, but got {message}.")
         self.messages.append(message)
         return message
 
-    def set_messages(self, messages: list[ChatMessage]):
+    def set_messages(self, messages: list[ChatMessageMeta]):
         assert isinstance(messages, list), f"Invalid messages \"{messages}\"."
         self.messages = messages
 
     def get_messages(self):
         return self.messages
 
-    async def stream_chat_completion(self, enable_timestamps: bool = True) -> AsyncStream[ChatCompletionChunk]:
-        openai_messages: list = await self.get_openai_messages_dict(enable_timestamps=enable_timestamps)
+    async def stream_chat_completion(self, enable_timestamps: bool = True, system_prompt: Optional[str | ChatMessageMeta] = None) -> AsyncStream[ChatCompletionChunk]:
+        openai_messages: list = await self.get_openai_messages_dict(
+            enable_timestamps=enable_timestamps,
+            system_prompt=system_prompt
+        )
         kwargs = dict(
             model=self.model.id,
             messages=openai_messages,
@@ -532,22 +400,27 @@ class AsyncChatClient:
 
         return await self.session.chat.completions.create(**kwargs)  # type: ignore
 
-    async def get_openai_messages_dict(self, enable_timestamps: bool = True) -> list[dict]:
+    async def get_openai_messages_dict(self, enable_timestamps: bool = True, system_prompt: Optional[str | ChatMessageMeta] = None) -> list[dict]:
         if len(self.messages) == 0:
             return list()
 
-        system_prompt = self.get_system_prompt()
-        messages = self.enforce_approximate_context_limit(system_prompt, self.messages.copy())
+        system_prompt = system_prompt or self.get_system_prompt()
+        messages = self.enforce_approximate_context_limit(
+            system_prompt.content if isinstance(system_prompt, ChatMessageMeta) else system_prompt,  # type: ignore
+            self.messages.copy()
+        )
 
-        openai_messages = [msg.to_openai_dict(timestamps=enable_timestamps) for msg in messages]
+        openai_messages = [ChatMessageUtils.from_meta(msg).to_openai_dict(
+            timestamps=enable_timestamps) for msg in messages]
         # add system prompt before to the last user message message to ensure it is in the
         # model's context but also don't disrupt the conversation or tool calling
-
         if exists(system_prompt):
-            system_message = ChatMessage(
-                role=ChatRole.SYSTEM,
-                content=system_prompt
-            ).to_openai_dict(timestamps=enable_timestamps)
+            if not isinstance(system_prompt, ChatMessageMeta):
+                system_prompt = ChatMessageMeta(
+                    role=ChatRole.SYSTEM,
+                    content=system_prompt
+                )
+            system_message = ChatMessageUtils.from_meta(system_prompt).to_openai_dict(timestamps=enable_timestamps)
 
             insert_index = 0
             # some models only support system message as the very first message
@@ -558,7 +431,7 @@ class AsyncChatClient:
             openai_messages.insert(insert_index, system_message)
         return openai_messages
 
-    def enforce_approximate_context_limit(self, system_prompt: str, messages: list[ChatMessage]):
+    def enforce_approximate_context_limit(self, system_prompt: str, messages: list[ChatMessageMeta]):
         system_prompt_size = len(system_prompt) if system_prompt else 0
         request_size = system_prompt_size
         for cutoff_index, message in enumerate(messages):
@@ -585,13 +458,16 @@ class AsyncChatClient:
                 messages = messages[-(cutoff_index-1):]
         return messages
 
-    async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>"):
+    async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>", temporal: bool = False, system_prompt: Optional[str | ChatCompletionChunk] = None):
+        if temporal:
+            orig_messages = self.messages.copy()
+        
         lookbehind_buffer: str = ""
         max_buffer_size = max(len(start_think_tag), len(end_think_tag))
 
         is_thinking = False
 
-        async for char in self.stream_request():
+        async for char in self.stream_request(system_prompt = system_prompt):
             lookbehind_buffer += char
 
             # make sure buffer doesn't grow indefinitely if none of the tags are found
@@ -612,13 +488,16 @@ class AsyncChatClient:
         if not is_thinking and lookbehind_buffer:
             for c in lookbehind_buffer:
                 yield c
+        
+        if temporal:
+            self.messages = orig_messages # pyright: ignore[reportPossiblyUnboundVariable]
 
-    def create_tool_context(self, reference_message: ChatMessage):
+    def create_tool_context(self, reference_message: ChatMessageMeta):
         return ToolContext(
             reference_message=reference_message,
         )
 
-    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessage) -> list[ChatMessage]:
+    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessageMeta) -> list[ChatMessageMeta]:
         """
         Execute tool calls and return results
         """
@@ -630,7 +509,7 @@ class AsyncChatClient:
             reference_message=reference_message
         )
 
-        results = [ChatMessage(
+        results = [ChatMessageMeta(
             ChatRole.ASSISTANT,
             content=None,
             tool_calls=function_calls
@@ -638,7 +517,7 @@ class AsyncChatClient:
         for fn in function_calls:
             tool = self.tools.get(fn.name)
             if tool:
-                func: AsyncTool = tool["func"]
+                func: ToolFunction = tool["function"]
                 func_args_str = ""
                 if fn.arguments:
                     func_args_str = ", ".join([
@@ -664,7 +543,7 @@ class AsyncChatClient:
                 result = f"Tool '{fn.name}' was not found."
                 self.logger.warning(f"Tool '{fn.name}' was not found.")
 
-            results.append(ChatMessage(
+            results.append(ChatMessageMeta(
                 ChatRole.TOOL,
                 content=result,
                 tool_call_id=fn.id,
@@ -674,12 +553,13 @@ class AsyncChatClient:
     async def stream_request(
         self,
         verbose: bool = logging.getLevelName(logging.root.level).lower() == "debug",
-        reference_message: ChatMessage | None = None
+        reference_message: ChatMessageMeta | None = None,
+        system_prompt: Optional[str | ChatMessageMeta] = None
     ):
         # reference_message is the last user message in which we are responding to, it contains
         # information about the current channel and holds special metadata
         reference_message = reference_message or self.messages[-1]
-        assert reference_message.role == ChatRole.USER, f"`reference_message` must be a USER message, but got a message with the role of \"{reference_message.role}\"."
+        assert reference_message.role in [ChatRole.USER, ChatRole.SYSTEM], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
 
         async def execute_tool_task(function_call):
             self.messages += await self.get_tool_results(
@@ -687,7 +567,7 @@ class AsyncChatClient:
                 reference_message=reference_message
             )
 
-        async with CoroutineQueueExecutor() as tool_call_queue, await self.stream_chat_completion() as stream:
+        async with CoroutineQueueExecutor() as tool_call_queue, await self.stream_chat_completion(system_prompt=system_prompt) as stream:
             partial_function_calls: dict[int, PartialFunctionCall] = dict()
             last_function_call_index = None
             response = ""
@@ -760,7 +640,7 @@ class AsyncChatClient:
             )
 
         if response:
-            self.messages.append(ChatMessage(
+            self.messages.append(ChatMessageMeta(
                 role=ChatRole.ASSISTANT,
                 content=response
             ))
@@ -770,23 +650,17 @@ class AsyncChatClient:
             async for chunk in self.stream_request(reference_message=reference_message):
                 yield chunk
 
-    async def stream_ask(self, message: str | ChatMessage, temporal: bool = False):
-        if temporal:
-            orig_messages = self.messages.copy()
-
+    async def stream_ask(self, message: str | ChatMessageMeta, temporal: bool = False, system_prompt: Optional[str] = None):
         if isinstance(message, str):
-            message = ChatMessage(ChatRole.USER, message)
+            message = ChatMessageMeta(ChatRole.USER, message)
         else:
-            assert isinstance(message, ChatMessage), "Message must be a string or a ChatMessage."
+            assert isinstance(message, ChatMessageMeta), "Message must be a string or a ChatMessageMeta."
 
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
 
-        async for chunk in self.stream_completion():
+        async for chunk in self.stream_completion(temporal = temporal, system_prompt=system_prompt):
             yield chunk
-
-        if temporal:
-            self.messages = orig_messages  # type: ignore
 
     def state_dict(self):
         return dict(
@@ -794,60 +668,7 @@ class AsyncChatClient:
         )
 
     def load_state_dict(self, data: dict):
-        self.messages = [ChatMessage.from_dict(msg) for msg in data.get("messages") or []]
-
-
-@dataclass(frozen=True)
-class AssistantPersona:
-    name: str
-    age: Optional[int] = None
-    location: Optional[str] = None
-    appearance: Optional[str] = None
-    background: Optional[str] = None
-    likes: Optional[str] = None
-    dislikes: Optional[str] = None
-    online: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'AssistantPersona':
-        return cls(**data)
-
-    @classmethod
-    def from_json(cls, file: str) -> 'AssistantPersona':
-        with open(file, "rb") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
-
-    def __str__(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False)
-
-
-@dataclass(frozen=True)
-class ToolEntry:
-    name: str
-    func: AsyncTool
-    parameters: Optional[dict] = None
-    description: Optional[str] = None
-    predicate: Optional[AsyncPredicate] = None
-
-
-@dataclass(frozen=True)
-class ActionEntry:
-    name: str
-    field_name: str
-    func: ActionFunction
-    description: str
-    is_visible: bool = True
-    predicate: Optional[AsyncPredicate] = None
-
-
-def get_instance_save_path(id: str, hash_prefix: str):
-    uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
-    path = str(PixiPaths.userdata() / f"{hash_prefix}_{uuid_hash}.json")
-    return path
+        self.messages = [ChatMessageMeta.from_dict(msg) for msg in data.get("messages") or []]
 
 
 class AsyncChatbotInstance(AsyncChatClient):
@@ -874,7 +695,7 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         self.id = str(uuid)
         self.prefix = hash_prefix
-        self.path = get_instance_save_path(id=self.id, hash_prefix=self.prefix)
+        self.path = AsyncChatbotInstance.get_save_path(id=self.id, hash_prefix=self.prefix)
 
         # load resources
         with open_resource("persona.json", "r") as f:
@@ -892,19 +713,26 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.actions_since_last_message = 0
 
         if not self.messages:
-            self.add_message(ChatMessage(
+            self.add_message(ChatMessageMeta(
                 role=ChatRole.ASSISTANT,
                 content="[NOTE: I accept the guidelines of the system, I use the SEND to respond nicely] [SEND: OK!, Let's begin!]",
                 bot=self.bot
             ))
 
         self.scheduler = AsyncScheduler()
+        self.news_task: Any | None = None
 
         # actions
         self.action_manager = AsyncActionManager()
 
         # async states
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+
+    @staticmethod
+    def get_save_path(id: str, hash_prefix: str):
+        uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
+        path = str(PixiPaths.userdata() / f"{hash_prefix}_{uuid_hash}.json")
+        return path
 
     def schedule(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]) -> bool:
         """Convenience wrapper for self.scheduler.schedule."""
@@ -926,11 +754,11 @@ class AsyncChatbotInstance(AsyncChatClient):
         """Convenience wrapper for self.scheduler.cancel_all."""
         self.scheduler.cancel_all()
 
-    def add_action(self, name: str, field_name: str, func: ActionFunction, description: Optional[str] = None):
+    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None):
         """Convenience wrapper for self.action_manager.add_action"""
-        self.action_manager.add_action(name, field_name, func, description)
+        self.action_manager.add_action(name, field_name, function, description)
 
-    def add_message(self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER) -> ChatMessage:
+    def add_message(self, message: ChatMessageMeta | str, default_role: ChatRole = ChatRole.USER) -> ChatMessageMeta:
         """
         Add a message to the conversation, and adds a reference to the bot to the messages as well.
 
@@ -938,13 +766,13 @@ class AsyncChatbotInstance(AsyncChatClient):
         """
         self.actions_since_last_message = 0
         if isinstance(message, str):
-            message = ChatMessage(default_role, message, bot=self.bot)
+            message = ChatMessageMeta(default_role, message, bot=self.bot)
 
-        if isinstance(message, ChatMessage):
+        if isinstance(message, ChatMessageMeta):
             message.bot = self.bot  # this is intended to be handled by this class
             return super().add_message(message)
         else:
-            raise TypeError(f"expected message to be a string or a ChatMessage, but got {type(message)}.")
+            raise TypeError(f"expected message to be a string or a ChatMessageMeta, but got {type(message)}.")
 
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
@@ -952,7 +780,7 @@ class AsyncChatbotInstance(AsyncChatClient):
     def get_realtime_data(self):
         return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False)
 
-    def create_tool_context(self, reference_message: ChatMessage):
+    def create_tool_context(self, reference_message: ChatMessageMeta):
         context = super().create_tool_context(
             reference_message=reference_message
         )
@@ -968,18 +796,27 @@ class AsyncChatbotInstance(AsyncChatClient):
             actions=self.action_manager.get_prompt()
         )
 
-    async def stream_call(self, reference_message: ChatMessage):
+    async def stream_call(self, reference_message: ChatMessageMeta, message: Optional[str] = None,  temporal: bool = False, system_prompt: Optional[str] = None):
+        if temporal:
+            prev_visible_actions_taken = self.action_manager.visible_actions_taken
+            orig_messages = self.messages.copy()
+        
+        if message:
+            self.add_message(message)
+
         non_response = "".join([char async for char in self.action_manager.consume(
-            stream=self.stream_completion(),
+            stream=self.stream_completion(temporal=temporal, system_prompt=system_prompt),
             action_context=ActionContext(
                 reference_message=reference_message,
                 parent_instance=self
             )
         )])
-
+        if temporal:
+            self.action_manager.visible_actions_taken = prev_visible_actions_taken # pyright: ignore[reportPossiblyUnboundVariable]
+            self.messages = orig_messages # pyright: ignore[reportPossiblyUnboundVariable]
         return non_response.strip() or None
 
-    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessage):
+    async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessageMeta):
         assert channel_id, "channel_id is None"
 
         async def stream_call_task():
@@ -999,6 +836,38 @@ class AsyncChatbotInstance(AsyncChatClient):
             cancel_task.cancel()
             await cancel_task
         return task
+
+    @property
+    def forum_id(self) -> Optional[int]:
+        """Extract the forum/guild ID from the instance identifier."""
+        if self.id.startswith("forum#"):
+            return int(self.id.split("#")[1])
+        return None
+
+    @property
+    def chat_id(self) -> Optional[int]:
+        """Extract the chat ID from the instance identifier."""
+        if self.id.startswith("chat#"):
+            return int(self.id.split("#")[1])
+        return None
+
+    def start_news_background_task(self, news_config, reflection_api, channel_selector_agent):
+        """Start the proactive news background task for this instance."""
+        from .news import NewsBackgroundTask
+
+        self.news_task = NewsBackgroundTask(
+            news_config=news_config,
+            reflection_api=reflection_api,
+            instance=self,
+            channel_selector_agent=channel_selector_agent,
+        )
+        self.news_task.start()
+
+    def stop_news_background_task(self):
+        """Stops the proactive news background task if running."""
+        if self.news_task is not None:
+            self.news_task.stop()
+            self.news_task = None
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible
@@ -1024,7 +893,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.hash_prefix = data.get("prefix")
-            self.messages = [ChatMessage.from_dict(d) for d in data.get("messages", [])]
+            self.messages = [ChatMessageMeta.from_dict(d) for d in data.get("messages", [])]
         except json.decoder.JSONDecodeError:
             self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         except FileNotFoundError:
@@ -1034,19 +903,19 @@ class AsyncChatbotInstance(AsyncChatClient):
             self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
 
 
-class CachedAsyncChatbotFactory:
+class AsyncChatbotInstanceRegistry:
     def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.instances: dict[str, AsyncChatbotInstance] = {}
         self.kwargs = kwargs
         self.hash_prefix = hash_prefix
-        self.tools: list[ToolEntry] = []
-        self.actions: list[ActionEntry] = []
+        self.tools: list[AsyncTool] = []
+        self.actions: list[AsyncAction] = []
         self.bot = parent
         assert self.bot
 
-    def register_action(self, action: ActionEntry):
+    def register_action(self, action: AsyncAction):
         """
         Register an action
 
@@ -1056,7 +925,7 @@ class CachedAsyncChatbotFactory:
 
         self.actions.append(action)
 
-    def register_tool(self, tool: ToolEntry):
+    def register_tool(self, tool: AsyncTool):
         """
         Register a tool (function) for tool calling.
         """
@@ -1077,7 +946,7 @@ class CachedAsyncChatbotFactory:
                 continue
             instance.add_tool(
                 name=tool.name,
-                func=tool.func,
+                function=tool.function,
                 parameters=tool.parameters,
                 description=tool.description
             )
@@ -1088,7 +957,7 @@ class CachedAsyncChatbotFactory:
                 continue
             instance.add_action(
                 name=action.name,
-                func=action.func,
+                function=action.function,
                 field_name=action.field_name,
                 description=action.description
             )
@@ -1123,7 +992,7 @@ class CachedAsyncChatbotFactory:
 
     def remove(self, identifier: str):
         self.logger.info(f"removing {identifier}")
-        save_path = get_instance_save_path(id=identifier, hash_prefix=self.hash_prefix)
+        save_path = AsyncChatbotInstance.get_save_path(id=identifier, hash_prefix=self.hash_prefix)
         if os.path.exists(save_path):
             os.remove(save_path)
         if identifier in self.instances.keys():

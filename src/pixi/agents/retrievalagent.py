@@ -3,7 +3,6 @@ import logging
 from typing import Optional
 
 from .base import AgentBase
-from ..chatting import AsyncChatClient
 
 
 class RetrievalAgent(AgentBase):
@@ -13,6 +12,7 @@ class RetrievalAgent(AgentBase):
 
     def __init__(self, context: Optional[list[str]] = None, **client_kwargs):
         super().__init__(**client_kwargs)
+        self.logger = logging.getLogger(self.__class__.__name__)
 
         self.context = context or []
         self.system_prompt = "\n".join([
@@ -44,20 +44,17 @@ class RetrievalAgent(AgentBase):
 
     @classmethod
     def from_dict(cls, data: dict, **client_kwargs) -> 'RetrievalAgent':
-        client = AsyncChatClient(**client_kwargs)
-        client.load_state_dict(data["client"])
-        context = data.get("context", [])
         return cls(
-            context = context,
-            client = client            
+            client=AgentBase.client_from_dict(data, **client_kwargs),
+            context=data.get("context", []),
         )
 
     def add_context(self, context: str):
-        logging.debug(f"Adding context: {context}")
+        """Convinent wrapper for `self.context.append(context)`"""
         self.context.append(context)
 
     def format_query(self, query: str) -> str:
-        logging.debug(f"Retrieving information for query: {query}")
+        self.logger.debug(f"Retrieving information for query: {query}")
         prompt = "\n".join([
             "Context:",
             "```json",

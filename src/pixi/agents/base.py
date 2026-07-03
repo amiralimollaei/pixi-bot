@@ -15,12 +15,16 @@ class AgentBase:
             client = self.client.state_dict()
         )
 
-    @classmethod
-    def from_dict(cls, data: dict, **client_kwargs) -> 'AgentBase':
+    @staticmethod
+    def client_from_dict(data: dict, **client_kwargs) -> AsyncChatClient:
         client = AsyncChatClient(**client_kwargs)
         client.load_state_dict(data["client"])
+        return client
+    
+    @classmethod
+    def from_dict(cls, data: dict, **client_kwargs) -> 'AgentBase':
         return cls(
-            client = client
+            client = AgentBase.client_from_dict(data, **client_kwargs)
         )
 
     def save_json(self, file: str):
@@ -42,7 +46,7 @@ class AgentBase:
     def format_query(self, query: str):
         return query
     
-    async def execute_query(self, query: str, temporal=True):
+    async def execute_query(self, query: str, temporal=True) -> str | None:
         response = ""
         async for char in self.client.stream_ask(self.format_query(query), temporal=temporal):
             response += char

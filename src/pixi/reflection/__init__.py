@@ -1,15 +1,27 @@
+from dataclasses import dataclass
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 from ..caching.base import MediaCache
-from ..enums import ChatType, Platform
+from ..model.enums import Platform
 from .message import AbstractMessage
 
+@dataclass(frozen=True)
+class ChannelMeta:
+    id: int
+    name: str
+    mention: Optional[str] = None
+
+@dataclass(frozen=True)
+class GuildMeta:
+    id: int
+    name: str
+    member_count: Optional[int] = None
 
 class ReflectionAPI:
     def __init__(self, platform: Platform):
         self.logger = logging.getLogger(self.__class__.__name__)
-        
+
         assert type(platform) == Platform
         self.platform = platform
         self.reflection_message_cls: type[AbstractMessage] | None = None
@@ -35,7 +47,12 @@ class ReflectionAPI:
         self.logger.debug(f"ReflectionAPI has been initilized for {self.platform}.")
 
     def run(self):
+        """Run the bot (blocking)."""
         return self._ref.run()
+
+    async def start_async(self):
+        """Start the bot asynchronously (non-blocking)."""
+        await self._ref.start()
 
     def register_on_message_event(self, function: Callable):
         return self._ref.register_on_message_event(function)
@@ -90,3 +107,15 @@ class ReflectionAPI:
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):
         return await self._ref.fetch_channel_history(channel_id, n)  # pyright: ignore[reportArgumentType]
+
+    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]:
+        """Fetch all text channels in a forum/guild by its ID."""
+        return await self._ref.fetch_forum_channels(forum_id)  # pyright: ignore[reportArgumentType]
+
+    async def send_message(self, chat_id: int, text: str):
+        """Send a proactive text message to a channel by its ID."""
+        return await self._ref.send_message(chat_id, text)  # pyright: ignore[reportArgumentType]
+
+    async def get_available_guilds(self) -> list[GuildMeta]:
+        """Get all guilds/chats where the bot is currently a member."""
+        return await self._ref.get_available_guilds()  # pyright: ignore[reportArgumentType]
