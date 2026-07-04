@@ -3,18 +3,18 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Concatenate, Coroutine, Optional, ParamSpec
 
-from ..storage.message import ChatMessageMeta, FunctionCall
+from ..storage.message import ChatMessageMeta, ToolCallMeta
 
 
 @dataclass
-class PartialFunctionCall:
+class PartialToolCallMeta:
     name: str
     index: int
     id: str
     arguments: Optional[str] = None
 
-    def to_function_call(self) -> FunctionCall:
-        return FunctionCall(
+    def to_tool_call(self) -> ToolCallMeta:
+        return ToolCallMeta(
             name=self.name,
             index=self.index,
             id=self.id,

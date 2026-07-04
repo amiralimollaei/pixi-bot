@@ -15,8 +15,8 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
 from .model.chatting.callbacks import (ActionContext, ActionFunction,
-                                       AsyncAction, AsyncTool, FunctionCall,
-                                       PartialFunctionCall, Predicate,
+                                       AsyncAction, AsyncTool, ToolCallMeta,
+                                       PartialToolCallMeta, Predicate,
                                        ToolContext, ToolFunction)
 from .model.chatting.persona import AssistantPersona
 from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
@@ -92,7 +92,7 @@ class ChatMessageUtils:
                     assert meta.content is None, f"expected ASSISTANT to not have `content` (e.g. the content should be None) while `tool_calls` is not None but got `{meta.content}`"
                     for tool_call in meta.tool_calls:
                         assert isinstance(
-                            tool_call, FunctionCall), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{meta.tool_calls}`"
+                            tool_call, ToolCallMeta), f"expected TOOL to have `tool_calls` of type `list[FunctionCall]` but at least one of the list elements is not of type FunctionCall, got `{meta.tool_calls}`"
                 else:
                     assert exists(
                         meta.content, True), f"expected ASSISTANT to have a `content` of type `str` but got `{meta.content}`"
@@ -174,7 +174,7 @@ class AsyncActionManager:
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.actions: dict[str, AsyncAction] = dict()
-        self.on_action: Callable[[str]] | None = None
+        self.on_action: Callable[[str, str | None]] | None = None
         self.visible_actions_taken = 0
 
     def _add_action(self, action: AsyncAction):
@@ -190,14 +190,14 @@ class AsyncActionManager:
             field_name=field_name,
             function=function,
             description=description,
-            is_visible=is_visible
+            is_visible=is_visible,
         ))
 
     def get_prompt(self):
         return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
 
-    async def execute_action(self, action: str, action_context: ActionContext):
-        action_content = action[1:-1]  # removed brakets
+    async def execute_action(self, action_str: str, action_context: ActionContext):
+        action_content = action_str[1:-1]  # removed brakets
 
         separator_idx = action_content.index(":") if ":" in action_content else None
         if separator_idx:
@@ -208,16 +208,16 @@ class AsyncActionManager:
             value = None
 
         if self.on_action:
-            self.on_action(name)
+            self.on_action(name, value)
 
-        action_meta = self.actions.get(name.lower())
-        if action_meta is None:
+        action = self.actions.get(name.lower())
+        if action is None:
             self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
             return
 
         try:
-            await action_meta.call(action_context, value)
-            if action_meta.is_visible:
+            await action.call(action_context, value)
+            if action.is_visible:
                 self.visible_actions_taken += 1
         except Exception:
             logging.exception("an error accured during action")
@@ -254,7 +254,7 @@ class AsyncActionManager:
                     if i == 0:
                         # run action without blocking the stream
                         await queue.add_to_queue(self.execute_action(
-                            action=action,
+                            action_str=action,
                             action_context=action_context
                         ))
                         action = ""
@@ -275,6 +275,174 @@ class AsyncActionManager:
 
     def is_visible_actions_taken(self) -> bool:
         return self.visible_actions_taken > 0
+
+
+class AsyncToolManager:
+    def __init__(self, log_tool_calls: bool = True, verbose: bool = False):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.log_tool_calls = log_tool_calls
+        self.verbose = verbose
+
+        self.tools: dict[str, AsyncTool] = dict()
+        self.on_tool: Callable[[ToolCallMeta]] | None = None
+        self.tool_results_consumer: Callable[[list[ChatMessageMeta]]] | None = None
+
+    def _add_tool(self, tool: AsyncTool):
+        assert tool is not None
+        self.tools.update({tool.name.lower(): tool})
+
+    def add_tool(self, name: str, function: ToolFunction, parameters: dict | None = None, description: str | None = None,):
+        assert name
+        assert function is not None
+        self._add_tool(AsyncTool(
+            name=name,
+            function=function,
+            parameters=parameters,
+            description=description,
+        ))
+
+    def get_tools_schema(self):
+        return [
+            dict(
+                type="function",
+                function=dict(
+                    name=tool.name,
+                    description=tool.description or tool.name,
+                    parameters=tool.parameters or dict(),
+                )
+            ) for tool in self.tools.values()
+        ]
+
+    async def get_tool_results(self, function_calls: list[ToolCallMeta], tool_context: ToolContext) -> list[ChatMessageMeta]:
+        """
+        Execute tool calls and return results
+        """
+
+        if not function_calls:
+            return []
+
+        results = [ChatMessageMeta(
+            ChatRole.ASSISTANT,
+            content=None,
+            tool_calls=function_calls
+        )]
+        for fn in function_calls:
+            tool = self.tools.get(fn.name)
+            if tool:
+                func: ToolFunction = tool.function
+                func_args_str = ""
+                if fn.arguments:
+                    func_args_str = ", ".join([
+                        (f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
+                        for k, v in fn.arguments.items()
+                    ])
+                try:
+                    if self.log_tool_calls:
+                        self.logger.info(f"Calling {fn.name}({func_args_str})...")
+                    else:
+                        self.logger.debug(f"Calling {fn.name}({func_args_str})...")
+                    result = await func(tool_context, **fn.arguments)  # type: ignore
+                    result = json.dumps(result, ensure_ascii=False, indent=3)
+                except Exception as e:
+                    self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
+                    result = f"Tool error: {e}"
+
+                if self.log_tool_calls:
+                    self.logger.info(f"Call {fn.name}({func_args_str}): {result}")
+                else:
+                    self.logger.debug(f"Call {fn.name}({func_args_str}): {result}")
+            else:
+                result = f"Tool '{fn.name}' was not found."
+                self.logger.warning(f"Tool '{fn.name}' was not found.")
+
+            results.append(ChatMessageMeta(
+                ChatRole.TOOL,
+                content=result,
+                tool_call_id=fn.id,
+            ))
+        return results
+
+    async def execute_tool(self, tool_call: ToolCallMeta, tool_context: ToolContext):
+        if self.on_tool:
+            self.on_tool(tool_call)
+
+        tool = self.tools.get(tool_call.name.lower())
+        if tool is None:
+            self.logger.error(f"Model tried to use the tool \"{tool}\", which is not implemented.")
+            return
+
+        try:
+            tool_kwargs = tool_call.arguments or dict()
+            await tool.call(tool_context, **tool_kwargs)
+        except Exception:
+            logging.exception("an error accured during action")
+
+    async def stream_tool_calls(self, stream: AsyncStream[ChatCompletionChunk], tool_context: ToolContext):
+        async def execute_and_consume_tool_results(tool_call: ToolCallMeta, tool_context: ToolContext):
+            retults = await self.get_tool_results(
+                [tool_call],
+                tool_context=tool_context
+            )
+            if self.tool_results_consumer is None:
+                self.logger.warning("tool results are being ignored")
+                return
+            maybe_coro = self.tool_results_consumer(retults)
+            if asyncio.iscoroutine(maybe_coro):
+                await maybe_coro
+
+        async with CoroutineQueueExecutor() as tool_call_queue:
+            partial_tool_calls: dict[int, PartialToolCallMeta] = dict()
+            last_tool_call_index = None
+            async for chunk in stream:
+                if chunk.choices is None or len(chunk.choices) == 0:
+                    continue
+                choice = chunk.choices[0]
+
+                for tool_call in choice.delta.tool_calls or []:
+                    function = tool_call.function
+                    function_index = tool_call.index
+                    function_id = tool_call.id
+                    function_name = function.name if function else None
+                    function_arguments = function.arguments if function else None
+                    if prev_function_call := partial_tool_calls.get(function_index):
+                        if function_arguments:
+                            new_function_arguments = (prev_function_call.arguments or "") + function_arguments
+                        else:
+                            new_function_arguments = prev_function_call.arguments
+                        partial_tool_calls[function_index] = PartialToolCallMeta(
+                            name=prev_function_call.name,
+                            arguments=new_function_arguments,
+                            index=function_index,
+                            id=prev_function_call.id
+                        )
+                    else:
+                        if self.verbose:
+                            print(f"Tool Call: {function_name}", end="")
+                        assert function_name
+                        assert function_id
+                        partial_tool_calls[function_index] = PartialToolCallMeta(
+                            name=function_name,
+                            arguments=function_arguments,
+                            index=function_index,
+                            id=function_id
+                        )
+                    # if the model is producing a new tool call, we can assume the current partial tool call is finished generating
+                    if last_tool_call_index is not None and function_index != last_tool_call_index:
+                        tool_call = partial_tool_calls.pop(function_index).to_tool_call()
+                        # runs the tool call without blocking and in correct order
+                        await tool_call_queue.add_to_queue(execute_and_consume_tool_results(tool_call, tool_context))
+                    last_tool_call_index = function_index
+                    if self.verbose:
+                        print(function_arguments, end="")
+
+                # yield chunk
+                yield chunk
+
+            # if the generation is finished, we can assume the current partial tool calls are finished generating
+            tool_calls = [f.to_tool_call() for f in partial_tool_calls.values()]
+            for tool_call in tool_calls:
+                # runs the tool call without blocking and in correct order
+                await tool_call_queue.add_to_queue(execute_and_consume_tool_results(tool_call, tool_context))
 
 
 class AsyncChatClient:
@@ -302,8 +470,11 @@ class AsyncChatClient:
                     f"expected messages to be of type `list[ChatMessageMeta]` or be None, but at least one element in the list is not of type `ChatMessageMeta`, got `{messages}`"
 
         self.system_prompt = None
-        self.tools: dict = {}
         self.rearrange_predicate = None
+
+        # tools
+        self.tool_manager = AsyncToolManager()
+        self.tool_manager.tool_results_consumer = self.messages.extend
 
         self.session = AsyncOpenAI(
             api_key=self.auth.api_key,
@@ -320,16 +491,12 @@ class AsyncChatClient:
         parameters: OpenAI tool/function parameters schema (dict)
         description: description of the tool (string)
         """
-        self.tools[name] = dict(
+
+        self.tool_manager.add_tool(
+            name=name,
             function=function,
-            schema=dict(
-                type="function",
-                function=dict(
-                    name=name,
-                    description=description or name,
-                    parameters=parameters or dict(),
-                )
-            )
+            parameters=parameters,
+            description=description
         )
 
     def set_rearrange_predicate(self, predicate: Predicate):
@@ -390,8 +557,8 @@ class AsyncChatClient:
             stream=True,
         )
         # If tools are registered, add them to the request
-        if self.tools:
-            kwargs["tools"] = [v["schema"] for k, v in self.tools.items()]  # type: ignore
+        if self.tool_manager.tools:
+            kwargs["tools"] = self.tool_manager.get_tools_schema()
 
         # Debugging: print the request to a file
         # with open("last-request.json", "w", encoding="utf-8") as f:
@@ -496,59 +663,6 @@ class AsyncChatClient:
             reference_message=reference_message,
         )
 
-    async def get_tool_results(self, function_calls: list[FunctionCall], reference_message: ChatMessageMeta) -> list[ChatMessageMeta]:
-        """
-        Execute tool calls and return results
-        """
-
-        if not function_calls:
-            return []
-
-        tool_context = self.create_tool_context(
-            reference_message=reference_message
-        )
-
-        results = [ChatMessageMeta(
-            ChatRole.ASSISTANT,
-            content=None,
-            tool_calls=function_calls
-        )]
-        for fn in function_calls:
-            tool = self.tools.get(fn.name)
-            if tool:
-                func: ToolFunction = tool["function"]
-                func_args_str = ""
-                if fn.arguments:
-                    func_args_str = ", ".join([
-                        (f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
-                        for k, v in fn.arguments.items()
-                    ])
-                try:
-                    if self.log_tool_calls:
-                        self.logger.info(f"Calling {fn.name}({func_args_str})...")
-                    else:
-                        self.logger.debug(f"Calling {fn.name}({func_args_str})...")
-                    result = await func(tool_context, **fn.arguments)  # type: ignore
-                    result = json.dumps(result, ensure_ascii=False, indent=3)
-                except Exception as e:
-                    self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
-                    result = f"Tool error: {e}"
-
-                if self.log_tool_calls:
-                    self.logger.info(f"Call {fn.name}({func_args_str}): {result}")
-                else:
-                    self.logger.debug(f"Call {fn.name}({func_args_str}): {result}")
-            else:
-                result = f"Tool '{fn.name}' was not found."
-                self.logger.warning(f"Tool '{fn.name}' was not found.")
-
-            results.append(ChatMessageMeta(
-                ChatRole.TOOL,
-                content=result,
-                tool_call_id=fn.id,
-            ))
-        return results
-
     async def stream_request(
         self,
         verbose: bool = logging.getLevelName(logging.root.level).lower() == "debug",
@@ -562,58 +676,13 @@ class AsyncChatClient:
             ChatRole.USER, ChatRole.SYSTEM
         ], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
 
-        async def execute_tool_task(function_call):
-            self.messages += await self.get_tool_results(
-                [function_call],
-                reference_message=reference_message
-            )
-
-        async with CoroutineQueueExecutor() as tool_call_queue, await self.stream_chat_completion(system_prompt=system_prompt) as stream:
-            partial_function_calls: dict[int, PartialFunctionCall] = dict()
-            last_function_call_index = None
+        async with await self.stream_chat_completion(system_prompt=system_prompt) as stream:
             response = ""
             finish_reason = None
-            async for event in stream:
+            async for event in self.tool_manager.stream_tool_calls(stream, tool_context=self.create_tool_context(reference_message=reference_message)):
                 if event.choices is None or len(event.choices) == 0:
                     continue
                 choice = event.choices[0]
-
-                for tool_call in choice.delta.tool_calls or []:
-                    function = tool_call.function
-                    function_index = tool_call.index
-                    function_id = tool_call.id
-                    function_name = function.name if function else None
-                    function_arguments = function.arguments if function else None
-                    if prev_function_call := partial_function_calls.get(function_index):
-                        if function_arguments:
-                            new_function_arguments = (prev_function_call.arguments or "") + function_arguments
-                        else:
-                            new_function_arguments = prev_function_call.arguments
-                        partial_function_calls[function_index] = PartialFunctionCall(
-                            name=prev_function_call.name,
-                            arguments=new_function_arguments,
-                            index=function_index,
-                            id=prev_function_call.id
-                        )
-                    else:
-                        if verbose:
-                            print(f"Function: {function_name}", end="")
-                        assert function_name
-                        assert function_id
-                        partial_function_calls[function_index] = PartialFunctionCall(
-                            name=function_name,
-                            arguments=function_arguments,
-                            index=function_index,
-                            id=function_id
-                        )
-                    # if the model is producing a new function call, we can assume the function call is finished generating
-                    if last_function_call_index is not None and function_index != last_function_call_index:
-                        function_call = partial_function_calls.pop(function_index).to_function_call()
-                        # runs the tool call without blocking and in correct order
-                        await tool_call_queue.add_to_queue(execute_tool_task(function_call))
-                    last_function_call_index = function_index
-                    if verbose:
-                        print(function_arguments, end="")
 
                 if choice.finish_reason:
                     finish_reason = choice.finish_reason
@@ -627,18 +696,10 @@ class AsyncChatClient:
                         yield char
 
                 if verbose and hasattr(choice.delta, "reasoning_content"):
-                    print(choice.delta.reasoning_content, end="", flush=True)  # pyright: ignore[reportAttributeAccessIssue]
+                    print(choice.delta.reasoning_content, end="", flush=True) # pyright: ignore[reportAttributeAccessIssue]
 
             if verbose:
                 print()
-
-        function_calls = [f.to_function_call() for f in partial_function_calls.values()]
-        del partial_function_calls
-        if function_calls:
-            self.messages += await self.get_tool_results(
-                function_calls,
-                reference_message=reference_message
-            )
 
         if response:
             self.messages.append(ChatMessageMeta(
@@ -727,8 +788,7 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         # async states
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
-        
-        
+
         # register all the tools
         for tool in tools:
             if not tool.should_register(self):
@@ -835,7 +895,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             )
         )])
         if temporal:
-            self.action_manager.visible_actions_taken = prev_visible_actions_taken  # pyright: ignore[reportPossiblyUnboundVariable]
+            self.action_manager.visible_actions_taken = prev_visible_actions_taken # pyright: ignore[reportPossiblyUnboundVariable]
             self.messages = orig_messages  # pyright: ignore[reportPossiblyUnboundVariable]
         return non_response.strip() or None
 
@@ -940,7 +1000,7 @@ class ChatbotInstanceRegistry:
     def init(hash_prefix: str, bot: Any):
         ChatbotInstanceRegistry.hash_prefix = hash_prefix
         ChatbotInstanceRegistry.bot = bot
-    
+
     @staticmethod
     def register_action(action: AsyncAction):
         """
@@ -965,9 +1025,9 @@ class ChatbotInstanceRegistry:
         instance = AsyncChatbotInstance(
             identifier,
             ChatbotInstanceRegistry.hash_prefix,
-            **kwargs, 
-            tools = ChatbotInstanceRegistry.tools, 
-            actions = ChatbotInstanceRegistry.actions, 
+            **kwargs,
+            tools=ChatbotInstanceRegistry.tools,
+            actions=ChatbotInstanceRegistry.actions,
             bot=ChatbotInstanceRegistry.bot
         )
         ChatbotInstanceRegistry.instances.update({instance.id: instance})

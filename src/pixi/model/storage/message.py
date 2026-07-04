@@ -9,7 +9,7 @@ from ..enums import ChatRole
 
 
 @dataclass(frozen=True)
-class FunctionCall:
+class ToolCallMeta:
     name: str
     index: int
     id: str
@@ -24,7 +24,7 @@ class FunctionCall:
         )
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'FunctionCall':
+    def from_dict(cls, data: dict) -> 'ToolCallMeta':
         return cls(
             name=data["name"],
             index=data["index"],
@@ -39,7 +39,7 @@ class ChatMessageMeta:
     content: Optional[str] = None
     images: list[MediaCache] = field(default_factory=list)
     audio: list[MediaCache] = field(default_factory=list)
-    tool_calls: Sequence[FunctionCall] = field(default_factory=list)
+    tool_calls: Sequence[ToolCallMeta] = field(default_factory=list)
     tool_call_id: Optional[str] = None
 
     # --- additional states---
@@ -88,6 +88,6 @@ class ChatMessageMeta:
             message_time=data.get("time", time.time()),
             images=images,  # pyright: ignore[reportArgumentType]
             audio=audio,  # pyright: ignore[reportArgumentType]
-            tool_calls=[FunctionCall.from_dict(d) for d in data.get("tool_calls", [])],
+            tool_calls=[ToolCallMeta.from_dict(d) for d in data.get("tool_calls", [])],
             tool_call_id=data.get("tool_call_id")
         )
