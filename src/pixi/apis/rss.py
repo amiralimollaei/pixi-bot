@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 
 from .api import APIBase
 
+
 # helpers
 
 def _get_text(parent, tag: str) -> Optional[str]:
@@ -36,51 +37,46 @@ class AsyncRSSAPI(APIBase):
         super().__init__(base=url, api_key=api_key, api_key_env_var=None)
 
     async def request(self, url: str, data: Optional[dict] = None) -> str | dict | list:
+        text = await self.request_raw(url=url, data=data)
         try:
-            response = await self.client.get(url, timeout=15.0)
-            response.raise_for_status()
-        except Exception:
+            root = ET.fromstring(text)
+        except ET.ParseError:
             return []
 
         items: list[NewsItem] = []
-        try:
-            root = ET.fromstring(response.text)
 
-            # RSS feed structure: <rss><channel><item>...</item></channel></rss>
-            rss_channel = root.find("channel")
-            if rss_channel is not None:
-                for item in rss_channel.findall("item"):
-                    title = _get_text(item, "title")
-                    description = _get_text(item, "description")
-                    link = _get_text(item, "link")
-                    pub_date = _get_text(item, "pubDate")
-                    if title:
-                        items.append(NewsItem(
-                            title=title,
-                            summary=_strip_html(description or ""),
-                            link=link or "",
-                            published=pub_date,
-                        ))
+        # RSS feed structure: <rss><channel><item>...</item></channel></rss>
+        rss_channel = root.find("channel")
+        if rss_channel is not None:
+            for item in rss_channel.findall("item"):
+                title = _get_text(item, "title")
+                description = _get_text(item, "description")
+                link = _get_text(item, "link")
+                pub_date = _get_text(item, "pubDate")
+                if title:
+                    items.append(NewsItem(
+                        title=title,
+                        summary=_strip_html(description or ""),
+                        link=link or "",
+                        published=pub_date,
+                    ))
 
-            # Atom feed structure: <feed><entry>...</entry></feed>
-            atom_ns = "{http://www.w3.org/2005/Atom}"
-            if not items and root.tag == f"{atom_ns}feed":
-                for entry in root.findall(f"{atom_ns}entry"):
-                    title = _get_text(entry, f"{atom_ns}title")
-                    summary = _get_text(entry, f"{atom_ns}summary") or _get_text(entry, f"{atom_ns}content")
-                    link_el = entry.find(f"{atom_ns}link")
-                    link = link_el.get("href", "") if link_el is not None else ""
-                    published = _get_text(entry, f"{atom_ns}published") or _get_text(entry, f"{atom_ns}updated")
-                    if title:
-                        items.append(NewsItem(
-                            title=title,
-                            summary=_strip_html(summary or ""),
-                            link=link,
-                            published=published,
-                        ))
-
-        except ET.ParseError:
-            return []
+        # Atom feed structure: <feed><entry>...</entry></feed>
+        atom_ns = "{http://www.w3.org/2005/Atom}"
+        if not items and root.tag == f"{atom_ns}feed":
+            for entry in root.findall(f"{atom_ns}entry"):
+                title = _get_text(entry, f"{atom_ns}title")
+                summary = _get_text(entry, f"{atom_ns}summary") or _get_text(entry, f"{atom_ns}content")
+                link_el = entry.find(f"{atom_ns}link")
+                link = link_el.get("href", "") if link_el is not None else ""
+                published = _get_text(entry, f"{atom_ns}published") or _get_text(entry, f"{atom_ns}updated")
+                if title:
+                    items.append(NewsItem(
+                        title=title,
+                        summary=_strip_html(summary or ""),
+                        link=link,
+                        published=published,
+                    ))
 
         return items
 
