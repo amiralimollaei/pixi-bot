@@ -13,11 +13,13 @@ class ChannelMeta:
     name: str
     mention: Optional[str] = None
 
+
 @dataclass(frozen=True)
 class GuildMeta:
     id: int
     name: str
     member_count: Optional[int] = None
+
 
 class ReflectionAPI:
     def __init__(self, platform: Platform):

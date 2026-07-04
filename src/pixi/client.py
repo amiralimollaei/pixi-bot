@@ -3,7 +3,7 @@ import json
 import logging
 import ssl
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Optional
 
 import httpx
 import openai
@@ -14,7 +14,7 @@ from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import (ActionContext, AsyncChatbotInstance,
                        AsyncChatbotInstanceRegistry, AsyncTool, ToolContext)
-from .model.chatting.callbacks import AsyncAction
+from .model.chatting.callbacks import AsyncAction, AsyncPredicate
 from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            NewsConfig, OpenAIAuthConfig,
                            OpenAIEmbeddingModelConfig,
@@ -24,7 +24,6 @@ from .model.storage.message import ChatMessageMeta
 from .rag.client import AsyncRAGClient
 from .reflection import AbstractMessage, ReflectionAPI
 from .storage.database import DirectoryDatabase
-from .typing import AsyncPredicate, Optional
 from .utils import format_time_later
 
 # constants
@@ -641,7 +640,7 @@ class PixiClient:
                 reflection_api=self.reflection_api,
             )
         return instance
-    
+
     async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessageMeta):
         assert reference_message.origin
         message: AbstractMessage = reference_message.origin
@@ -829,7 +828,7 @@ class PixiClient:
 
     def register_pre_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
         """Register an async awaitable to run before the bot connects to Discord/Telegram.
-        
+
         The hook will be awaited concurrently before the platform connection starts.
         This allows running async initialization code (e.g., database migrations,
         cache warming, API pre-checks) before the bot begins handling messages.
@@ -838,29 +837,29 @@ class PixiClient:
 
     def register_post_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
         """Register an async awaitable to run after the bot connects to Discord/Telegram.
-        
+
         The hook will be awaited concurrently after the platform connection starts.
         This allows running async initialization code (e.g., database migrations,
         cache warming, API pre-checks) after the bot begins handling messages.
         """
         self.post_startup_hooks.append(hook)
-    
+
     async def _post_startup_task(self):
         await self.reflection_api.wait_until_ready()
         if self.post_startup_hooks:
             self.logger.info(f"Running {len(self.post_startup_hooks)} post-startup hook(s)...")
             results = await asyncio.gather(*(f() for f in self.post_startup_hooks))
             self.logger.info("All post-startup hooks completed.")
-    
+
     async def start(self):
         """Start the bot asynchronously, running all startup hooks first."""
         if self.pre_startup_hooks:
             self.logger.info(f"Running {len(self.pre_startup_hooks)} pre-startup hook(s)...")
             results = await asyncio.gather(*(f() for f in self.pre_startup_hooks))
             self.logger.info("All pre-startup hooks completed.")
-        
+
         post_task = asyncio.create_task(self._post_startup_task())
-        
+
         await self.reflection_api.start_async()
         await post_task
 

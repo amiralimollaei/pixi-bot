@@ -5,7 +5,8 @@ import logging
 import os
 import time
 from collections import defaultdict
-from typing import Any, Awaitable, Callable
+from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
+                    Generator, Iterator, Optional)
 
 import httpx
 from openai import AsyncOpenAI
@@ -14,16 +15,14 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
 from .model.chatting.callbacks import (ActionContext, ActionFunction,
-                                       AsyncAction, AsyncTool, FunctionCall,
-                                       PartialFunctionCall, ToolContext,
-                                       ToolFunction)
-from .model.storage.message import ChatMessageMeta
+                                       AsyncAction, AsyncPredicate, AsyncTool,
+                                       FunctionCall, PartialFunctionCall,
+                                       ToolContext, ToolFunction)
 from .model.chatting.persona import AssistantPersona
 from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
 from .model.enums import ChatRole
+from .model.storage.message import ChatMessageMeta
 from .storage.paths import PixiPaths, open_resource
-from .typing import (AsyncGenerator, AsyncIterator, AsyncPredicate, Generator,
-                     Iterator, Optional)
 from .utils import clean_dict, exists, format_time_ago
 
 
@@ -223,7 +222,7 @@ class AsyncActionManager:
         except Exception:
             logging.exception("an error accured during action")
 
-    async def consume(self, stream: Iterator | Generator | AsyncGenerator | AsyncGenerator, action_context: ActionContext):
+    async def consume(self, stream: Iterator | Generator | AsyncIterator | AsyncGenerator, action_context: ActionContext):
         """
         Consumes actions and runs them automatically
         """
@@ -461,13 +460,13 @@ class AsyncChatClient:
     async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>", temporal: bool = False, system_prompt: Optional[str | ChatCompletionChunk] = None):
         if temporal:
             orig_messages = self.messages.copy()
-        
+
         lookbehind_buffer: str = ""
         max_buffer_size = max(len(start_think_tag), len(end_think_tag))
 
         is_thinking = False
 
-        async for char in self.stream_request(system_prompt = system_prompt):
+        async for char in self.stream_request(system_prompt=system_prompt):
             lookbehind_buffer += char
 
             # make sure buffer doesn't grow indefinitely if none of the tags are found
@@ -488,9 +487,9 @@ class AsyncChatClient:
         if not is_thinking and lookbehind_buffer:
             for c in lookbehind_buffer:
                 yield c
-        
+
         if temporal:
-            self.messages = orig_messages # pyright: ignore[reportPossiblyUnboundVariable]
+            self.messages = orig_messages  # pyright: ignore[reportPossiblyUnboundVariable]
 
     def create_tool_context(self, reference_message: ChatMessageMeta):
         return ToolContext(
@@ -559,7 +558,8 @@ class AsyncChatClient:
         # reference_message is the last user message in which we are responding to, it contains
         # information about the current channel and holds special metadata
         reference_message = reference_message or self.messages[-1]
-        assert reference_message.role in [ChatRole.USER, ChatRole.SYSTEM], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
+        assert reference_message.role in [
+            ChatRole.USER, ChatRole.SYSTEM], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
 
         async def execute_tool_task(function_call):
             self.messages += await self.get_tool_results(
@@ -626,7 +626,7 @@ class AsyncChatClient:
                         yield char
 
                 if verbose and hasattr(choice.delta, "reasoning_content"):
-                    print(choice.delta.reasoning_content, end="", flush=True) # pyright: ignore[reportAttributeAccessIssue]
+                    print(choice.delta.reasoning_content, end="", flush=True)  # pyright: ignore[reportAttributeAccessIssue]
 
             if verbose:
                 print()
@@ -659,7 +659,7 @@ class AsyncChatClient:
         assert message.role == ChatRole.USER, "Message must be from the user."
         self.messages.append(message)
 
-        async for chunk in self.stream_completion(temporal = temporal, system_prompt=system_prompt):
+        async for chunk in self.stream_completion(temporal=temporal, system_prompt=system_prompt):
             yield chunk
 
     def state_dict(self):
@@ -800,7 +800,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         if temporal:
             prev_visible_actions_taken = self.action_manager.visible_actions_taken
             orig_messages = self.messages.copy()
-        
+
         if message:
             self.add_message(message)
 
@@ -812,8 +812,8 @@ class AsyncChatbotInstance(AsyncChatClient):
             )
         )])
         if temporal:
-            self.action_manager.visible_actions_taken = prev_visible_actions_taken # pyright: ignore[reportPossiblyUnboundVariable]
-            self.messages = orig_messages # pyright: ignore[reportPossiblyUnboundVariable]
+            self.action_manager.visible_actions_taken = prev_visible_actions_taken  # pyright: ignore[reportPossiblyUnboundVariable]
+            self.messages = orig_messages  # pyright: ignore[reportPossiblyUnboundVariable]
         return non_response.strip() or None
 
     async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessageMeta):
@@ -832,7 +832,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
         await self.cancel_channel_stream_call_tasks(channel_id)
         return task
-    
+
     async def cancel_channel_stream_call_tasks(self, channel_id: str):
         # cancell extra tasks
         while len(self.channel_active_tasks[channel_id]) > 1:

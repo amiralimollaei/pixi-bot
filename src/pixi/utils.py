@@ -8,7 +8,7 @@ from typing import Sequence
 def exists(value, allow_empty_string=False):
     if value is None:
         return False
-    
+
     if isinstance(value, bool):
         return value
 
@@ -64,17 +64,20 @@ def format_time(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
 
     return "just now"  # less than a second ago
 
+
 def format_time_ago(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
     if delta >= min_count:
         return format_time(delta, min_count, max_lenght) + " ago"
 
     return "just now"  # less than a second ago
 
+
 def format_time_later(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
     if delta >= min_count:
         return format_time(delta, min_count, max_lenght) + " later"
 
     return "just now"  # less than a second ago
+
 
 def clean_dict(d: dict):
     final_dict = {}
@@ -88,7 +91,7 @@ def clean_dict(d: dict):
         elif isinstance(v, Sequence):
             if len(v) == 0:
                 continue
-            if not isinstance(v, str): # other than strings, we every other sequence is a nested dynamic type
+            if not isinstance(v, str):  # other than strings, we every other sequence is a nested dynamic type
                 v = [(clean_dict(e) if isinstance(e, dict) else e) for e in v]
         final_dict[k] = v
     return final_dict

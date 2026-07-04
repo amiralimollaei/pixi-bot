@@ -5,7 +5,7 @@ class PixiFeatures(IntFlag):
     """
     A bitflag containing all the toggleable features of pixi
     """
-    
+
     ToolCalling = auto()
     ToolLogging = auto()
     WikiSearch = auto()
@@ -21,7 +21,7 @@ class PixiFeatures(IntFlag):
     @classmethod
     def default(cls) -> 'PixiFeatures':
         return cls.ToolCalling | cls.ToolLogging | cls.GIFSearch
-    
+
     @classmethod
     def empty(cls) -> 'PixiFeatures':
         return cls(0)

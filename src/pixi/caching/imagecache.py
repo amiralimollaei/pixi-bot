@@ -4,8 +4,7 @@ from typing import Optional
 import av
 
 from ..storage.paths import PixiPaths
-from .base import MediaCache, CompressedMedia
-
+from .base import CompressedMedia, MediaCache
 
 # constants
 

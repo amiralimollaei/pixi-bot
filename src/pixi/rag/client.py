@@ -4,10 +4,10 @@ import httpx
 import numpy as np
 import openai
 
-from .embedding import EmbeddingCache
 from ..model.config.openai import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
 from ..model.search.document import (DocumentReference, TextPieceMatch,
                                      VectorTextPiece)
+from .embedding import EmbeddingCache
 from .splitter import SmartSplitter
 
 

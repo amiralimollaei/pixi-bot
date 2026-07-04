@@ -87,20 +87,20 @@ class DiscordReflectionAPI:
                     "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
-                    #"connected_listeners": {
+                    # "connected_listeners": {
                     #    "count": len(c.listeners),
                     #    "members": [m.display_name for m in c.listeners]
-                    #},
+                    # },
                 } for c in cat.stage_channels],
                 "voice_channels": [{
                     "name": c.name,
                     "mention_string": c.mention,
                     "is_nsfw": c.nsfw,
                     "user_limit": c.user_limit,
-                    #"connected_members": {
+                    # "connected_members": {
                     #    "count": len(c.members),
                     #    "members": [m.display_name for m in c.members]
-                    #},
+                    # },
                 } for c in cat.voice_channels],
                 "text_channels": [{
                     "name": c.name,
@@ -115,7 +115,7 @@ class DiscordReflectionAPI:
                     {
                         "name": r.name,
                         "color": '#{:06X}'.format(r.color.value),
-                    #    "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
+                        #    "created_at": r.created_at.strftime("%d/%m/%Y at %H:%M:%S")
                     } for r in m.roles
                 ],
             } for m in guild.members]
@@ -235,8 +235,8 @@ class DiscordReflectionAPI:
         bot_member = await guild.fetch_member(self.bot.user.id)  # pyright: ignore[reportOptionalMemberAccess]
         return [
             ChannelMeta(
-                id=c.id, 
-                name=c.name, 
+                id=c.id,
+                name=c.name,
                 mention=c.mention
             ) for c in await guild.fetch_channels() if (c.permissions_for(bot_member).send_messages and c.id != (guild.id + 1))
         ]

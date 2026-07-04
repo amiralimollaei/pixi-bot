@@ -1,6 +1,6 @@
 import logging
 
-from .base import UnsupportedMediaException, MediaCache
+from .base import MediaCache, UnsupportedMediaException
 
 logger = logging.getLogger("pixi.caching")
 

@@ -1,13 +1,10 @@
-import os
 import tempfile
 from typing import Optional
 
 import av
 
 from ..storage.paths import PixiPaths
-
-from .base import MediaCache, CompressedMedia, UnsupportedMediaException
-
+from .base import CompressedMedia, MediaCache, UnsupportedMediaException
 
 # constants
 

@@ -5,8 +5,8 @@ from telegram.constants import ChatAction
 from telegram.constants import ChatType as TChatType
 
 from ...caching.base import MediaCache
-from . import (ChatType, Platform, ReflectionEnvironment,
-               ReflectionMessageAuthor, AbstractMessage)
+from . import (AbstractMessage, ChatType, Platform, ReflectionEnvironment,
+               ReflectionMessageAuthor)
 
 ImageCache = None
 AudioCache = None

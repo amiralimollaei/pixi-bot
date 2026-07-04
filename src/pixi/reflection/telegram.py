@@ -103,7 +103,7 @@ class TelegramReflectionAPI:
     def is_bot_mentioned(self, message: TelegramMessageImpl):
         reply_message = message.origin.reply_to_message
         if reply_message is not None and reply_message.from_user is not None and self.application.bot.id == reply_message.from_user.id:
-            return True 
+            return True
         return message.content is not None and f"@{self.application.bot.username}" in message.content
 
     async def is_dm_or_admin(self, message: TelegramMessageImpl) -> bool:
@@ -172,5 +172,5 @@ class TelegramReflectionAPI:
             self.logger.exception(f"Failed to send message to chat {chat_id}.")
             raise
 
-    async def get_available_guilds(self) -> list[GuildMeta]:        
+    async def get_available_guilds(self) -> list[GuildMeta]:
         return []

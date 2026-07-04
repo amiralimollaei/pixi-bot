@@ -76,7 +76,7 @@ class NewsBackgroundTask:
     async def _execute_news_cycle(self):
         """Fetch news, generate a message, pick a channel, and send it."""
         self.logger.info(f"News cycle triggered")
-        
+
         channels = []
         forum_id = self.instance.forum_id
         if forum_id is not None:
@@ -87,7 +87,6 @@ class NewsBackgroundTask:
         else:
             self.logger.warning(f"News cycle cancelled")
             return
-        
 
         # 1. Fetch news
         headlines = await self.feed_api.fetch(self.news_config.feed_url, max_items=10)
@@ -133,7 +132,7 @@ class NewsBackgroundTask:
         self.logger.info(f"Generated message: {message_text}...")
 
         # 3. Select appropriate channel
-        
+
         forum_id = self.instance.forum_id
         if forum_id is None:
             channel_id = self.instance.chat_id
@@ -141,11 +140,12 @@ class NewsBackgroundTask:
             channel_id = int(response["channel"])
 
         assert channel_id
-        
+
         # 4. Send the message
         try:
             message_text = response["message"]
-            await self.reflection_api.send_message(chat_id=channel_id, text=message_text) # pyright: ignore[reportArgumentType]
+            # pyright: ignore[reportArgumentType]
+            await self.reflection_api.send_message(chat_id=channel_id, text=message_text)
             self.logger.info(f"Sent proactive news message to channel {channel_id}.")
             # update instance
             self.instance.add_message(ChatMessageMeta(ChatRole.ASSISTANT, content=f"[send: {message_text}]"))
@@ -154,6 +154,6 @@ class NewsBackgroundTask:
         except RuntimeError:
             self.channel_blacklist.append(channel_id)
             self.logger.exception(f"Failed to send message to channel {channel_id}, retrying in 10 seconds...")
-            
+
             await asyncio.sleep(10)
             await self._execute_news_cycle()
