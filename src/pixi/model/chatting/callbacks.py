@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Concatenate, Coroutine, Optional, ParamSpec
@@ -39,7 +40,7 @@ class ActionContext:
     # more fields to be added
 
 
-AsyncPredicate = Callable[..., Coroutine[Any, Any, bool]]
+Predicate = Callable[..., bool]
 ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
 
 
@@ -50,7 +51,7 @@ class AsyncAction:
     function: ActionFunction
     description: Optional[str] = None
     is_visible: bool = True  # whether or not the action has a visible effect from the user's perspective
-    predicate: Optional[AsyncPredicate] = None
+    predicate: Optional[Predicate] = None
 
     def get_syntax(self):
         desc = self.description or "no description"
@@ -72,7 +73,7 @@ class AsyncTool:
     function: ToolFunction
     parameters: Optional[dict] = None
     description: Optional[str] = None
-    predicate: Optional[AsyncPredicate] = None
+    predicate: Optional[Predicate] = None
 
     def get_syntax(self):
         desc = self.description or "no description"

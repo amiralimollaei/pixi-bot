@@ -15,8 +15,8 @@ from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
 from .model.chatting.callbacks import (ActionContext, ActionFunction,
-                                       AsyncAction, AsyncPredicate, AsyncTool,
-                                       FunctionCall, PartialFunctionCall,
+                                       AsyncAction, AsyncTool, FunctionCall,
+                                       PartialFunctionCall, Predicate,
                                        ToolContext, ToolFunction)
 from .model.chatting.persona import AssistantPersona
 from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
@@ -28,11 +28,11 @@ from .utils import clean_dict, exists, format_time_ago
 
 # takes the last N messages in the message list that match a predicate, and moves them to the
 # end of the message list, this is to ensure the LLMs immmediate context is accurate
-async def get_rearranged_messages(messages: list[ChatMessageMeta], predicate: AsyncPredicate, n: int = 5) -> list[ChatMessageMeta]:
+def get_rearranged_messages(messages: list[ChatMessageMeta], predicate: Predicate, n: int = 5) -> list[ChatMessageMeta]:
     selected_messages: list[ChatMessageMeta] = []
     unselected_predicate: list[ChatMessageMeta] = []
     for msg in messages[::-1]:
-        if await predicate(msg) and len(selected_messages) < n:
+        if predicate(msg) and len(selected_messages) < n:
             selected_messages.append(msg)
         else:
             unselected_predicate.append(msg)
@@ -332,7 +332,7 @@ class AsyncChatClient:
             )
         )
 
-    def set_rearrange_predicate(self, predicate: AsyncPredicate):
+    def set_rearrange_predicate(self, predicate: Predicate):
         """
         Set a predicate function to rearrange messages based on a specific condition.
         This is useful for filtering messages by channel or other criteria and moving them
@@ -457,7 +457,7 @@ class AsyncChatClient:
                 messages = messages[-(cutoff_index-1):]
         return messages
 
-    async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>", temporal: bool = False, system_prompt: Optional[str | ChatCompletionChunk] = None):
+    async def stream_completion(self, start_think_tag: str = "<think>", end_think_tag: str = "</think>", temporal: bool = False, system_prompt: Optional[str | ChatMessageMeta] = None):
         if temporal:
             orig_messages = self.messages.copy()
 
@@ -677,8 +677,9 @@ class AsyncChatbotInstance(AsyncChatClient):
                  uuid: int | str,
                  hash_prefix: str,
                  *,
+                 tools: list[AsyncTool] = [],
+                 actions: list[AsyncAction] = [],
                  bot=None,
-                 resource_folder: str | None = None,
                  **client_kwargs,
                  ):
 
@@ -691,8 +692,6 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
-        assert not exists(resource_folder) or (exists(resource_folder) and isinstance(
-            resource_folder, str)), f"Invalid resource_folder \"{resource_folder}\"."
 
         self.id = str(uuid)
         self.prefix = hash_prefix
@@ -728,6 +727,29 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         # async states
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+        
+        
+        # register all the tools
+        for tool in tools:
+            if not tool.should_register(self):
+                continue
+            self.add_tool(
+                name=tool.name,
+                function=tool.function,
+                parameters=tool.parameters,
+                description=tool.description
+            )
+
+        # register all the actions
+        for action in actions:
+            if not action.should_register(self):
+                continue
+            self.add_action(
+                name=action.name,
+                function=action.function,
+                field_name=action.field_name,
+                description=action.description
+            )
 
     @staticmethod
     def get_save_path(id: str, hash_prefix: str):
@@ -906,19 +928,21 @@ class AsyncChatbotInstance(AsyncChatClient):
             self.logger.exception(f"Unable to load the instance save file {self.path}`, using default values.")
 
 
-class AsyncChatbotInstanceRegistry:
-    def __init__(self, *, parent=None, hash_prefix: str, **kwargs):
-        self.logger = logging.getLogger(self.__class__.__name__)
+class ChatbotInstanceRegistry:
+    hash_prefix: str
+    instances: dict[str, AsyncChatbotInstance] = {}
+    tools: list[AsyncTool] = []
+    actions: list[AsyncAction] = []
+    bot: Any | None = None
+    logger = logging.getLogger("ChatbotInstanceRegistry")
 
-        self.instances: dict[str, AsyncChatbotInstance] = {}
-        self.kwargs = kwargs
-        self.hash_prefix = hash_prefix
-        self.tools: list[AsyncTool] = []
-        self.actions: list[AsyncAction] = []
-        self.bot = parent
-        assert self.bot
-
-    def register_action(self, action: AsyncAction):
+    @staticmethod
+    def init(hash_prefix: str, bot: Any):
+        ChatbotInstanceRegistry.hash_prefix = hash_prefix
+        ChatbotInstanceRegistry.bot = bot
+    
+    @staticmethod
+    def register_action(action: AsyncAction):
         """
         Register an action
 
@@ -926,84 +950,44 @@ class AsyncChatbotInstanceRegistry:
         calling capabilities), their descriptions are dynamically added to the system prompt at runtime
         """
 
-        self.actions.append(action)
+        ChatbotInstanceRegistry.actions.append(action)
 
-    def register_tool(self, tool: AsyncTool):
+    @staticmethod
+    def register_tool(tool: AsyncTool):
         """
         Register a tool (function) for tool calling.
         """
 
-        self.tools.append(tool)
+        ChatbotInstanceRegistry.tools.append(tool)
 
-    async def __execute_predicate_if_present(self, predicate: AsyncPredicate | None, *args, **kwargs) -> bool:
-        if predicate is None:
-            return True
-        return await predicate(*args, **kwargs)
-
-    async def new_instance(self, identifier: str) -> AsyncChatbotInstance:
-        instance = AsyncChatbotInstance(identifier, **self.kwargs, hash_prefix=self.hash_prefix, bot=self.bot)
-
-        # register all the tools for the newly created instance
-        for tool in self.tools:
-            if not await self.__execute_predicate_if_present(tool.predicate, instance):
-                continue
-            instance.add_tool(
-                name=tool.name,
-                function=tool.function,
-                parameters=tool.parameters,
-                description=tool.description
-            )
-
-        # register all the actions for the newly created instance
-        for action in self.actions:
-            if not await self.__execute_predicate_if_present(action.predicate, instance):
-                continue
-            instance.add_action(
-                name=action.name,
-                function=action.function,
-                field_name=action.field_name,
-                description=action.description
-            )
-
+    @staticmethod
+    def new_instance(identifier: str, **kwargs) -> AsyncChatbotInstance:
+        instance = AsyncChatbotInstance(
+            identifier,
+            ChatbotInstanceRegistry.hash_prefix,
+            **kwargs, 
+            tools = ChatbotInstanceRegistry.tools, 
+            actions = ChatbotInstanceRegistry.actions, 
+            bot=ChatbotInstanceRegistry.bot
+        )
+        ChatbotInstanceRegistry.instances.update({instance.id: instance})
         return instance
 
-    def cache_instance(self, instance: AsyncChatbotInstance):
-        self.instances.update({instance.id: instance})
-
-    async def get(self, identifier: str) -> AsyncChatbotInstance | None:
-        cached_instance = self.instances.get(identifier)
-        if cached_instance:
-            return cached_instance
-        instance = await self.new_instance(identifier)
-        try:
-            instance.load(not_found_ok=False)
-            # cache the instance
-            self.cache_instance(instance)
+    @staticmethod
+    def get(identifier: str, or_create: bool = True, **kwargs) -> AsyncChatbotInstance | None:
+        if instance := ChatbotInstanceRegistry.instances.get(identifier):
             return instance
-        except FileNotFoundError:
-            return None
-
-    async def get_or_create(self, identifier: str) -> AsyncChatbotInstance:
-        instance = self.instances.get(identifier)
-        if instance is None:
-            instance = await self.new_instance(identifier)
+        if or_create:
+            instance = ChatbotInstanceRegistry.new_instance(identifier, **kwargs)
             instance.load(not_found_ok=True)
-            # cache the instance
-            self.cache_instance(instance)
-            self.logger.info(f"initiated a conversation with {identifier=}.")
-        return instance
+            ChatbotInstanceRegistry.logger.info(f"created new chatbot instance {instance.id=}.")
+            return instance
 
-    def remove(self, identifier: str):
-        self.logger.info(f"removing {identifier}")
-        save_path = AsyncChatbotInstance.get_save_path(id=identifier, hash_prefix=self.hash_prefix)
+    @staticmethod
+    def remove(identifier: str):
+        save_path = AsyncChatbotInstance.get_save_path(id=identifier, hash_prefix=ChatbotInstanceRegistry.hash_prefix)
         if os.path.exists(save_path):
             os.remove(save_path)
-        if identifier in self.instances.keys():
-            del self.instances[identifier]
-
-    def save(self):
-        for identifier, conversation in self.instances.items():
-            try:
-                conversation.save()
-            except Exception as e:
-                self.logger.exception(f"Failed to save conversation with {identifier=}: {e}")
+            ChatbotInstanceRegistry.logger.info(f"removed chatbot instance {identifier=}.")
+        if identifier in ChatbotInstanceRegistry.instances.keys():
+            del ChatbotInstanceRegistry.instances[identifier]

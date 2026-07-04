@@ -13,8 +13,8 @@ from .agents import AgentBase, RetrievalAgent
 from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import (ActionContext, AsyncChatbotInstance,
-                       AsyncChatbotInstanceRegistry, AsyncTool, ToolContext)
-from .model.chatting.callbacks import AsyncAction, AsyncPredicate
+                       ChatbotInstanceRegistry, AsyncTool, ToolContext)
+from .model.chatting.callbacks import AsyncAction, Predicate
 from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            NewsConfig, OpenAIAuthConfig,
                            OpenAIEmbeddingModelConfig,
@@ -88,13 +88,7 @@ class PixiClient:
             self.accept_images = False
             self.accept_audio = False
 
-        self.chatbot_factory = AsyncChatbotInstanceRegistry(
-            parent=self,
-            auth=self.auth,
-            model=model,
-            hash_prefix=platform,
-            log_tool_calls=self.log_tool_calls,
-        )
+        ChatbotInstanceRegistry.init(hash_prefix = platform, bot = self)
 
         self.reflection_api = ReflectionAPI(platform=platform)
 
@@ -137,7 +131,7 @@ class PixiClient:
         for guild in await self.reflection_api.get_available_guilds():
             instance_id = f"forum#{guild.id}"
             self.logger.info(f" - \"{guild.name}\" (members: {guild.member_count})")
-            instance = await self.get_conversation_instance(instance_id)
+            self.get_chatbot_instance(instance_id)
 
     async def verify_models(self):
         """
@@ -189,12 +183,12 @@ class PixiClient:
                 "model verification will be skipped. This is expected for some OpenAI-compatible backends."
             )
 
-    def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[AsyncPredicate] = None):
+    def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[Predicate] = None):
         if not self.enable_tool_calls:
             self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
-        self.chatbot_factory.register_tool(AsyncTool(
+        ChatbotInstanceRegistry.register_tool(AsyncTool(
             name=name,
             function=func,
             parameters=parameters,
@@ -202,8 +196,8 @@ class PixiClient:
             predicate=predicate
         ))
 
-    def register_action(self, name: str, function, field_name: str, description: str, predicate: Optional[AsyncPredicate] = None, is_visible: bool = True):
-        self.chatbot_factory.register_action(AsyncAction(
+    def register_action(self, name: str, function, field_name: str, description: str, predicate: Optional[Predicate] = None, is_visible: bool = True):
+        ChatbotInstanceRegistry.register_action(AsyncAction(
             name=name,
             function=function,
             field_name=field_name,
@@ -581,8 +575,7 @@ class PixiClient:
                 return
             try:
                 environment_id = message.environment_id
-                conversation = await self.get_conversation_instance(environment_id)
-                is_notes_visible = conversation.toggle_notes()
+                is_notes_visible = self.get_chatbot_instance(environment_id).toggle_notes()
                 notes_message = "Notes are now visible." if is_notes_visible else "Notes are no longer visible"
                 await message.send(notes_message)
             except Exception:
@@ -596,11 +589,11 @@ class PixiClient:
 
             environment_id = message.environment_id
 
-            instance = self.chatbot_factory.instances.get(environment_id)
+            instance = ChatbotInstanceRegistry.get(environment_id, or_create=False)
             if instance:
                 instance.cancel_all_schedules()
                 instance.stop_news_background_task()
-            self.chatbot_factory.remove(environment_id)
+            ChatbotInstanceRegistry.remove(environment_id)
             self.logger.info(f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled.")
 
             await message.send("Wha- Where am I?!")
@@ -626,8 +619,13 @@ class PixiClient:
             description="See pixi's thoughts"
         )
 
-    async def get_conversation_instance(self, identifier: str) -> AsyncChatbotInstance:
-        instance = await self.chatbot_factory.get_or_create(identifier)
+    def get_chatbot_instance(self, identifier: str) -> AsyncChatbotInstance:
+        instance = ChatbotInstanceRegistry.get(identifier,
+            auth=self.auth,
+            model=self.model,
+            log_tool_calls=self.log_tool_calls
+        )
+        assert instance
         # Start news background task if feature is enabled and not already running
         if (
             PixiFeatures.NewsProactive in self.features
@@ -678,31 +676,13 @@ class PixiClient:
 
         return instance.action_manager.is_visible_actions_taken()
 
-    async def pixi_resp_retry(self, chat_message: ChatMessageMeta, num_retry: int = 10):
+    async def pixi_resp_retry(self, instance: AsyncChatbotInstance, chat_message: ChatMessageMeta, num_retry: int = 10):
         """
         create a copy of all messages in the conversation instance and try to respond to the message.
         if the response fails, it will retry up to `num_retry` times.
         if the response is successful, it will save the conversation instance and return True.
         if the response fails after all retries, it will return False.
         """
-
-        async def rearrage_predicate(msg: ChatMessageMeta):
-            msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
-            current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
-
-            if msg_channel_id is None or current_channel_id is None:
-                return False
-            return msg_channel_id == current_channel_id
-
-        assert chat_message.origin
-        message = chat_message.origin
-
-        assert chat_message.instance_id
-        identifier = chat_message.instance_id
-
-        instance = await self.get_conversation_instance(identifier)
-        instance.update_realtime(self.reflection_api.get_realtime_data(message))
-        instance.set_rearrange_predicate(rearrage_predicate)
 
         instance.add_message(chat_message)
         messages_checkpoint = instance.get_messages().copy()
@@ -728,55 +708,39 @@ class PixiClient:
         """
         return self.environment_filter.is_allowed(identifier)
 
-    async def on_message(self, message: AbstractMessage):
+    async def should_respond(self, message: AbstractMessage) -> bool:
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
-            return
+            return False
+        
+        environment_id = message.environment_id
+        if not self.is_environment_allowed(environment_id):
+            self.logger.warning(f"ignoring message in {environment_id} because it's not in an allowed environment.")
+            return False
+        
+        if self.reflection_api.is_bot_mentioned(message) or message.is_inside_dm():
+            return True
 
         message_text = message.content
         if message_text is None:
             message_text = ""
 
-        # Check if the message contains a summon word, a reply to the bot, a DM, or mentions the bot
-        bot_mentioned = self.reflection_api.is_bot_mentioned(message)
+        # check if the message contains a summon word or a prefixed command
         is_keyword_present = False
         for keyword in SUMMON_KEYWORDS:
             if keyword in message_text.lower():
                 is_keyword_present = True
                 break
         is_prefixed = message_text.lower().startswith(tuple(["!" + k for k in SUMMON_KEYWORDS]))
-        environment_id = message.environment_id
 
-        if not (message.is_inside_dm() or bot_mentioned or is_prefixed or is_keyword_present):
-            return
-
-        if not self.is_environment_allowed(environment_id):
-            self.logger.warning(f"ignoring message in {environment_id} because it's not in an allowed environment.")
-            return
-
-        if is_prefixed:
-            message_text = remove_prefixes(message_text)
-
-        instance = await self.chatbot_factory.get_or_create(environment_id)
-
-        attached_images = []
-        if self.accept_images:
-            attached_images = await message.fetch_images()
-        attached_audio = []
-        if self.accept_audio:
-            attached_audio = await message.fetch_audio()
-
-        message_author = asdict(message.author)
-
-        metadata = dict(
-            from_user=message_author
-        )
-
-        # check if the message is a reply to a bot message
-        reply_message = await message.fetch_refrences()
-        if reply_message is not None:
+        return is_prefixed or is_keyword_present
+    
+    async def __add_reply_metadata(self, instance: AsyncChatbotInstance, metadata: dict, message: AbstractMessage):
+        # process reply reference
+        reply_message = await message.fetch_reference()
+        if reply_message is not None and reply_message.content is not None:
             reply_message_text = remove_prefixes(reply_message.content)
-            # if the reply is to the last message that is sent by the bot, we don't need to do anything.
+            # if the reply is to the last message in the instance, we don't need to do anything.
             reply_optimization = -1
             instance_messages = instance.get_messages()
             matching_messages = [
@@ -789,7 +753,7 @@ class PixiClient:
                     reply_optimization = 1
             if reply_optimization == 2:
                 # completely ignore reply context
-                self.logger.debug(f"completely ignore reply context for {environment_id=}")
+                self.logger.debug(f"completely ignore reply context for {message.environment_id=}")
             elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
                     metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
@@ -812,19 +776,50 @@ class PixiClient:
                         "from": asdict(reply_message.author),
                         "message": reply_message_text
                     }
+    
+    async def on_message(self, message: AbstractMessage):
+        if not await self.should_respond(message):
+            return
 
-        # convert everything into `ChatMessage`
-        role_message = ChatMessageMeta(
+        message_text = message.content
+        if message_text is None:
+            message_text = ""
+
+        message_text = remove_prefixes(message_text)
+        environment_id = message.environment_id
+
+        instance = self.get_chatbot_instance(environment_id)
+
+        metadata = dict(
+            from_user=asdict(message.author)
+        )
+        await self.__add_reply_metadata(instance, metadata, message)
+                    
+        def rearrage_predicate(msg: ChatMessageMeta):
+            msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
+            current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
+
+            if msg_channel_id is None or current_channel_id is None:
+                return False
+            return msg_channel_id == current_channel_id
+        
+        instance.update_realtime(self.reflection_api.get_realtime_data(message))
+        instance.set_rearrange_predicate(rearrage_predicate)
+
+        # convert everything into `ChatMessageMeta`
+        chat_message = ChatMessageMeta(
             role=ChatRole.USER,
             content=message_text,
             metadata=metadata,
-            images=attached_images,
-            audio=attached_audio,
+            images=await message.fetch_images() if self.accept_images else [],
+            audio=await message.fetch_audio() if self.accept_audio else [],
             # the following properties are intended to be used internally and are NOT reload persistant
             instance_id=environment_id,
+            # origin is used for actions and tool calls
             origin=message
         )
-        await self.pixi_resp_retry(role_message)
+
+        await self.pixi_resp_retry(instance, chat_message)
 
     def register_pre_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
         """Register an async awaitable to run before the bot connects to Discord/Telegram.
@@ -844,21 +839,21 @@ class PixiClient:
         """
         self.post_startup_hooks.append(hook)
 
-    async def _post_startup_task(self):
+    async def __post_startup_task(self):
         await self.reflection_api.wait_until_ready()
         if self.post_startup_hooks:
             self.logger.info(f"Running {len(self.post_startup_hooks)} post-startup hook(s)...")
-            results = await asyncio.gather(*(f() for f in self.post_startup_hooks))
+            await asyncio.gather(*(f() for f in self.post_startup_hooks))
             self.logger.info("All post-startup hooks completed.")
 
     async def start(self):
         """Start the bot asynchronously, running all startup hooks first."""
         if self.pre_startup_hooks:
             self.logger.info(f"Running {len(self.pre_startup_hooks)} pre-startup hook(s)...")
-            results = await asyncio.gather(*(f() for f in self.pre_startup_hooks))
+            await asyncio.gather(*(f() for f in self.pre_startup_hooks))
             self.logger.info("All pre-startup hooks completed.")
 
-        post_task = asyncio.create_task(self._post_startup_task())
+        post_task = asyncio.create_task(self.__post_startup_task())
 
         await self.reflection_api.start_async()
         await post_task

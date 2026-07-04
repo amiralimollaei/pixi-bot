@@ -126,7 +126,7 @@ class DiscordMessageImpl(AbstractMessage):
                 attachments.append(AudioCache(await attachment.read()))
         return attachments
 
-    async def fetch_refrences(self) -> 'DiscordMessageImpl | None':
+    async def fetch_reference(self) -> 'DiscordMessageImpl | None':
         origin: discord.Message | discord.Interaction = self.origin
         if isinstance(origin, discord.Interaction):
             return

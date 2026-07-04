@@ -26,7 +26,7 @@ class ReflectionEnvironment:
 
 @dataclasses.dataclass(frozen=True)
 class AbstractMessage(ABC):
-    content: str
+    content: str | None
     author: ReflectionMessageAuthor
     id: int
     environment: ReflectionEnvironment
@@ -51,7 +51,7 @@ class AbstractMessage(ABC):
     @abstractmethod
     async def fetch_audio(self) -> list[MediaCache]: ...
     @abstractmethod
-    async def fetch_refrences(self) -> 'AbstractMessage | None': ...
+    async def fetch_reference(self) -> 'AbstractMessage | None': ...
     @abstractmethod
     async def add_reaction(self, emoji: str): ...
     @abstractmethod

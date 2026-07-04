@@ -124,7 +124,7 @@ class TelegramMessageImpl(AbstractMessage):
             attachments.append(AudioCache(bytes(audio_bytes)))
         return attachments
 
-    async def fetch_refrences(self) -> 'TelegramMessageImpl | None':
+    async def fetch_reference(self) -> 'TelegramMessageImpl | None':
         ref = self.origin.reply_to_message
         return TelegramMessageImpl.from_origin(ref) if ref else None
 
