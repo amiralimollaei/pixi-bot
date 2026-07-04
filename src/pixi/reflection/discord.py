@@ -243,15 +243,16 @@ class DiscordReflectionAPI:
 
     async def send_message(self, chat_id: int, text: str):
         """Send a text message to a channel by its ID."""
-        channel = await self.bot.fetch_channel(chat_id)
-        if channel is None:
-            raise RuntimeError(f"Channel {chat_id} not found, cannot send message.")
-        if not hasattr(channel, "send"):
-            raise RuntimeError(f"Channel {chat_id} does not support sending messages.")
         try:
+            channel = await self.bot.fetch_channel(chat_id)
+            if channel is None:
+                raise RuntimeError(f"Channel {chat_id} not found, cannot send message.")
+            if not hasattr(channel, "send"):
+                raise RuntimeError(f"Channel {chat_id} does not support sending messages.")
             await channel.send(text)  # pyright: ignore[reportAttributeAccessIssue]
         except Exception:
             self.logger.exception(f"Failed to send message to channel {chat_id}.")
+            raise
 
     async def get_available_guilds(self) -> list[GuildMeta]:
         """Return all guilds the bot is currently a member of."""

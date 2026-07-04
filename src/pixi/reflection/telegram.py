@@ -170,6 +170,7 @@ class TelegramReflectionAPI:
             await self.application.bot.send_message(chat_id=chat_id, text=text)
         except Exception:
             self.logger.exception(f"Failed to send message to chat {chat_id}.")
+            raise
 
     async def get_available_guilds(self) -> list[GuildMeta]:        
         return []
