@@ -26,9 +26,6 @@ telegram = [
 discord = [
     "discord-py>=2.6"
 ]
-rag = [
-    "numpy>=2.0"
-]
 
 
 [tool.setuptools.packages.find]

@@ -38,15 +38,17 @@ class TelegramReflectionAPI:
         self.application = application
         self.known_chats: set[int] = set()
 
-    async def start(self):
+    async def start_async(self):
         """Start the Telegram bot asynchronously."""
         await self.application.initialize()
         await self.application.start()
         await self.application.updater.start_polling()  # pyright: ignore[reportOptionalMemberAccess]
-        # Wait until the bot is fully connected and ready
-        if self.application.bot:
-            await self.application.bot.wait_until_ready()  # pyright: ignore[reportAttributeAccessIssue]
 
+    async def close_async(self):
+        """Close the Telegram bot asynchronously."""
+        await self.application.shutdown()
+
+    
     async def wait_until_ready(self):
         """Wait until the bot is fully connected and ready."""
         if self.application.bot:

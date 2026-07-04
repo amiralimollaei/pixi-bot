@@ -1,7 +1,6 @@
+import array
 import logging
-
-import httpx
-import numpy as np
+import math
 
 from .. import openai
 from ..model.config.openai import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
@@ -24,8 +23,6 @@ class AsyncRAGClient:
         self.client = openai.AsyncOpenAI(
             base_url=self.auth.base_url,
             api_key=self.auth.api_key,
-            # don't use proxies from environment variables
-            http_client=httpx.AsyncClient(trust_env=False),
         )
 
     async def add_document_piece(self, input: str | list[str], reference: DocumentReference):
@@ -103,7 +100,7 @@ class AsyncRAGClient:
                 results.append(EmbeddingCache(
                     text=embedding_text,
                     dim=self.model.dimension,
-                    vec=np.array(embedding_data.embedding, dtype="float16"),
+                    vec=array.array("f", embedding_data.embedding),
                 ))
 
         return results[0] if was_unbatched else results
@@ -118,11 +115,18 @@ class AsyncRAGClient:
         assert query.vec is not None
         assert document.vec is not None
 
-        q_dot_docs = (query.vec * document.vec).sum(axis=-1)
-        norm_coeff = np.linalg.norm(query.vec, axis=-1) * np.linalg.norm(document.vec, axis=-1)
-        norm_coeff = np.clip(norm_coeff, a_min=epsilon, a_max=None)  # avoid devision by zero
+        # Compute dot product
+        q_dot_docs = sum(q * d for q, d in zip(query.vec, document.vec))
 
-        return float(q_dot_docs / norm_coeff)
+        # Compute L2 norms
+        query_norm = math.sqrt(sum(x * x for x in query.vec))
+        doc_norm = math.sqrt(sum(x * x for x in document.vec))
+        norm_coeff = query_norm * doc_norm
+
+        # Clip to avoid division by zero
+        norm_coeff = max(epsilon, norm_coeff)
+
+        return q_dot_docs / norm_coeff
 
     def search(self, query: EmbeddingCache, best_n: int = 10):
         matches: list[TextPieceMatch] = []

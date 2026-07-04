@@ -41,12 +41,14 @@ class DiscordReflectionAPI:
 
         self.bot = DiscordClient()
 
-    async def start(self):
+    async def start_async(self):
         """Start the Discord bot asynchronously."""
         assert self.token
         await self.bot.start(self.token)
-        # Wait until the bot is fully ready and cache is populated
-        await self.bot.wait_until_ready()
+    
+    async def close_async(self):
+        """Close the Discord bot asynchronously."""
+        await self.bot.close()
 
     async def wait_until_ready(self):
         """Wait until the bot is fully connected and ready."""

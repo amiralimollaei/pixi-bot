@@ -1,8 +1,7 @@
+import array
 import hashlib
 import os
 from typing import Optional
-
-import numpy as np
 
 from ..storage.paths import PixiPaths
 
@@ -14,7 +13,7 @@ class EmbeddingCache:
     cache file does not exist or cannot be read.
     """
 
-    def __init__(self, text: str, dim: int, vec: Optional[np.ndarray] = None):
+    def __init__(self, text: str, dim: int, vec: Optional[array.array[float]] = None):
         self.text = text
         self.dim = dim
         self.vec = vec
@@ -25,6 +24,7 @@ class EmbeddingCache:
             # loads the cached vector
             self.load()
         else:
+            assert self.vec.typecode == "f"
             # caches the vector
             if not os.path.exists(self.get_save_path(self.hash_hexdigest)):
                 os.makedirs(cache_dir, exist_ok=True)
@@ -40,8 +40,11 @@ class EmbeddingCache:
 
     def save(self):
         assert self.vec is not None
-        return np.savez_compressed(self.get_save_path(self.hash_hexdigest), vec=self.vec)
+        with open(self.get_save_path(self.hash_hexdigest), "wb") as f:
+            f.write(self.vec.tobytes())
 
     def load(self):
-        data = np.load(self.get_save_path(self.hash_hexdigest))
-        self.vec = data["vec"]
+        vec = array.array("f")
+        with open(self.get_save_path(self.hash_hexdigest), "rb") as f:
+            vec.frombytes(f.read())
+        self.vec = vec

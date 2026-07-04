@@ -30,7 +30,7 @@ class AbstractResponse(ABC):
 
 class _AiohttpAPI(AbstractAPI):
     def __init__(self):
-        import aiohttp # pyright: ignore[reportMissingImports]
+        import aiohttp  # pyright: ignore[reportMissingImports]
         self._session = aiohttp.ClientSession()
 
     async def get(self, url: str, params: Optional[dict]) -> AbstractResponse:
@@ -39,7 +39,7 @@ class _AiohttpAPI(AbstractAPI):
 
 
 class _AiohttpResponse(AbstractResponse):
-    def __init__(self, response: "aiohttp.ClientResponse"): # pyright: ignore[reportUndefinedVariable]
+    def __init__(self, response: "aiohttp.ClientResponse"):  # pyright: ignore[reportUndefinedVariable]
         self._response = response
 
     async def read(self) -> bytes:
@@ -48,7 +48,7 @@ class _AiohttpResponse(AbstractResponse):
 
 class _HttpxAPI(AbstractAPI):
     def __init__(self):
-        import httpx # pyright: ignore[reportMissingImports]
+        import httpx  # pyright: ignore[reportMissingImports]
         self._client = httpx.AsyncClient(trust_env=False)
 
     async def get(self, url: str, params: Optional[dict]) -> AbstractResponse:
@@ -56,7 +56,7 @@ class _HttpxAPI(AbstractAPI):
 
 
 class _HttpxResponse(AbstractResponse):
-    def __init__(self, response: "httpx.Response"): # pyright: ignore[reportUndefinedVariable]
+    def __init__(self, response: "httpx.Response"):  # pyright: ignore[reportUndefinedVariable]
         self._response = response
         self._response = response
 
@@ -88,7 +88,7 @@ class APIBase:
     async def request_raw(self, url: str, data: Optional[dict] = None) -> bytes:
         if self.api is None:
             self.api = self._select_api()
-        
+
         full_url = _build_url(self.base, url)
         api_key_data = {self.api_key_key: self.api_key} if self.api_key else {}
         if data is None:
@@ -100,7 +100,7 @@ class APIBase:
         response = await self.api.get(full_url, params=params)
         content = await response.read()
         return content.strip(b"\n").strip(b" ")
-    
+
     async def request(self, url: str, data: Optional[dict] = None) -> str | dict | list:
         text = await self.request_raw(url=url, data=data)
         if text.startswith(b"{") and text.endswith(b"}"):

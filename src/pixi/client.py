@@ -861,8 +861,11 @@ class PixiClient:
 
         post_task = asyncio.create_task(self.__post_startup_task())
 
-        await self.reflection_api.start_async()
-        await post_task
+        try:
+            await self.reflection_api.start_async()
+            await post_task
+        except asyncio.CancelledError:
+            await self.reflection_api.close_async()
 
     def run(self):
         """Run the bot (blocking with async support for startup hooks)."""

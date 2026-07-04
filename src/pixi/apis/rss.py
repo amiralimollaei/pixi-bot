@@ -1,10 +1,8 @@
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Optional
 
-import xml.etree.ElementTree as ET
-
 from .api import APIBase
-
 
 # helpers
 
@@ -36,11 +34,19 @@ class AsyncRSSAPI(APIBase):
     def __init__(self, url: str, api_key: Optional[str] = None):
         super().__init__(base=url, api_key=api_key, api_key_env_var=None)
 
-    async def request(self, url: str, data: Optional[dict] = None) -> str | dict | list:
+    async def request_xml(self, url: str, data: Optional[dict] = None):
         text = await self.request_raw(url=url, data=data)
         try:
             root = ET.fromstring(text)
         except ET.ParseError:
+            return None
+        
+        return root
+
+    async def fetch(self, max_items: int = 10) -> list[NewsItem]:
+        """Fetch and parse an RSS/Atom feed, returning up to `max_items` headlines."""
+        root = await self.request_xml("/")
+        if not root:
             return []
 
         items: list[NewsItem] = []
@@ -78,11 +84,5 @@ class AsyncRSSAPI(APIBase):
                         published=published,
                     ))
 
-        return items
 
-    async def fetch(self, feed_url: str, max_items: int = 5) -> list[NewsItem]:
-        """Fetch and parse an RSS/Atom feed, returning up to `max_items` headlines."""
-        items = await self.request(feed_url)
-        if not isinstance(items, list):
-            return []
         return items[:max_items]

@@ -89,7 +89,7 @@ class NewsBackgroundTask:
             return
 
         # 1. Fetch news
-        headlines = await self.feed_api.fetch(self.news_config.feed_url, max_items=10)
+        headlines = await self.feed_api.fetch(max_items=10)
         if not headlines:
             self.logger.warning("No news headlines fetched.")
             return

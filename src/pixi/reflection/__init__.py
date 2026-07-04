@@ -55,7 +55,11 @@ class ReflectionAPI:
 
     async def start_async(self):
         """Start the bot asynchronously (non-blocking)."""
-        await self._ref.start()
+        await self._ref.start_async()
+    
+    async def close_async(self):
+        """Closes the bot asynchronously (non-blocking)."""
+        await self._ref.close_async()
 
     async def wait_until_ready(self):
         """Wait until the bot is fully connected and ready."""
