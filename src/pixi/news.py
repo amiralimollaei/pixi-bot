@@ -149,7 +149,7 @@ class NewsBackgroundTask:
             self.logger.info(f"Sent proactive news message to channel {channel_id}.")
             # update instance
             self.instance.add_message(ChatMessageMeta(ChatRole.ASSISTANT, content=f"[send: {message_text}]"))
-            await self.instance.cancel_channel_stream_call_tasks(channel_id=str(channel_id))
+            await self.instance.cancel_channel_active_tasks(channel_id=str(channel_id))
             self.instance.save()
         except RuntimeError:
             self.channel_blacklist.append(channel_id)

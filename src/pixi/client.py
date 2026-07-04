@@ -644,7 +644,8 @@ class PixiClient:
         message: AbstractMessage = reference_message.origin
 
         channel_id = message.environment.chat_id
-
+        
+        cancelled = False
         try:
             # concurrent_channel_stream_call handles overlapping requests automatically
             # killing tasks that are not done and restarting the request every time untill
@@ -655,26 +656,29 @@ class PixiClient:
             # lost progress and http errors.
             #
             # TODO: find a solution to the above
-            task = await instance.concurrent_channel_stream_call(
-                channel_id=str(channel_id),
-                reference_message=reference_message,
-            )
-            while not task.done():
-                try:
-                    await message.typing()
-                    await asyncio.sleep(3)
-                except ssl.SSLError:
-                    self.logger.warning("SSLError occurred while sending typing status")
-                except Exception:
-                    self.logger.exception("an error occurred while sending typing status")
-            noncall_result = await task
-            if noncall_result:
-                self.logger.warning(f"{noncall_result=}")
+            try:
+                task = await instance.concurrent_channel_stream_call(
+                    channel_id=str(channel_id),
+                    reference_message=reference_message,
+                )
+                while not task.done():
+                    try:
+                        await message.typing()
+                        await asyncio.sleep(3)
+                    except ssl.SSLError:
+                        self.logger.warning("SSLError occurred while sending typing status")
+                    except Exception:
+                        self.logger.exception("an error occurred while sending typing status")
+                noncall_result = await task
+                if noncall_result:
+                    self.logger.warning(f"{noncall_result=}")
+            except asyncio.CancelledError:
+                cancelled = True
         except Exception:
             self.logger.exception(f"Unknown error while responding to a message in {instance.id}.")
             # await message.send(Messages.UNKNOWN_ERROR)
 
-        return instance.action_manager.is_visible_actions_taken()
+        return instance.action_manager.is_visible_actions_taken(), cancelled
 
     async def pixi_resp_retry(self, instance: AsyncChatbotInstance, chat_message: ChatMessageMeta, num_retry: int = 10):
         """
@@ -688,16 +692,15 @@ class PixiClient:
         messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
             try:
-                responded = await self.pixi_resp(instance, reference_message=chat_message)
-                instance.save()
-                if responded:
-                    self.logger.info("model responded to a message.")
+                responded, cancelled = await self.pixi_resp(instance, reference_message=chat_message)
+                if not cancelled:
+                    instance.save()
+                if responded or cancelled:
                     return True
                 else:
                     self.logger.warning("model didn't respond to a message. (invalid, requesting a response)")
                     # ask the model to respond again
-                    instance.add_message(
-                        "[SYSTEM]: You didn't respond to the user, if this is intentional use the SEND action with an empty message instead.")
+                    instance.add_message("[SYSTEM]: You didn't respond, if this is intentional use the SEND action with no value.")
             except Exception:
                 self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)

@@ -902,6 +902,8 @@ class AsyncChatbotInstance(AsyncChatClient):
     async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessageMeta):
         assert channel_id, "channel_id is None"
 
+        await self.cancel_channel_active_tasks(channel_id)
+
         async def stream_call_task():
             try:
                 await self.stream_call(reference_message)
@@ -909,19 +911,17 @@ class AsyncChatbotInstance(AsyncChatClient):
                 self.logger.warning(
                     f"stream_call task was cancelled inside {self.id} in channel {channel_id}"
                 )
+                # propegate the cancellation
+                raise
 
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
         task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
-        await self.cancel_channel_stream_call_tasks(channel_id)
         return task
 
-    async def cancel_channel_stream_call_tasks(self, channel_id: str):
-        # cancell extra tasks
-        while len(self.channel_active_tasks[channel_id]) > 1:
-            cancel_task = self.channel_active_tasks[channel_id][0]
-            cancel_task.cancel()
-            await cancel_task
+    async def cancel_channel_active_tasks(self, channel_id: str):
+        for task in self.channel_active_tasks[channel_id]:
+            task.cancel()
 
     @property
     def forum_id(self) -> Optional[int]:
