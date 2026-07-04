@@ -7,19 +7,18 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 ## Features
 
 - **Multi-Platform Support:** Works with Discord and Telegram out of the box.
-- **Multi-Instance Support:** Run multiple instances with completely different configurations in parallel.
+- **Configurable:** Easily modify the bot's persona and behavior.
+- **Change Data Directory:** Run multiple instances with completely different configurations/storage in parallel.
 - **Tool Calling:** Supports calling external tools and APIs from chat.
 - **Advanced Logging:** Colored logging, Supports logging tool calls and extra information for debugging.
 - **Image Support:** Can recieve, compress and cache all image formats.
 - **Audio Support:** Can recieve, compress and cache all audio formats.
-- **Configurable:** Easily modify the bot's persona and behavior.
 - **Addon Support:** Easily add new actions, tools, or other integrations (WIP, API is unstable and documentation is pending).
 - **Dotenv Support:** Securely manage API keys and tokens with environment variables.
 
 ## Requirements
 
-- Python>=3.10
-- argparse
+- Python>=3.12
 - dotenv
 - openai
 - zstandard
@@ -95,20 +94,27 @@ pixi-cli -p [platform] [options]
 > the following message is provided by running `pixi-cli --help`
 
 ```text
-usage: pixi-cli [-h] --platform {discord,telegram} [--pixi-directory {discord,telegram}]
-                [--log-level {debug,info,warning,error,critical}] [--api-url API_URL]
-                [--auth | --no-auth] --model MODEL
-                [--model-max-context MODEL_MAX_CONTEXT] [--helper-model HELPER_MODEL]
+usage: pixi-cli [-h] --platform {discord,telegram}
+                [--pixi-directory PIXI_DIRECTORY]
+                [--log-level {debug,info,warning,error,critical}]
+                [--api-url API_URL] [--auth | --no-auth] --model MODEL
+                [--model-max-context MODEL_MAX_CONTEXT]
+                [--helper-model HELPER_MODEL]
                 [--helper-model-max-context HELPER_MODEL_MAX_CONTEXT]
                 [--embedding-model EMBEDDING_MODEL]
                 [--embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT]
                 [--embedding-model-dimension EMBEDDING_MODEL_DIMENSION]
                 [--embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE]
                 [--embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE]
-                [--tool-calling | --no-tool-calling] [--tool-logging | --no-tool-logging]
-                [--wiki-search | --no-wiki-search] [--gif-search | --no-gif-search]
+                [--tool-calling | --no-tool-calling]
+                [--tool-logging | --no-tool-logging]
+                [--wiki-search | --no-wiki-search]
+                [--gif-search | --no-gif-search]
                 [--image-support | --no-image-support]
                 [--audio-support | --no-audio-support]
+                [--news-feed-url NEWS_FEED_URL]
+                [--news-interval NEWS_INTERVAL]
+                [--news-probability NEWS_PROBABILITY]
                 [--environment-whitelist | --no-environment-whitelist]
                 [--environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]]
                 [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
@@ -118,65 +124,84 @@ Run the Pixi bot, a multi-platform AI chatbot.
 
 options:
   -h, --help            show this help message and exit
-  --platform {discord,telegram}, -p {discord,telegram}
+  --platform, -p {discord,telegram}
                         Platform to run the bot on.
-  --pixi-directory {discord,telegram}, -pd {discord,telegram}
-                        The root directory for configuration files, addons, userdata,
-                        assets and cache, defaults to "~/.pixi/"
-  --log-level {debug,info,warning,error,critical}, -l {debug,info,warning,error,critical}
+  --pixi-directory, -pd PIXI_DIRECTORY
+                        The root directory for configuration files,
+                        addons, userdata, assets and cache, defaults to
+                        "~/.pixi/"
+  --log-level, -l {debug,info,warning,error,critical}
                         Set the logging level.
-  --api-url API_URL, -a API_URL
+  --api-url, -a API_URL
                         OpenAI Compatible API URL to use for the bot
   --auth, --no-auth     whether or not to authorize to the API backends
-  --model MODEL, -m MODEL
-                        Language Model to use for the main chatbot bot
-  --model-max-context MODEL_MAX_CONTEXT, -ctx MODEL_MAX_CONTEXT
-                        Maximum model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is '16192`.
-  --helper-model HELPER_MODEL, -hm HELPER_MODEL
+  --model, -m MODEL     Language Model to use for the main chatbot bot
+  --model-max-context, -ctx MODEL_MAX_CONTEXT
+                        Maximum model context size (in tokens), pixi
+                        tries to apporiximately stay within this
+                        context size, Default is '16192`.
+  --helper-model, -hm HELPER_MODEL
                         Language Model to use for agentic tools
-  --helper-model-max-context HELPER_MODEL_MAX_CONTEXT, -hctx HELPER_MODEL_MAX_CONTEXT
-                        Maximum helper model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is '16192`.
-  --embedding-model EMBEDDING_MODEL, -em EMBEDDING_MODEL
+  --helper-model-max-context, -hctx HELPER_MODEL_MAX_CONTEXT
+                        Maximum helper model context size (in tokens),
+                        pixi tries to apporiximately stay within this
+                        context size, Default is '16192`.
+  --embedding-model, -em EMBEDDING_MODEL
                         Embedding Model to use for embedding tools
-  --embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT, -ectx EMBEDDING_MODEL_MAX_CONTEXT
-                        Maximum embedding model context size (in tokens), pixi tries to
-                        apporiximately stay within this context size, Default is '16192`.
-  --embedding-model-dimension EMBEDDING_MODEL_DIMENSION, -ed EMBEDDING_MODEL_DIMENSION
-                        Dimention to use for the embedding model, Default is '768`.
-  --embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE, -emin EMBEDDING_MODEL_MIN_SIZE
-                        Minimum chunk size to use for the embedding chunk tokenizer,
-                        Default is '256`.
-  --embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE, -emax EMBEDDING_MODEL_MAX_SIZE
-                        Maximum chunk size to use for the embedding chunk tokenizer,
-                        Default is '1024`.
+  --embedding-model-max-context, -ectx EMBEDDING_MODEL_MAX_CONTEXT
+                        Maximum embedding model context size (in
+                        tokens), pixi tries to apporiximately stay
+                        within this context size, Default is '16192`.
+  --embedding-model-dimension, -ed EMBEDDING_MODEL_DIMENSION
+                        Dimension to use for the embedding model,
+                        Default is '768`.
+  --embedding-model-min-size, -emin EMBEDDING_MODEL_MIN_SIZE
+                        Minimum chunk size to use for the embedding
+                        chunk tokenizer, Default is '256`.
+  --embedding-model-max-size, -emax EMBEDDING_MODEL_MAX_SIZE
+                        Maximum chunk size to use for the embedding
+                        chunk tokenizer, Default is '1024`.
   --tool-calling, --no-tool-calling
-                        allows pixi to use built-in and/or plugin tools, tool calling can
-                        only be used if the model supports them
+                        allows pixi to use built-in and/or plugin
+                        tools, tool calling can only be used if the
+                        model supports them
   --tool-logging, --no-tool-logging
-                        verbose logging for tool calls (enabled by default when running
-                        with logging level DEBUG)
+                        verbose logging for tool calls (enabled by
+                        default when running with logging level DEBUG)
   --wiki-search, --no-wiki-search
-                        allows pixi to search any mediawiki compatible Wiki
+                        allows pixi to search any mediawiki compatible
+                        Wiki
   --gif-search, --no-gif-search
-                        allows pixi to search for gifs online, and send them in chat
+                        allows pixi to search for gifs online, and send
+                        them in chat
   --image-support, --no-image-support
                         allows pixi to download and process image files
   --audio-support, --no-audio-support
                         allows pixi to download and process audio files
+  --news-feed-url, -n NEWS_FEED_URL
+                        RSS/Atom feed URL for proactive news feature.
+                        Enables the news feature if provided.
+  --news-interval NEWS_INTERVAL
+                        Seconds between news checks for proactive news
+                        feature. Default is 3600 (1 hour).
+  --news-probability NEWS_PROBABILITY
+                        Probability of sending a proactive news message
+                        each check (0.0 to 1.0). Default is 0.1.
   --environment-whitelist, --no-environment-whitelist
-                        whether or not the ids passed to environment ids are whitelisted
-                        or blacklisted
+                        whether or not the ids passed to environment
+                        ids are whitelisted or blacklisted
   --environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]
-                        add the id of the environment that the bot is or is not allowed
-                        to respond in (space-separated). If not provided, the bot will
+                        add the id of the environment that the bot is
+                        or is not allowed to respond in (space-
+                        separated). If not provided, the bot will
                         respond everywhere.
-  --database-names DATABASE_NAMES [DATABASE_NAMES ...], -db DATABASE_NAMES [DATABASE_NAMES ...]
-                        add the name of databases to use (space-separated).
-  --mediawiki-wikis MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...], -mw MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
-                        add the mediawiki wikis to use (space-separated), it should
-                        follow the format of `name=url`, Example:
+  --database-names, -db DATABASE_NAMES [DATABASE_NAMES ...]
+                        add the name of databases to use (space-
+                        separated).
+  --mediawiki-wikis, -mw MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
+                        add the mediawiki wikis to use (space-
+                        separated), it should follow the format of
+                        `name=url`, Example:
                         wikipedia=https://www.wikipedia.org/w/
 ```
 
