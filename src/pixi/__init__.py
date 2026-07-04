@@ -1,54 +1,21 @@
 __author__ = "amiralimollaei"
 
-import os
-from pathlib import Path
-
-from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
-                           NewsConfig, OpenAIAuthConfig,
-                           OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig,
-                           PixiFeatures)
-from .model.enums import Platform
-from .model.enums.ansi import AnsiColors
-from .storage.paths import PixiPaths, copy_default_resources
-from .utils import load_dotenv
-
-
-def run(
-    platform: Platform,
-    pixi_directory: str | Path,
-    *,
-    auth: OpenAIAuthConfig,
-    model: OpenAILanguageModelConfig,
-    helper_model: OpenAILanguageModelConfig | None,
-    embedding_model: OpenAIEmbeddingModelConfig | None,
-    features: PixiFeatures = PixiFeatures.default(),
-    datasets: list[DatasetConfig] = [],
-    wikis: list[MediaWikiConfig] = [],
-    environment_filter: IdFilter = IdFilter.allow(),
-    news_config: NewsConfig | None = None,
-):
-    PixiPaths.set_root(pixi_directory)
-    copy_default_resources()
-
-    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
-
-    PixiClient(
-        platform=platform,
-        auth=auth,
-        model=model,
-        helper_model=helper_model,
-        embedding_model=embedding_model,
-        features=features,
-        datasets=datasets,
-        wikis=wikis,
-        environment_filter=environment_filter,
-        news_config=news_config,
-    ).run()
-
 
 def main():
     import argparse
     import logging
+    import os
+
+    from .storage.paths import PixiPaths, copy_default_resources
+
+    from .model.enums.ansi import AnsiColors
+    from .utils import load_dotenv
+    
+    from .model.enums import Platform
+    from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                            NewsConfig, OpenAIAuthConfig,
+                            OpenAIEmbeddingModelConfig, OpenAILanguageModelConfig,
+                            PixiFeatures)
 
     # injecting colors into the default logger
 
@@ -350,9 +317,13 @@ def main():
             probability=args.news_probability,
         )
 
-    return run(
-        Platform[args.platform.upper()],
-        pixi_directory=args.pixi_directory,
+    PixiPaths.set_root(args.pixi_directory)
+    copy_default_resources()
+
+    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
+
+    return PixiClient(
+        platform=Platform[args.platform.upper()],
         auth=auth,
         model=model,
         helper_model=helper_model,
@@ -362,4 +333,4 @@ def main():
         wikis=wikis,
         environment_filter=environment_filter,
         news_config=news_config,
-    )
+    ).run()

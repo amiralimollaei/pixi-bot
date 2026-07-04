@@ -2,8 +2,8 @@ import logging
 
 import httpx
 import numpy as np
-import openai
 
+from .. import openai
 from ..model.config.openai import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
 from ..model.search.document import (DocumentReference, TextPieceMatch,
                                      VectorTextPiece)

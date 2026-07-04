@@ -194,3 +194,6 @@ addons/
 
 # cline
 .clinerules/
+
+# mprofile
+mprofile_*.dat

@@ -1,29 +1,23 @@
 import asyncio
 import json
 import logging
-import ssl
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Coroutine, Optional
 
-import httpx
-import openai
-
 from .addon import AddonManager
 from .agents import AgentBase, RetrievalAgent
-from .apis import AsyncTenorAPI, AsyncWikimediaAPI
 from .caching import SUPPORTS_MEDIA_CACHING
 from .chatting import (ActionContext, AsyncChatbotInstance,
-                       ChatbotInstanceRegistry, AsyncTool, ToolContext)
-from .model.chatting.callbacks import AsyncAction, Predicate
+                       ChatbotInstanceRegistry)
+from .model.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
+                                       Predicate, ToolContext)
 from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            NewsConfig, OpenAIAuthConfig,
                            OpenAIEmbeddingModelConfig,
                            OpenAILanguageModelConfig, PixiFeatures)
 from .model.enums import ChatRole, Platform
 from .model.storage.message import ChatMessageMeta
-from .rag.client import AsyncRAGClient
 from .reflection import AbstractMessage, ReflectionAPI
-from .storage.database import DirectoryDatabase
 from .utils import format_time_later
 
 # constants
@@ -88,13 +82,14 @@ class PixiClient:
             self.accept_images = False
             self.accept_audio = False
 
-        ChatbotInstanceRegistry.init(hash_prefix = platform, bot = self)
+        ChatbotInstanceRegistry.init(hash_prefix=platform, bot=self)
 
         self.reflection_api = ReflectionAPI(platform=platform)
 
         self.gif_api = None
         if PixiFeatures.GIFSearch in features:
             try:
+                from .apis.tenor import AsyncTenorAPI
                 self.gif_api = AsyncTenorAPI()
             except KeyError:
                 self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
@@ -139,13 +134,14 @@ class PixiClient:
         Logs a warning for any configured model IDs not found in the API's model list.
         Raises RuntimeError if the API is unreachable.
         """
+        from . import openai
+
         self.logger.info(f"Verifying API connectivity and model availability at {self.auth.base_url}...")
 
         try:
             session = openai.OpenAI(
                 api_key=self.auth.api_key,
                 base_url=self.auth.base_url,
-                http_client=httpx.Client(trust_env=False),
             )
             models_page = session.models.list()
             available_models = {model.id for model in models_page}
@@ -196,7 +192,7 @@ class PixiClient:
             predicate=predicate
         ))
 
-    def register_action(self, name: str, function, field_name: str, description: str, predicate: Optional[Predicate] = None, is_visible: bool = True):
+    def register_action(self, name: str, function, field_name: str, description: str, is_visible: bool = True, predicate: Optional[Predicate] = None):
         ChatbotInstanceRegistry.register_action(AsyncAction(
             name=name,
             function=function,
@@ -378,7 +374,9 @@ class PixiClient:
             description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
         )
 
-    def register_database_tool(self, dataset_config: DatasetConfig) -> DirectoryDatabase | None:
+    def register_database_tool(self, dataset_config: DatasetConfig):
+        from .storage.database import DirectoryDatabase
+
         if not self.enable_tool_calls:
             self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             return
@@ -415,6 +413,7 @@ class PixiClient:
                 return "no result: no id specified"
 
             if self.embedding_model:
+                from .rag.client import AsyncRAGClient
                 rag = AsyncRAGClient(self.auth, self.embedding_model)
                 entries = await asyncio.gather(*[
                     database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
@@ -463,6 +462,8 @@ class PixiClient:
             self.logger.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
 
+        from .apis.wikimedia import AsyncWikimediaAPI
+
         wiki_api = AsyncWikimediaAPI(url)
 
         async def fetch_wiki_page(title: str) -> tuple[str, str]:
@@ -502,6 +503,7 @@ class PixiClient:
             ])
 
             if self.embedding_model:
+                from .rag.client import AsyncRAGClient
                 rag = AsyncRAGClient(self.auth, self.embedding_model)
                 for i, (page, title) in enumerate(context):
                     await rag.add_document(page, title, i)
@@ -621,10 +623,10 @@ class PixiClient:
 
     def get_chatbot_instance(self, identifier: str) -> AsyncChatbotInstance:
         instance = ChatbotInstanceRegistry.get(identifier,
-            auth=self.auth,
-            model=self.model,
-            log_tool_calls=self.log_tool_calls
-        )
+                                               auth=self.auth,
+                                               model=self.model,
+                                               log_tool_calls=self.log_tool_calls
+                                               )
         assert instance
         # Start news background task if feature is enabled and not already running
         if (
@@ -644,7 +646,7 @@ class PixiClient:
         message: AbstractMessage = reference_message.origin
 
         channel_id = message.environment.chat_id
-        
+
         cancelled = False
         try:
             # concurrent_channel_stream_call handles overlapping requests automatically
@@ -665,8 +667,8 @@ class PixiClient:
                     try:
                         await message.typing()
                         await asyncio.sleep(3)
-                    except ssl.SSLError:
-                        self.logger.warning("SSLError occurred while sending typing status")
+                    except OSError:
+                        self.logger.warning("OSError occurred while sending typing status")
                     except Exception:
                         self.logger.exception("an error occurred while sending typing status")
                 noncall_result = await task
@@ -700,7 +702,8 @@ class PixiClient:
                 else:
                     self.logger.warning("model didn't respond to a message. (invalid, requesting a response)")
                     # ask the model to respond again
-                    instance.add_message("[SYSTEM]: You didn't respond, if this is intentional use the SEND action with no value.")
+                    instance.add_message(
+                        "[SYSTEM]: You didn't respond, if this is intentional use the SEND action with no value.")
             except Exception:
                 self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
                 instance.set_messages(messages_checkpoint)
@@ -715,12 +718,12 @@ class PixiClient:
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return False
-        
+
         environment_id = message.environment_id
         if not self.is_environment_allowed(environment_id):
             self.logger.warning(f"ignoring message in {environment_id} because it's not in an allowed environment.")
             return False
-        
+
         if self.reflection_api.is_bot_mentioned(message) or message.is_inside_dm():
             return True
 
@@ -737,7 +740,7 @@ class PixiClient:
         is_prefixed = message_text.lower().startswith(tuple(["!" + k for k in SUMMON_KEYWORDS]))
 
         return is_prefixed or is_keyword_present
-    
+
     async def __add_reply_metadata(self, instance: AsyncChatbotInstance, metadata: dict, message: AbstractMessage):
         # process reply reference
         reply_message = await message.fetch_reference()
@@ -779,7 +782,7 @@ class PixiClient:
                         "from": asdict(reply_message.author),
                         "message": reply_message_text
                     }
-    
+
     async def on_message(self, message: AbstractMessage):
         if not await self.should_respond(message):
             return
@@ -797,7 +800,7 @@ class PixiClient:
             from_user=asdict(message.author)
         )
         await self.__add_reply_metadata(instance, metadata, message)
-                    
+
         def rearrage_predicate(msg: ChatMessageMeta):
             msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
             current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
@@ -805,7 +808,7 @@ class PixiClient:
             if msg_channel_id is None or current_channel_id is None:
                 return False
             return msg_channel_id == current_channel_id
-        
+
         instance.update_realtime(self.reflection_api.get_realtime_data(message))
         instance.set_rearrange_predicate(rearrage_predicate)
 

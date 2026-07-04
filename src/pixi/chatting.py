@@ -8,10 +8,7 @@ from collections import defaultdict
 from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
                     Generator, Iterator, Optional)
 
-import httpx
-from openai import AsyncOpenAI
-from openai._streaming import AsyncStream
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from .openai import AsyncOpenAI, AsyncStream, ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
 from .model.chatting.callbacks import (ActionContext, ActionFunction,
@@ -401,6 +398,7 @@ class AsyncToolManager:
                 for tool_call in choice.delta.tool_calls or []:
                     function = tool_call.function
                     function_index = tool_call.index
+                    assert function_index
                     function_id = tool_call.id
                     function_name = function.name if function else None
                     function_arguments = function.arguments if function else None
@@ -479,8 +477,6 @@ class AsyncChatClient:
         self.session = AsyncOpenAI(
             api_key=self.auth.api_key,
             base_url=self.auth.base_url,
-            # don't use proxies from environment variables
-            http_client=httpx.AsyncClient(trust_env=False),
         )
 
     def add_tool(self, name: str, function: ToolFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
