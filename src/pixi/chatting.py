@@ -559,7 +559,8 @@ class AsyncChatClient:
         # information about the current channel and holds special metadata
         reference_message = reference_message or self.messages[-1]
         assert reference_message.role in [
-            ChatRole.USER, ChatRole.SYSTEM], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
+            ChatRole.USER, ChatRole.SYSTEM
+        ], f"`reference_message` must be a USER or SYSTEM message, but got a message with the role of \"{reference_message.role}\"."
 
         async def execute_tool_task(function_call):
             self.messages += await self.get_tool_results(
@@ -796,7 +797,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             actions=self.action_manager.get_prompt()
         )
 
-    async def stream_call(self, reference_message: ChatMessageMeta, message: Optional[str] = None,  temporal: bool = False, system_prompt: Optional[str] = None):
+    async def stream_call(self, reference_message: ChatMessageMeta, message: Optional[str] = None, temporal: bool = False, system_prompt: Optional[str] = None):
         if temporal:
             prev_visible_actions_taken = self.action_manager.visible_actions_taken
             orig_messages = self.messages.copy()
