@@ -2,7 +2,7 @@ import json
 import os
 from typing import Optional
 
-from ..model.http import build_url, get_http_client_provider
+from .http import build_url, get_http_client_provider
 
 HTTPClient = get_http_client_provider()
 
