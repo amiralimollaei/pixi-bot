@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
 from ...caching.base import MediaCache
-from ...reflection.message import AbstractMessage
+from ...platform.message import PlatformMessage
 from ...utils import clean_dict
 from ..enums import ChatRole
 
@@ -52,7 +52,7 @@ class ChatMessageMeta:
     # the original message that this message is instantiated from, should be of type
     # discord.Message or telegram.Message, but the type is not specified here to avoid import
     # errors if one library is not found, is used mostly to reply to the original message
-    origin: Optional[AbstractMessage] = None
+    origin: Optional[PlatformMessage] = None
 
     bot: Any = None
 

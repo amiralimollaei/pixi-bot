@@ -8,7 +8,7 @@ from discord import app_commands
 
 from ..caching.base import MediaCache, UnsupportedMediaException
 from ..model.enums import Platform
-from ..reflection import ChannelMeta, GuildMeta
+from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.discord import DiscordMessageImpl
 
 ImageCache = None
@@ -18,7 +18,7 @@ except ImportError:
     pass
 
 
-class DiscordReflectionAPI:
+class DiscordProvider(PlatformProvider):
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -74,7 +74,8 @@ class DiscordReflectionAPI:
             message = DiscordMessageImpl.from_origin(interaction)
             await function(message)
 
-    def get_guild_info(self, message: DiscordMessageImpl) -> dict:
+    def get_guild_info(self, message: PlatformMessage) -> dict:
+        assert isinstance(message, DiscordMessageImpl)
         guild: discord.Guild | None = message.origin.guild
         if guild is None:
             return dict()
@@ -123,7 +124,8 @@ class DiscordReflectionAPI:
             } for m in guild.members]
         }
 
-    def get_thread_info(self, message: DiscordMessageImpl) -> dict:
+    def get_thread_info(self, message: PlatformMessage) -> dict:
+        assert isinstance(message, DiscordMessageImpl)
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin, discord.Interaction):
             return dict()
@@ -149,19 +151,22 @@ class DiscordReflectionAPI:
                 return False
         return True
 
-    def is_message_from_the_bot(self, message: DiscordMessageImpl) -> bool:
+    def is_message_from_the_bot(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, DiscordMessageImpl)
         bot_user = self.bot.user
         assert bot_user is not None, "bot_user is None"
         return message.author.id == bot_user.id
 
-    def is_bot_mentioned(self, message: DiscordMessageImpl) -> bool:
+    def is_bot_mentioned(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, DiscordMessageImpl)
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin, discord.Interaction):
             return False
         bot_user = self.bot.user
         return bot_user is not None and bot_user in origin.mentions
 
-    async def is_dm_or_admin(self, message: DiscordMessageImpl) -> bool:
+    async def is_dm_or_admin(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, DiscordMessageImpl)
         origin: discord.Message | discord.Interaction = message.origin
         if isinstance(origin.channel, discord.DMChannel):
             return True

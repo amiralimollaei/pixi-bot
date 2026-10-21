@@ -1,11 +1,12 @@
 import logging
+from dataclasses import dataclass
 
 import telegram
 from telegram.constants import ChatAction
 from telegram.constants import ChatType as TChatType
 
 from ...caching.base import MediaCache
-from . import (AbstractMessage, ChatType, Platform, ReflectionEnvironment,
+from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
 
 ImageCache = None
@@ -20,7 +21,13 @@ except ImportError:
     pass
 
 
-class TelegramMessageImpl(AbstractMessage):
+@dataclass(frozen=True)
+class TelegramMessageImpl(PlatformMessage):
+    content: str | None
+    author: ReflectionMessageAuthor
+    id: int
+    environment: ReflectionEnvironment
+    platform: Platform
     origin: telegram.Message
 
     @classmethod

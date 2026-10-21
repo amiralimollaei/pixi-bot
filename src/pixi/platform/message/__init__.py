@@ -1,6 +1,5 @@
 import dataclasses
-from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol
 
 from ...caching.base import MediaCache
 from ...model.enums import ChatType, Platform
@@ -24,8 +23,11 @@ class ReflectionEnvironment:
     is_forum: bool
 
 
-@dataclasses.dataclass(frozen=True)
-class AbstractMessage(ABC):
+class PlatformMessage(Protocol):
+    """Platform-neutral message contract with shared chat metadata helpers.
+
+    Concrete messages own their storage and wrap the platform SDK's origin.
+    """
     content: str | None
     author: ReflectionMessageAuthor
     id: int
@@ -36,26 +38,25 @@ class AbstractMessage(ABC):
     origin: Any
 
     @classmethod
-    @abstractmethod
-    def from_origin(cls, message) -> 'AbstractMessage': ...
-    @abstractmethod
-    async def send(self, content: str) -> 'AbstractMessage': ...
-    @abstractmethod
-    async def edit(self, content: str) -> 'AbstractMessage | None': ...
-    @abstractmethod
-    async def delete(self): ...
-    @abstractmethod
-    async def typing(self): ...
-    @abstractmethod
+    def from_origin(cls, message) -> 'PlatformMessage': ...
+
+    async def send(self, content: str) -> 'PlatformMessage': ...
+
+    async def edit(self, content: str) -> 'PlatformMessage | None': ...
+
+    async def delete(self) -> None: ...
+
+    async def typing(self) -> None: ...
+
     async def fetch_images(self) -> list[MediaCache]: ...
-    @abstractmethod
+
     async def fetch_audio(self) -> list[MediaCache]: ...
-    @abstractmethod
-    async def fetch_reference(self) -> 'AbstractMessage | None': ...
-    @abstractmethod
-    async def add_reaction(self, emoji: str): ...
-    @abstractmethod
-    async def send_file(self, filepath: str, filename: str, caption: str | None = None): ...
+
+    async def fetch_reference(self) -> 'PlatformMessage | None': ...
+
+    async def add_reaction(self, emoji: str) -> None: ...
+
+    async def send_file(self, filepath: str, filename: str, caption: str | None = None) -> None: ...
 
     @property
     def environment_id(self) -> str:

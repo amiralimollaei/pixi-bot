@@ -1,9 +1,10 @@
 import logging
+from dataclasses import dataclass
 
 import discord
 
 from ...caching.base import MediaCache
-from . import (AbstractMessage, ChatType, Platform, ReflectionEnvironment,
+from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
 
 ImageCache = None
@@ -18,7 +19,13 @@ except ImportError:
     pass
 
 
-class DiscordMessageImpl(AbstractMessage):
+@dataclass(frozen=True)
+class DiscordMessageImpl(PlatformMessage):
+    content: str | None
+    author: ReflectionMessageAuthor
+    id: int
+    environment: ReflectionEnvironment
+    platform: Platform
     origin: discord.Message | discord.Interaction
 
     @classmethod

@@ -17,7 +17,7 @@ from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            OpenAILanguageModelConfig, PixiFeatures)
 from .model.enums import ChatRole, Platform
 from .model.storage.message import ChatMessageMeta
-from .reflection import AbstractMessage, ReflectionAPI
+from .platform import PlatformMessage, PlatformProvider, get_platform_provider
 from .utils import format_time_later
 
 # constants
@@ -84,7 +84,7 @@ class PixiClient:
 
         ChatbotInstanceRegistry.init(hash_prefix=platform, bot=self)
 
-        self.reflection_api = ReflectionAPI(platform=platform)
+        self.reflection_api: PlatformProvider = get_platform_provider(platform)()
 
         self.gif_api = None
         if PixiFeatures.GIFSearch in features:
@@ -206,7 +206,7 @@ class PixiClient:
         return agent_cls(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
-        async def checked_function(message: AbstractMessage):
+        async def checked_function(message: PlatformMessage):
             environment_id = message.environment_id
             if not self.is_environment_allowed(environment_id):
                 self.logger.warning(
@@ -216,7 +216,7 @@ class PixiClient:
             await function(message)
         self.reflection_api.register_slash_command(name, checked_function, description)
 
-    async def typing_delay(self, message: AbstractMessage, delay: float):
+    async def typing_delay(self, message: PlatformMessage, delay: float):
         delay_served = 0.0
         while delay_served < delay:
             await message.typing()
@@ -278,7 +278,7 @@ class PixiClient:
             if not value or ctx.reference_message is None:
                 return
             assert ctx.reference_message.origin is not None
-            message: AbstractMessage = ctx.reference_message.origin
+            message: PlatformMessage = ctx.reference_message.origin
 
             schedule_id = value.strip()
             if not schedule_id:
@@ -301,7 +301,7 @@ class PixiClient:
             if not value or ctx.reference_message is None:
                 return
             assert ctx.reference_message.origin is not None
-            message: AbstractMessage = ctx.reference_message.origin
+            message: PlatformMessage = ctx.reference_message.origin
 
             # wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
             # await self.typing_delay(message, wait_time)
@@ -318,7 +318,7 @@ class PixiClient:
                 if not value or ctx.reference_message is None:
                     return
                 assert ctx.reference_message.origin is not None
-                message: AbstractMessage = ctx.reference_message.origin
+                message: PlatformMessage = ctx.reference_message.origin
 
                 assert self.gif_api is not None
                 resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
@@ -343,7 +343,7 @@ class PixiClient:
             if not value or ctx.reference_message is None:
                 return
             assert ctx.reference_message.origin is not None
-            message: AbstractMessage = ctx.reference_message.origin
+            message: PlatformMessage = ctx.reference_message.origin
 
             if ctx.parent_instance and ctx.parent_instance.is_notes_visible:
                 await message.send(f"> thoughts: {value}")
@@ -360,7 +360,7 @@ class PixiClient:
             if not value or ctx.reference_message is None:
                 return
             assert ctx.reference_message.origin is not None
-            message: AbstractMessage = ctx.reference_message.origin
+            message: PlatformMessage = ctx.reference_message.origin
 
             try:
                 await message.add_reaction(value)
@@ -571,7 +571,7 @@ class PixiClient:
         )
 
     def __register_builtin_slash_commands(self):
-        async def notes_slash_command(message: AbstractMessage):
+        async def notes_slash_command(message: PlatformMessage):
             if not await self.reflection_api.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
@@ -584,7 +584,7 @@ class PixiClient:
                 self.logger.exception(f"Failed to toggle notes")
                 await message.send("Failed to toggle notes.")
 
-        async def reset_slash_command(message: AbstractMessage):
+        async def reset_slash_command(message: PlatformMessage):
             if not await self.reflection_api.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
@@ -604,7 +604,7 @@ class PixiClient:
             # for some reason event handlers in telegram are order dependent, meaning we should
             # run register_on_message_event after all slash commands are registered or else the
             # slash commands will not work.
-            async def start_command(message: AbstractMessage):
+            async def start_command(message: PlatformMessage):
                 await message.send("Hiiiii, how's it going?")
 
             self.register_slash_command(name="start", function=start_command)
@@ -643,7 +643,7 @@ class PixiClient:
 
     async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessageMeta):
         assert reference_message.origin
-        message: AbstractMessage = reference_message.origin
+        message: PlatformMessage = reference_message.origin
 
         channel_id = message.environment.chat_id
 
@@ -714,7 +714,7 @@ class PixiClient:
         """
         return self.environment_filter.is_allowed(identifier)
 
-    async def should_respond(self, message: AbstractMessage) -> bool:
+    async def should_respond(self, message: PlatformMessage) -> bool:
         # we should not process our own messages again
         if self.reflection_api.is_message_from_the_bot(message):
             return False
@@ -741,7 +741,7 @@ class PixiClient:
 
         return is_prefixed or is_keyword_present
 
-    async def __add_reply_metadata(self, instance: AsyncChatbotInstance, metadata: dict, message: AbstractMessage):
+    async def __add_reply_metadata(self, instance: AsyncChatbotInstance, metadata: dict, message: PlatformMessage):
         # process reply reference
         reply_message = await message.fetch_reference()
         if reply_message is not None and reply_message.content is not None:
@@ -783,7 +783,7 @@ class PixiClient:
                         "message": reply_message_text
                     }
 
-    async def on_message(self, message: AbstractMessage):
+    async def on_message(self, message: PlatformMessage):
         if not await self.should_respond(message):
             return
 

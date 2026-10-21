@@ -9,7 +9,7 @@ from .chatting import AsyncChatbotInstance
 from .model.config.news import NewsConfig
 from .model.enums import ChatRole
 from .model.storage.message import ChatMessageMeta
-from .reflection import ReflectionAPI
+from .platform import PlatformProvider
 from .storage.paths import open_resource
 
 
@@ -22,7 +22,7 @@ class NewsBackgroundTask:
     def __init__(
         self,
         news_config: NewsConfig,
-        reflection_api: ReflectionAPI,
+        reflection_api: PlatformProvider,
         instance: AsyncChatbotInstance,
     ):
         self.logger = logging.getLogger(f"{self.__class__.__name__}[{instance.id}]")

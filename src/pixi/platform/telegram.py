@@ -10,7 +10,7 @@ from telegram.ext import (Application, CommandHandler, ContextTypes,
 
 from ..caching.base import MediaCache, UnsupportedMediaException
 from ..model.enums import Messages, Platform
-from ..reflection import ChannelMeta, GuildMeta
+from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.telegram import TelegramMessageImpl
 
 ImageCache = None
@@ -20,7 +20,7 @@ except ImportError:
     pass
 
 
-class TelegramReflectionAPI:
+class TelegramProvider(PlatformProvider):
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -106,27 +106,30 @@ class TelegramReflectionAPI:
                     return function(message)
         self.application.add_handler(CommandHandler(name, slash_command))
 
-    def get_guild_info(self, message: TelegramMessageImpl) -> dict:
+    def get_guild_info(self, message: PlatformMessage) -> dict:
         return dict()
 
-    def get_thread_info(self, message: TelegramMessageImpl) -> dict:
+    def get_thread_info(self, message: PlatformMessage) -> dict:
         return dict()
 
-    def can_read_history(self, channel) -> bool:
+    def can_read_history(self, chat_id: int) -> bool:
         return True
 
-    def is_message_from_the_bot(self, message: TelegramMessageImpl) -> bool:
+    def is_message_from_the_bot(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, TelegramMessageImpl)
         origin: telegram.Message = message.origin
         assert origin.from_user is not None, "from_user is None"
         return origin.get_bot().id == origin.from_user.id
 
-    def is_bot_mentioned(self, message: TelegramMessageImpl):
+    def is_bot_mentioned(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, TelegramMessageImpl)
         reply_message = message.origin.reply_to_message
         if reply_message is not None and reply_message.from_user is not None and self.application.bot.id == reply_message.from_user.id:
             return True
         return message.content is not None and f"@{self.application.bot.username}" in message.content
 
-    async def is_dm_or_admin(self, message: TelegramMessageImpl) -> bool:
+    async def is_dm_or_admin(self, message: PlatformMessage) -> bool:
+        assert isinstance(message, TelegramMessageImpl)
         if message.environment.chat_type == ChatType.PRIVATE:
             return True
         # Check if user has admin permissions to use the bot commands
