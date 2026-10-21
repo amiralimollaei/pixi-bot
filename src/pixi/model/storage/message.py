@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
-from ...caching.base import MediaCache
+from ...caching import MediaCache, get_caching_provider
 from ...platform.message import PlatformMessage
 from ...utils import clean_dict
 from ..enums import ChatRole
@@ -74,13 +74,11 @@ class ChatMessageMeta:
     @classmethod
     def from_dict(cls, data: dict) -> 'ChatMessageMeta':
         images = []
-        if images_cache := data.get("images", []):
-            from ...caching import ImageCache
-            images = [ImageCache.from_dict(d) for d in images_cache]
         audio = []
-        if audio_cache := data.get("audio", []):
-            from ...caching import AudioCache
-            audio = [AudioCache.from_dict(d) for d in audio_cache]
+        if data.get("images") or data.get("audio"):
+            provider = get_caching_provider()()
+            images = [provider.load_image(d) for d in data.get("images") or []]
+            audio = [provider.load_audio(d) for d in data.get("audio") or []]
         return cls(
             role=ChatRole[data["role"].upper()],
             content=data.get("content"),

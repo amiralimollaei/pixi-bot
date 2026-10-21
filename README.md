@@ -24,7 +24,8 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - zstandard
 - discord-py (optional, for discord platform)
 - python-telegram-bot  (optional, for telegram platform)
-- av (optional, for media caching)
+- ffmpeg (on `PATH`, for default media caching)
+- av (legacy fallback for when ffmpeg is not available)
 - uv (recommended, for setting up all the requirements easily in a python virtual environemnt)
 
 ## Getting Started
@@ -33,7 +34,7 @@ There are many extra optional dependecy groups that you may need to install base
 
 | extra dependecy group | packages | description | status |
 |---|---|---|:---:|
-| media | av | installs PyAV and enables media caching and processing features | optional |
+| media | av | installs the optional PyAV compatibility backend; default caching uses the system FFmpeg executable | optional |
 | discord | discord-py | installs discord.py and enables discord bot functionality | optional\* |
 | telegram | python-telegram-bot | installs python-telegram-bot and enables telegram bot functionality | optional\* |
 

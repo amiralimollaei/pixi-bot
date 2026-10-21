@@ -3,15 +3,16 @@ from typing import Optional
 
 import av
 
-from ..storage.paths import PixiPaths
-from .base import CompressedMedia, MediaCache
+from ....storage.paths import PixiPaths
+from ... import CompressedMedia, DiskMediaCache
+
 
 # constants
 
 THUMBNAIL_SIZE = 512
 
 
-class ImageCache(MediaCache):
+class ImageCache(DiskMediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None):
         super().__init__(
             str(PixiPaths.cache() / "images"),

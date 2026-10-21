@@ -5,20 +5,9 @@ import telegram
 from telegram.constants import ChatAction
 from telegram.constants import ChatType as TChatType
 
-from ...caching.base import MediaCache
+from ...caching import MediaCache, get_caching_provider
 from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
-
-ImageCache = None
-AudioCache = None
-try:
-    from ...caching import ImageCache
-except ImportError:
-    pass
-try:
-    from ...caching import AudioCache
-except ImportError:
-    pass
 
 
 @dataclass(frozen=True)
@@ -98,8 +87,8 @@ class TelegramMessageImpl(PlatformMessage):
             file = await origin.document.get_file()
             image_bytes = await file.download_as_bytearray()
         if image_bytes:
-            assert ImageCache
-            attachments.append(ImageCache(bytes(image_bytes)))
+            provider = get_caching_provider()()
+            attachments.append(provider.cache_image(bytes(image_bytes)))
         return attachments
 
     async def fetch_audio(self) -> list[MediaCache]:
@@ -127,8 +116,8 @@ class TelegramMessageImpl(PlatformMessage):
             file = await origin.document.get_file()
             audio_bytes = await file.download_as_bytearray()
         if audio_bytes:
-            assert AudioCache
-            attachments.append(AudioCache(bytes(audio_bytes)))
+            provider = get_caching_provider()()
+            attachments.append(provider.cache_audio(bytes(audio_bytes)))
         return attachments
 
     async def fetch_reference(self) -> 'TelegramMessageImpl | None':

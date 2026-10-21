@@ -6,7 +6,7 @@ from typing import Any, Callable, Coroutine, Optional
 
 from .addon import AddonManager
 from .agents import AgentBase, RetrievalAgent
-from .caching import SUPPORTS_MEDIA_CACHING
+from .caching import get_caching_provider
 from .chatting import (ActionContext, AsyncChatbotInstance,
                        ChatbotInstanceRegistry)
 from .model.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
@@ -77,10 +77,13 @@ class PixiClient:
 
         self.accept_images = PixiFeatures.ImageSupport in features
         self.accept_audio = PixiFeatures.AudioSupport in features
-        if (self.accept_images or self.accept_audio) and not SUPPORTS_MEDIA_CACHING:
-            self.logger.warning("tried to accept audio/images, but media caching features are not available")
-            self.accept_images = False
-            self.accept_audio = False
+        if self.accept_images or self.accept_audio:
+            try:
+                get_caching_provider()
+            except RuntimeError as error:
+                self.logger.warning("%s Disabling image/audio support.", error)
+                self.accept_images = False
+                self.accept_audio = False
 
         ChatbotInstanceRegistry.init(hash_prefix=platform, bot=self)
 

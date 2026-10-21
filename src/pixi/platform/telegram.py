@@ -8,16 +8,10 @@ from telegram.constants import ChatMemberStatus, ChatType
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
-from ..caching.base import MediaCache, UnsupportedMediaException
+from ..caching import MediaCache, get_caching_provider
 from ..model.enums import Messages, Platform
 from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.telegram import TelegramMessageImpl
-
-ImageCache = None
-try:
-    from ..caching import ImageCache
-except ImportError:
-    pass
 
 
 class TelegramProvider(PlatformProvider):
@@ -163,9 +157,8 @@ class TelegramProvider(PlatformProvider):
             file = await self.application.bot.get_user_profile_photos(user_id)
             if file.photos:
                 photo = file.photos[0][-1]  # Get the highest resolution photo
-                assert ImageCache
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
-                return ImageCache(bytes(image_bytes))
+                return get_caching_provider()().cache_image(bytes(image_bytes))
         except telegram.error.BadRequest as e:
             self.logger.error(f"Failed to fetch user avatar: {e}")
             return None

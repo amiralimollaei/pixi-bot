@@ -3,20 +3,9 @@ from dataclasses import dataclass
 
 import discord
 
-from ...caching.base import MediaCache
+from ...caching import MediaCache, get_caching_provider
 from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
-
-ImageCache = None
-AudioCache = None
-try:
-    from ...caching import ImageCache
-except ImportError:
-    pass
-try:
-    from ...caching import AudioCache
-except ImportError:
-    pass
 
 
 @dataclass(frozen=True)
@@ -111,10 +100,12 @@ class DiscordMessageImpl(PlatformMessage):
 
         supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
+        provider = None
         for attachment in self.origin.attachments:
             if attachment.content_type in supported_mime_types:
-                assert ImageCache
-                attachments.append(ImageCache(await attachment.read()))
+                if provider is None:
+                    provider = get_caching_provider()()
+                attachments.append(provider.cache_image(await attachment.read()))
         return attachments
 
     async def fetch_audio(self) -> list[MediaCache]:
@@ -124,13 +115,15 @@ class DiscordMessageImpl(PlatformMessage):
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
         supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []
+        provider = None
         for attachment in self.origin.attachments:
             mime = attachment.content_type
             ext = attachment.filename.lower().rsplit('.', 1)[-1] if '.' in attachment.filename else ''
             ext = f'.{ext}'
             if (mime and mime in supported_mime_types) or (ext in supported_extensions):
-                assert AudioCache
-                attachments.append(AudioCache(await attachment.read()))
+                if provider is None:
+                    provider = get_caching_provider()()
+                attachments.append(provider.cache_audio(await attachment.read()))
         return attachments
 
     async def fetch_reference(self) -> 'DiscordMessageImpl | None':

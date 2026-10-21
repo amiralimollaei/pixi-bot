@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Any, Protocol
 
-from ...caching.base import MediaCache
+from ...caching import MediaCache
 from ...model.enums import ChatType, Platform
 
 

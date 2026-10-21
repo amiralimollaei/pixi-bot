@@ -3,8 +3,8 @@ from typing import Optional
 
 import av
 
-from ..storage.paths import PixiPaths
-from .base import CompressedMedia, MediaCache, UnsupportedMediaException
+from ....storage.paths import PixiPaths
+from ... import CompressedMedia, DiskMediaCache, UnsupportedMediaException
 
 # constants
 
@@ -13,7 +13,7 @@ CACHE_BITRATE = 32000
 CACHE_MAX_DURATION = 30
 
 
-class AudioCache(MediaCache):
+class AudioCache(DiskMediaCache):
     def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None, strict: bool = False):
         self.strict = strict
         super().__init__(

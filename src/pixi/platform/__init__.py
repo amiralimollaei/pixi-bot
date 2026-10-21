@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
-from ..caching.base import MediaCache
+from ..caching import MediaCache
 from ..model.enums import Platform
 from .message import PlatformMessage
 

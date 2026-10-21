@@ -49,21 +49,15 @@ class ChatMessageUtils:
 
     @staticmethod
     def validate_params(meta: ChatMessageMeta):
-        if meta.images:
-            # image cache might not be an installed feature, so we import it only when we need to use it
-            from .caching import ImageCache
+        for image in meta.images or []:
+            assert image.get_mime_type().startswith("image/"), (
+                f"expected an image cache, but got {image.get_mime_type()}."
+            )
 
-            for image in meta.images:
-                assert isinstance(
-                    image, ImageCache), f"expected image to be an instance of ImageCache, but got {image}."
-
-        if meta.audio:
-            # audio cache might not be an installed feature, so we import it only when we need to use it
-            from .caching import AudioCache
-
-            for audio in meta.audio:
-                assert isinstance(
-                    audio, AudioCache), f"expected audio to be an instance of AudioCache, but got {audio}."
+        for audio in meta.audio or []:
+            assert audio.get_mime_type().startswith("audio/"), (
+                f"expected an audio cache, but got {audio.get_mime_type()}."
+            )
 
         # validating each role's requirements
 

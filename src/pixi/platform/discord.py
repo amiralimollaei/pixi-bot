@@ -6,16 +6,10 @@ from typing import IO, Any, Callable
 import discord
 from discord import app_commands
 
-from ..caching.base import MediaCache, UnsupportedMediaException
+from ..caching import MediaCache, UnsupportedMediaException, get_caching_provider
 from ..model.enums import Platform
 from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.discord import DiscordMessageImpl
-
-ImageCache = None
-try:
-    from ..caching import ImageCache
-except ImportError:
-    pass
 
 
 class DiscordProvider(PlatformProvider):
@@ -205,15 +199,14 @@ class DiscordProvider(PlatformProvider):
 
     async def get_user_avatar(self, user_id: int) -> MediaCache | None:
         """
-        Fetches the avatar of a user and returns it as an ImageCache object.
+        Fetches the avatar of a user and returns it as a media cache object.
         """
         try:
             user = await self.bot.fetch_user(user_id)
             if user is None or user.avatar is None:
                 raise UnsupportedMediaException("User avatar not found or has an unsupported media type.")
-            assert ImageCache
             avatar_bytes = await user.avatar.read()
-            return ImageCache(avatar_bytes)
+            return get_caching_provider()().cache_image(avatar_bytes)
         except discord.NotFound:
             self.logger.error(f"User with ID {user_id} not found.")
             return None
