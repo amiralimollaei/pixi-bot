@@ -398,7 +398,7 @@ class AsyncToolManager:
                 for tool_call in choice.delta.tool_calls or []:
                     function = tool_call.function
                     function_index = tool_call.index
-                    assert function_index
+                    assert function_index is not None, f"Tool call index is None for tool call {tool_call}"
                     function_id = tool_call.id
                     function_name = function.name if function else None
                     function_arguments = function.arguments if function else None
@@ -416,8 +416,8 @@ class AsyncToolManager:
                     else:
                         if self.verbose:
                             print(f"Tool Call: {function_name}", end="")
-                        assert function_name
-                        assert function_id
+                        assert function_name is not None, f"Tool call name is None for tool call {tool_call}"
+                        assert function_id is not None, f"Tool call id is None for tool call {tool_call}"
                         partial_tool_calls[function_index] = PartialToolCallMeta(
                             name=function_name,
                             arguments=function_arguments,

@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, AsyncIterator, Generic, Optional, TypeVar
 
-import aiohttp
+from ..model.http import get_http_client_provider
+
+HTTPClient = get_http_client_provider()  # type: ignore[reportUnknownVariableType]
 
 
 # ============================================================================
@@ -124,22 +126,21 @@ async def _stream_chat_completions(
     api_key: str,
     payload: dict[str, Any],
 ) -> AsyncIterator[ChatCompletionChunk]:
-    url = f"{base_url.rstrip('/')}/chat/completions"
     headers = _build_headers(api_key)
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers) as response:
+        async with HTTPClient(base_url.rstrip('/')) as session:
+            async with session.post("/chat/completions", json=payload, headers=headers) as response:
                 if response.status != 200:
                     text = await response.text()
                     _handle_response_error(response.status, text)
 
-                buffer = ""
+                buffer = b""
                 async for chunk in response.content:
-                    buffer += chunk.decode("utf-8")
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.strip()
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        line = line.decode("utf-8").strip()
                         if line.startswith("data: "):
                             data = line[6:].strip()
                             if data == "[DONE]":
@@ -199,7 +200,7 @@ async def _stream_chat_completions(
                                     f"Failed to parse SSE data: {data}"
                                 )
                                 continue
-    except aiohttp.ClientError as e:
+    except ConnectionError as e:
         raise APIConnectionError(f"Connection error: {e}") from e
 
 
@@ -218,13 +219,12 @@ async def _create_embeddings(
     api_key: str,
     payload: dict[str, Any],
 ) -> EmbeddingResponse:
-    url = f"{base_url.rstrip('/')}/embeddings"
     headers = _build_headers(api_key)
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with HTTPClient(base_url) as session:
             async with session.post(
-                url, json=payload, headers=headers
+                "/embeddings", json=payload, headers=headers
             ) as response:
                 if response.status != 200:
                     text = await response.text()
@@ -236,7 +236,7 @@ async def _create_embeddings(
                         for item in data.get("data", [])
                     ]
                 )
-    except aiohttp.ClientError as e:
+    except ConnectionError as e:
         raise APIConnectionError(f"Connection error: {e}") from e
 
 
@@ -330,19 +330,17 @@ class Models:
         self._client = client
 
     def list(self, **kwargs: Any) -> ModelList:
-        url = f"{self._client.base_url.rstrip('/')}/models"
         headers = _build_headers(self._client.api_key)
 
         async def _do() -> ModelList:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as response:
+            async with HTTPClient(self._client.base_url) as session:
+                async with session.get("/models", headers=headers) as response:
                     if response.status != 200:
                         text = await response.text()
                         _handle_response_error(response.status, text)
                     data = await response.json()
                     return ModelList(data.get("data", []))
 
-        client = self._client
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():

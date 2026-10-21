@@ -25,6 +25,7 @@ class TelegramReflectionAPI:
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.platform = Platform.TELEGRAM
+        self._ready = asyncio.Event()
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
         if self.token is None:
@@ -42,17 +43,34 @@ class TelegramReflectionAPI:
         """Start the Telegram bot asynchronously."""
         await self.application.initialize()
         await self.application.start()
-        await self.application.updater.start_polling()  # pyright: ignore[reportOptionalMemberAccess]
+
+        updater = self.application.updater
+        assert updater is not None
+        await updater.start_polling()
+
+        # TODO: here we just assume that the bot is ready after starting the updater, 
+        # but we should ideally check if the bot is actually connected and ready to receive messages.
+        self._ready.set()
+        await asyncio.Future()  # Remain alive until cancelled.
 
     async def close_async(self):
         """Close the Telegram bot asynchronously."""
+        self._ready.clear()
+
+        updater = self.application.updater
+        if updater is not None and updater.running:
+            await updater.stop()
+
+        if self.application.running:
+            await self.application.stop()
+
         await self.application.shutdown()
 
     
     async def wait_until_ready(self):
         """Wait until the bot is fully connected and ready."""
         if self.application.bot:
-            await self.application.bot.wait_until_ready()  # pyright: ignore[reportAttributeAccessIssue]
+            await self._ready.wait()
 
     def run(self):
         """Run the Telegram bot (blocking)."""
