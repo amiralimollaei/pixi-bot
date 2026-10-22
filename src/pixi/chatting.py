@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
                     Generator, Iterator, Optional)
 
@@ -768,6 +769,8 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.realtime_data = dict()
         self.is_notes_visible = False
         self.actions_since_last_message = 0
+        self.last_used_at = time.monotonic()
+        self._active_users = 0
 
         if not self.messages:
             self.add_message(ChatMessageMeta(
@@ -807,6 +810,29 @@ class AsyncChatbotInstance(AsyncChatClient):
                 description=action.description
             )
 
+    @contextmanager
+    def use(self):
+        """Keep this instance resident until the current operation finishes."""
+        self._active_users += 1
+        try:
+            yield self
+        finally:
+            self._active_users -= 1
+            self.last_used_at = time.monotonic()
+
+    @property
+    def is_busy(self) -> bool:
+        return (
+            self._active_users > 0
+            or self.scheduler.pending_count > 0
+            or self.news_task is not None
+            or any(
+                not task.done()
+                for tasks in self.channel_active_tasks.values()
+                for task in tasks
+            )
+        )
+
     @staticmethod
     def get_save_path(id: str, hash_prefix: str):
         uuid_hash = hashlib.sha256(f"{hash_prefix}_{id}".encode("utf-8")).hexdigest()
@@ -814,8 +840,12 @@ class AsyncChatbotInstance(AsyncChatClient):
         return path
 
     def schedule(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]) -> bool:
-        """Convenience wrapper for self.scheduler.schedule."""
-        return self.scheduler.schedule(id, delay, callback)
+        """Schedule a callback while protecting its execution from eviction."""
+        async def run_callback():
+            with self.use():
+                await callback()
+
+        return self.scheduler.schedule(id=id, delay=delay, callback=run_callback)
 
     def schedule_action(self, action: str, action_context: ActionContext, id: str, delay: float):
         async def execute_scheduled():
@@ -823,7 +853,7 @@ class AsyncChatbotInstance(AsyncChatClient):
                 action,
                 action_context=action_context
             )
-        return self.scheduler.schedule(id=id, delay=delay, callback=execute_scheduled)
+        return self.schedule(id=id, delay=delay, callback=execute_scheduled)
 
     def cancel_schedule(self, id: str) -> bool:
         """Convenience wrapper for self.scheduler.cancel."""
@@ -844,6 +874,7 @@ class AsyncChatbotInstance(AsyncChatClient):
         if message is a string, tries to determine the role of the message based on the last message recieved.
         """
         self.actions_since_last_message = 0
+        self.last_used_at = time.monotonic()
         if isinstance(message, str):
             message = ChatMessageMeta(default_role, message, bot=self.bot)
 
@@ -876,24 +907,25 @@ class AsyncChatbotInstance(AsyncChatClient):
         )
 
     async def stream_call(self, reference_message: ChatMessageMeta, message: Optional[str] = None, temporal: bool = False, system_prompt: Optional[str] = None):
-        if temporal:
-            prev_visible_actions_taken = self.action_manager.visible_actions_taken
-            orig_messages = self.messages.copy()
+        with self.use():
+            if temporal:
+                prev_visible_actions_taken = self.action_manager.visible_actions_taken
+                orig_messages = self.messages.copy()
 
-        if message:
-            self.add_message(message)
+            if message:
+                self.add_message(message)
 
-        non_response = "".join([char async for char in self.action_manager.consume(
-            stream=self.stream_completion(temporal=temporal, system_prompt=system_prompt),
-            action_context=ActionContext(
-                reference_message=reference_message,
-                parent_instance=self
-            )
-        )])
-        if temporal:
-            self.action_manager.visible_actions_taken = prev_visible_actions_taken # pyright: ignore[reportPossiblyUnboundVariable]
-            self.messages = orig_messages  # pyright: ignore[reportPossiblyUnboundVariable]
-        return non_response.strip() or None
+            non_response = "".join([char async for char in self.action_manager.consume(
+                stream=self.stream_completion(temporal=temporal, system_prompt=system_prompt),
+                action_context=ActionContext(
+                    reference_message=reference_message,
+                    parent_instance=self
+                )
+            )])
+            if temporal:
+                self.action_manager.visible_actions_taken = prev_visible_actions_taken # pyright: ignore[reportPossiblyUnboundVariable]
+                self.messages = orig_messages  # pyright: ignore[reportPossiblyUnboundVariable]
+            return non_response.strip() or None
 
     async def concurrent_channel_stream_call(self, channel_id: str, reference_message: ChatMessageMeta):
         assert channel_id, "channel_id is None"
@@ -959,6 +991,7 @@ class AsyncChatbotInstance(AsyncChatClient):
             uuid=self.id,
             prefix=self.prefix,
             messages=[msg.to_dict() for msg in self.messages],
+            is_notes_visible=self.is_notes_visible,
         )
 
     def save(self):
@@ -974,7 +1007,8 @@ class AsyncChatbotInstance(AsyncChatClient):
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.hash_prefix = data.get("prefix")
-            self.messages = [ChatMessageMeta.from_dict(d) for d in data.get("messages", [])]
+            self.messages[:] = [ChatMessageMeta.from_dict(d) for d in data.get("messages", [])]
+            self.is_notes_visible = data.get("is_notes_visible", False)
         except json.decoder.JSONDecodeError:
             self.logger.warning(f"Unable to load the instance save file `{self.path}`, using default values.")
         except FileNotFoundError:
@@ -1032,12 +1066,34 @@ class ChatbotInstanceRegistry:
     @staticmethod
     def get(identifier: str, or_create: bool = True, **kwargs) -> AsyncChatbotInstance | None:
         if instance := ChatbotInstanceRegistry.instances.get(identifier):
+            instance.last_used_at = time.monotonic()
             return instance
         if or_create:
             instance = ChatbotInstanceRegistry.new_instance(identifier, **kwargs)
             instance.load(not_found_ok=True)
             ChatbotInstanceRegistry.logger.info(f"created new chatbot instance {instance.id=}.")
             return instance
+
+    @staticmethod
+    def evict_idle(idle_timeout: float) -> int:
+        """Save and unload idle instances without deleting their saved history."""
+        now = time.monotonic()
+        evicted = 0
+        for identifier in list(ChatbotInstanceRegistry.instances):
+            instance = ChatbotInstanceRegistry.instances[identifier]
+            if instance.is_busy or now - instance.last_used_at < idle_timeout:
+                continue
+            try:
+                instance.save()
+            except Exception:
+                ChatbotInstanceRegistry.logger.exception(
+                    "Failed to save idle instance %s; keeping it loaded.", identifier
+                )
+                continue
+            del ChatbotInstanceRegistry.instances[identifier]
+            evicted += 1
+            ChatbotInstanceRegistry.logger.info("Unloaded idle chatbot instance %s.", identifier)
+        return evicted
 
     @staticmethod
     def remove(identifier: str):

@@ -56,22 +56,24 @@ class NewsBackgroundTask:
         return self._task is not None and not self._task.done()
 
     async def _run(self):
-        interval_seconds = self.news_config.interval_sec
-        while True:
-            try:
-                await asyncio.sleep(interval_seconds)
+        with self.instance.use():
+            interval_seconds = self.news_config.interval_sec
+            while True:
+                try:
+                    await asyncio.sleep(interval_seconds)
 
-                # Probability check
-                if random.random() >= self.news_config.probability:
-                    self.logger.debug("Probability check missed, skipping this cycle.")
-                    continue
+                    # Probability check
+                    if random.random() >= self.news_config.probability:
+                        self.logger.debug("Probability check missed, skipping this cycle.")
+                        continue
 
-                await self._execute_news_cycle()
+                    await self._execute_news_cycle()
 
-            except asyncio.CancelledError:
-                self.logger.info("News background task cancelled during sleep.")
-            except Exception:
-                self.logger.exception("Unexpected error in news background task.")
+                except asyncio.CancelledError:
+                    self.logger.info("News background task cancelled.")
+                    raise
+                except Exception:
+                    self.logger.exception("Unexpected error in news background task.")
 
     async def _execute_news_cycle(self):
         """Fetch news, generate a message, pick a channel, and send it."""

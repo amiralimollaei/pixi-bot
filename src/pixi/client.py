@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Coroutine, Optional
 
@@ -49,9 +50,12 @@ class PixiClient:
         wikis: list[MediaWikiConfig] = [],
         environment_filter: IdFilter = IdFilter.allow(),
         news_config: Optional[NewsConfig] = None,
+        instance_idle_timeout: float = 900.0,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info(f"Initalizing Pixi with feature set {features} and platform {platform}...")
+        if not math.isfinite(instance_idle_timeout) or instance_idle_timeout <= 0:
+            raise ValueError("instance_idle_timeout must be a positive finite number of seconds.")
 
         self.platform = platform
 
@@ -61,14 +65,16 @@ class PixiClient:
         self.embedding_model = embedding_model
         self.features = features
         self.news_config = news_config
+        self.instance_idle_timeout = instance_idle_timeout
         self.pre_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
         self.post_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
 
         # Verify models and API connectivity at startup
         self.register_pre_startup_hook(self.verify_models)
 
-        # Pre-Load all the instances after startup
-        self.register_post_startup_hook(self.preload_instances)
+        # Proactive news needs its guild instances even before the first message.
+        if PixiFeatures.NewsProactive in features and news_config is not None:
+            self.register_post_startup_hook(self._start_news_instances)
 
         self.enable_tool_calls = PixiFeatures.ToolCalling in features
         self.log_tool_calls = PixiFeatures.ToolLogging in features
@@ -124,12 +130,17 @@ class PixiClient:
 
         self.logger.info(f"Pixi finished initalizing!")
 
-    async def preload_instances(self):
-        self.logger.info("Pre-Loading all guilds instances...")
+    async def _start_news_instances(self):
+        self.logger.info("Starting proactive news for available guilds...")
         for guild in await self.reflection_api.get_available_guilds():
             instance_id = f"forum#{guild.id}"
             self.logger.info(f" - \"{guild.name}\" (members: {guild.member_count})")
             self.get_chatbot_instance(instance_id)
+
+    async def _evict_idle_instances(self):
+        while True:
+            await asyncio.sleep(min(60.0, self.instance_idle_timeout))
+            ChatbotInstanceRegistry.evict_idle(self.instance_idle_timeout)
 
     async def verify_models(self):
         """
@@ -799,36 +810,37 @@ class PixiClient:
 
         instance = self.get_chatbot_instance(environment_id)
 
-        metadata = dict(
-            from_user=asdict(message.author)
-        )
-        await self.__add_reply_metadata(instance, metadata, message)
+        with instance.use():
+            metadata = dict(
+                from_user=asdict(message.author)
+            )
+            await self.__add_reply_metadata(instance, metadata, message)
 
-        def rearrage_predicate(msg: ChatMessageMeta):
-            msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
-            current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
+            def rearrage_predicate(msg: ChatMessageMeta):
+                msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
+                current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
 
-            if msg_channel_id is None or current_channel_id is None:
-                return False
-            return msg_channel_id == current_channel_id
+                if msg_channel_id is None or current_channel_id is None:
+                    return False
+                return msg_channel_id == current_channel_id
 
-        instance.update_realtime(self.reflection_api.get_realtime_data(message))
-        instance.set_rearrange_predicate(rearrage_predicate)
+            instance.update_realtime(self.reflection_api.get_realtime_data(message))
+            instance.set_rearrange_predicate(rearrage_predicate)
 
-        # convert everything into `ChatMessageMeta`
-        chat_message = ChatMessageMeta(
-            role=ChatRole.USER,
-            content=message_text,
-            metadata=metadata,
-            image_hashes=await message.fetch_images() if self.accept_images else [],
-            audio_hashes=await message.fetch_audio() if self.accept_audio else [],
-            # the following properties are intended to be used internally and are NOT reload persistant
-            instance_id=environment_id,
-            # origin is used for actions and tool calls
-            origin=message
-        )
+            # convert everything into `ChatMessageMeta`
+            chat_message = ChatMessageMeta(
+                role=ChatRole.USER,
+                content=message_text,
+                metadata=metadata,
+                image_hashes=await message.fetch_images() if self.accept_images else [],
+                audio_hashes=await message.fetch_audio() if self.accept_audio else [],
+                # the following properties are intended to be used internally and are NOT reload persistant
+                instance_id=environment_id,
+                # origin is used for actions and tool calls
+                origin=message
+            )
 
-        await self.pixi_resp_retry(instance, chat_message)
+            await self.pixi_resp_retry(instance, chat_message)
 
     def register_pre_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
         """Register an async awaitable to run before the bot connects to Discord/Telegram.
@@ -863,11 +875,17 @@ class PixiClient:
             self.logger.info("All pre-startup hooks completed.")
 
         post_task = asyncio.create_task(self.__post_startup_task())
+        eviction_task = asyncio.create_task(self._evict_idle_instances(), name="idle-instance-eviction")
 
         try:
             await self.reflection_api.start_async()
             await post_task
         except asyncio.CancelledError:
+            pass
+        finally:
+            post_task.cancel()
+            eviction_task.cancel()
+            await asyncio.gather(post_task, eviction_task, return_exceptions=True)
             await self.reflection_api.close_async()
 
     def run(self):

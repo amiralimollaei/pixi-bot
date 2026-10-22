@@ -98,6 +98,7 @@ pixi-cli -p [platform] [options]
 usage: pixi-cli [-h] --platform {discord,telegram}
                 [--pixi-directory PIXI_DIRECTORY]
                 [--log-level {debug,info,warning,error,critical}]
+                [--instance-idle-timeout INSTANCE_IDLE_TIMEOUT]
                 [--api-url API_URL] [--auth | --no-auth] --model MODEL
                 [--model-max-context MODEL_MAX_CONTEXT]
                 [--helper-model HELPER_MODEL]
@@ -133,6 +134,9 @@ options:
                         "~/.pixi/"
   --log-level, -l {debug,info,warning,error,critical}
                         Set the logging level.
+  --instance-idle-timeout INSTANCE_IDLE_TIMEOUT
+                        Save and unload inactive conversations after this many
+                        seconds (default: 900).
   --api-url, -a API_URL
                         OpenAI Compatible API URL to use for the bot
   --auth, --no-auth     whether or not to authorize to the API backends

@@ -74,6 +74,12 @@ def main():
         help="Set the logging level."
     )
     parser.add_argument(
+        "--instance-idle-timeout",
+        type=float,
+        default=900.0,
+        help="Save and unload inactive conversations after this many seconds (default: 900)."
+    )
+    parser.add_argument(
         "--api-url", "-a",
         type=str,
         default="https://api.openai.com/v1",
@@ -333,4 +339,5 @@ def main():
         wikis=wikis,
         environment_filter=environment_filter,
         news_config=news_config,
+        instance_idle_timeout=args.instance_idle_timeout,
     ).run()
