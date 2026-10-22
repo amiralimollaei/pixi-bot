@@ -5,6 +5,37 @@ from pixi.chatting import AsyncChatbotInstance, AssistantPersona
 from pixi.utils import load_dotenv
 
 
+class ConsoleSendAction:
+    name = "send"
+    field_name = "message"
+    description = "sends a message"
+    label = "LLM"
+    is_visible = True
+
+    @classmethod
+    def should_register(cls, instance):
+        return True
+
+    @classmethod
+    async def call(cls, context, value):
+        print(f"{cls.label}: {value}")
+
+
+class ConsoleNoteAction(ConsoleSendAction):
+    name = "note"
+    field_name = "thoughts"
+    description = "annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
+    label = "Thoughts"
+    is_visible = False
+
+
+class ConsoleYeetAction(ConsoleSendAction):
+    name = "yeet"
+    field_name = "object"
+    description = "yeets the object"
+    label = "Yeet"
+
+
 async def main():
     while True:
         reference_message = instance.add_message(input("You: "))
@@ -17,33 +48,9 @@ if __name__ == "__main__":
     persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
     instance = AsyncChatbotInstance(0, "test")
 
-    async def psudo_send_action(ctx, text):
-        print("LLM: " + text)
-
-    async def psudo_note_action(ctx, text):
-        print("Thoughts: " + text)
-
-    async def psudo_yeet_action(ctx, text):
-        print("Yeet: " + text)
-
-    instance.add_action(
-        name="send",
-        field_name="message",
-        function=psudo_send_action,
-        description="sends a message"
-    )
-    instance.add_action(
-        name="note",
-        field_name="thoughts",
-        function=psudo_note_action,
-        description="annotates your thoughts, you must do this before each message e.g., [NOTE: I should be offended and will respond with an offended tone]"
-    )
-    instance.add_action(
-        name="yeet",
-        field_name="object",
-        function=psudo_yeet_action,
-        description="yeets the object"
-    )
+    instance.add_action(ConsoleSendAction())
+    instance.add_action(ConsoleNoteAction())
+    instance.add_action(ConsoleYeetAction())
 
     print(instance.action_manager.get_prompt())
 

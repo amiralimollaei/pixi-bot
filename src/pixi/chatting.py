@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
@@ -6,18 +8,20 @@ import os
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
                     Generator, Iterator, Optional)
 
 from pixi.caching import get_caching_provider
 
+if TYPE_CHECKING:
+    from pixi.client import PixiClient
+
 from .openai import AsyncOpenAI, AsyncStream, ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
-from .model.chatting.callbacks import (ActionContext, ActionFunction,
-                                       AsyncAction, AsyncTool, ToolCallMeta,
-                                       PartialToolCallMeta, Predicate,
-                                       ToolContext, ToolFunction)
+from .model.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
+                                       ToolCallMeta, PartialToolCallMeta,
+                                       Predicate, ToolContext)
 from .model.chatting.persona import AssistantPersona
 from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
 from .model.enums import ChatRole
@@ -173,24 +177,16 @@ class AsyncActionManager:
         self.on_action: Callable[[str, str | None]] | None = None
         self.visible_actions_taken = 0
 
-    def _add_action(self, action: AsyncAction):
-        assert action is not None
-        self.actions.update({action.name.lower(): action})
-
-    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None, is_visible: bool = True):
-        assert name
-        assert field_name
-        assert function is not None
-        self._add_action(AsyncAction(
-            name=name,
-            field_name=field_name,
-            function=function,
-            description=description,
-            is_visible=is_visible,
-        ))
+    def add_action(self, action: AsyncAction):
+        assert action.name
+        assert action.field_name
+        self.actions[action.name.lower()] = action
 
     def get_prompt(self):
-        return "\n".join(["- "+func.get_syntax() for name, func in self.actions.items()])
+        return "\n".join(
+            f"- [{action.name}:<{action.field_name}>]: {action.description or 'no description'}"
+            for action in self.actions.values()
+        )
 
     async def execute_action(self, action_str: str, action_context: ActionContext):
         action_content = action_str[1:-1]  # removed brakets
@@ -210,6 +206,10 @@ class AsyncActionManager:
         if action is None:
             self.logger.error(f"Model tried to use the action \"{name}\", which is not implemented.")
             return
+
+        await self._invoke_action(action, action_context, value)
+
+    async def _invoke_action(self, action: AsyncAction, action_context: ActionContext, value: str | None):
 
         try:
             await action.call(action_context, value)
@@ -283,19 +283,9 @@ class AsyncToolManager:
         self.on_tool: Callable[[ToolCallMeta]] | None = None
         self.tool_results_consumer: Callable[[list[ChatMessageMeta]]] | None = None
 
-    def _add_tool(self, tool: AsyncTool):
-        assert tool is not None
-        self.tools.update({tool.name.lower(): tool})
-
-    def add_tool(self, name: str, function: ToolFunction, parameters: dict | None = None, description: str | None = None,):
-        assert name
-        assert function is not None
-        self._add_tool(AsyncTool(
-            name=name,
-            function=function,
-            parameters=parameters,
-            description=description,
-        ))
+    def add_tool(self, tool: AsyncTool):
+        assert tool.name
+        self.tools[tool.name.lower()] = tool
 
     def get_tools_schema(self):
         return [
@@ -325,7 +315,6 @@ class AsyncToolManager:
         for fn in function_calls:
             tool = self.tools.get(fn.name)
             if tool:
-                func: ToolFunction = tool.function
                 func_args_str = ""
                 if fn.arguments:
                     func_args_str = ", ".join([
@@ -337,7 +326,7 @@ class AsyncToolManager:
                         self.logger.info(f"Calling {fn.name}({func_args_str})...")
                     else:
                         self.logger.debug(f"Calling {fn.name}({func_args_str})...")
-                    result = await func(tool_context, **fn.arguments)  # type: ignore
+                    result = await tool.call(tool_context, **(fn.arguments or {}))
                     result = json.dumps(result, ensure_ascii=False, indent=3)
                 except Exception as e:
                     self.logger.exception(f"Error calling tool '{fn.name}({func_args_str})'")
@@ -478,21 +467,9 @@ class AsyncChatClient:
             base_url=self.auth.base_url,
         )
 
-    def add_tool(self, name: str, function: ToolFunction, parameters: Optional[dict] = None, description: Optional[str] = None):
-        """
-        Register a tool (function) for tool calling.
-        name: tool name (string)
-        function: (str) -> Awaitable[None]
-        parameters: OpenAI tool/function parameters schema (dict)
-        description: description of the tool (string)
-        """
-
-        self.tool_manager.add_tool(
-            name=name,
-            function=function,
-            parameters=parameters,
-            description=description
-        )
+    def add_tool(self, tool: AsyncTool):
+        """Register a tool instance implementing the AsyncTool protocol."""
+        self.tool_manager.add_tool(tool)
 
     def set_rearrange_predicate(self, predicate: Predicate):
         """
@@ -737,7 +714,7 @@ class AsyncChatbotInstance(AsyncChatClient):
                  *,
                  tools: list[AsyncTool] = [],
                  actions: list[AsyncAction] = [],
-                 bot=None,
+                 bot: PixiClient | None = None,
                  **client_kwargs,
                  ):
 
@@ -745,8 +722,8 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self.bot = bot
-        assert self.bot
+        assert bot is not None
+        self.bot: PixiClient = bot
 
         assert exists(uuid) and isinstance(uuid, (int, str)), f"Invalid uuid \"{uuid}\"."
         assert exists(hash_prefix) and isinstance(hash_prefix, str), f"Invalid hash_prefix \"{hash_prefix}\"."
@@ -792,23 +769,13 @@ class AsyncChatbotInstance(AsyncChatClient):
         for tool in tools:
             if not tool.should_register(self):
                 continue
-            self.add_tool(
-                name=tool.name,
-                function=tool.function,
-                parameters=tool.parameters,
-                description=tool.description
-            )
+            self.add_tool(tool)
 
         # register all the actions
         for action in actions:
             if not action.should_register(self):
                 continue
-            self.add_action(
-                name=action.name,
-                function=action.function,
-                field_name=action.field_name,
-                description=action.description
-            )
+            self.add_action(action)
 
     @contextmanager
     def use(self):
@@ -847,12 +814,12 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         return self.scheduler.schedule(id=id, delay=delay, callback=run_callback)
 
-    def schedule_action(self, action: str, action_context: ActionContext, id: str, delay: float):
+    def schedule_action(self, action: AsyncAction, value: str | None, action_context: ActionContext, id: str, delay: float) -> bool:
+        """Schedule an action instance with its value, without parsing inline syntax."""
         async def execute_scheduled():
-            await self.action_manager.execute_action(
-                action,
-                action_context=action_context
-            )
+            if self.action_manager.on_action:
+                self.action_manager.on_action(action.name, value)
+            await self.action_manager._invoke_action(action, action_context, value)
         return self.schedule(id=id, delay=delay, callback=execute_scheduled)
 
     def cancel_schedule(self, id: str) -> bool:
@@ -863,9 +830,9 @@ class AsyncChatbotInstance(AsyncChatClient):
         """Convenience wrapper for self.scheduler.cancel_all."""
         self.scheduler.cancel_all()
 
-    def add_action(self, name: str, field_name: str, function: ActionFunction, description: Optional[str] = None):
-        """Convenience wrapper for self.action_manager.add_action"""
-        self.action_manager.add_action(name, field_name, function, description)
+    def add_action(self, action: AsyncAction):
+        """Register an action instance implementing the AsyncAction protocol."""
+        self.action_manager.add_action(action)
 
     def add_message(self, message: ChatMessageMeta | str, default_role: ChatRole = ChatRole.USER) -> ChatMessageMeta:
         """

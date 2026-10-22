@@ -210,6 +210,74 @@ options:
                         wikipedia=https://www.wikipedia.org/w/
 ```
 
+## Custom Actions and Tools
+
+`PixiClient.register_action(action)` and `register_tool(tool)` accept instances
+implementing `AsyncAction` and `AsyncTool` from
+`pixi.model.chatting.callbacks`.
+
+Actions provide `name`, `field_name`, `description`, `is_visible`,
+`should_register(instance)`, and `async call(context, value)`. The value is a
+string, or `None` when the model omits it. Tools provide `name`, `description`,
+`parameters` (an OpenAI-compatible JSON schema, or `None`),
+`should_register(instance)`, and `async call(context, **arguments)`. Define metadata on the class.
+
+```python
+from pixi.model.chatting.callbacks import ActionContext, ToolContext
+
+
+class ShoutAction:
+    name = "shout"
+    field_name = "message"
+    description = "Send an uppercase message in the current chat."
+    is_visible = True
+
+    @classmethod
+    def should_register(cls, instance) -> bool:
+        return True
+
+    @classmethod
+    async def call(cls, context: ActionContext, value: str | None) -> None:
+        if value and context.reference_message:
+            message = context.reference_message.origin
+            if message is not None:
+                await message.send(value.upper())
+
+
+class CounterTool:
+    name = "increment_counter"
+    description = "Increment a shared counter by the requested amount."
+    parameters = {
+        "type": "object",
+        "properties": {"amount": {"type": "integer"}},
+        "required": ["amount"],
+        "additionalProperties": False,
+    }
+
+    total = 0
+
+    @classmethod
+    def should_register(cls, instance) -> bool:
+        return True
+
+    @classmethod
+    async def call(cls, context: ToolContext, *, amount: int) -> int:
+        cls.total += amount
+        return cls.total
+
+
+# Given an initialized PixiClient:
+client.register_action(ShoutAction())
+client.register_tool(CounterTool())
+```
+
+Client registrations apply to subsequently created chats. Each chat calls
+`should_register(self)` when it is constructed; return `False` to exclude an
+action or tool from that chat. State belongs to the class, not the registered
+instance; use `context.parent_instance` for chat-specific state. Both contexts also expose
+`reference_message`. Invisible actions (`is_visible = False`) do not count as a
+visible response. Tool registration is ignored when tool calling is disabled.
+
 ## Lisence
 
 MIT

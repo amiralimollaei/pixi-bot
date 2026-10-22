@@ -1,17 +1,16 @@
 import asyncio
-import json
 import logging
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import Any, Callable, Coroutine, Optional
 
+from .actions import (CancelScheduleAction, NoteAction, ReactAction,
+                      ScheduleAction, SendAction, SendGifAction)
 from .addon import AddonManager
-from .agents import AgentBase, RetrievalAgent
+from .agents import AgentBase
 from .caching import get_caching_provider
-from .chatting import (ActionContext, AsyncChatbotInstance,
-                       ChatbotInstanceRegistry)
-from .model.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
-                                       Predicate, ToolContext)
+from .chatting import AsyncChatbotInstance, ChatbotInstanceRegistry
+from .model.chatting.callbacks import AsyncAction, AsyncTool
 from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
                            NewsConfig, OpenAIAuthConfig,
                            OpenAIEmbeddingModelConfig,
@@ -19,7 +18,8 @@ from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
 from .model.enums import ChatRole, Platform
 from .model.storage.message import ChatMessageMeta
 from .platform import PlatformMessage, PlatformProvider, get_platform_provider
-from .utils import format_time_later
+from .tools import (FetchChannelHistoryTool, create_database_tools,
+                    create_mediawiki_tools)
 
 # constants
 
@@ -57,8 +57,6 @@ class PixiClient:
         if not math.isfinite(instance_idle_timeout) or instance_idle_timeout <= 0:
             raise ValueError("instance_idle_timeout must be a positive finite number of seconds.")
 
-        self.platform = platform
-
         self.auth = auth
         self.model = model
         self.helper_model = helper_model or model
@@ -73,66 +71,69 @@ class PixiClient:
         self.register_pre_startup_hook(self.verify_models)
 
         # Proactive news needs its guild instances even before the first message.
-        if PixiFeatures.NewsProactive in features and news_config is not None:
+        if PixiFeatures.NewsProactive in self.features and news_config is not None:
             self.register_post_startup_hook(self._start_news_instances)
 
-        self.enable_tool_calls = PixiFeatures.ToolCalling in features
-        self.log_tool_calls = PixiFeatures.ToolLogging in features
         self.datasets = []
         self.environment_filter = environment_filter
 
-        self.accept_images = PixiFeatures.ImageSupport in features
-        self.accept_audio = PixiFeatures.AudioSupport in features
-        if self.accept_images or self.accept_audio:
+        if PixiFeatures.ImageSupport in self.features or PixiFeatures.AudioSupport in self.features:
             try:
                 get_caching_provider()
             except RuntimeError as error:
                 self.logger.warning("%s Disabling image/audio support.", error)
-                self.accept_images = False
-                self.accept_audio = False
+                self.features &= ~(PixiFeatures.ImageSupport | PixiFeatures.AudioSupport)
 
         ChatbotInstanceRegistry.init(hash_prefix=platform, bot=self)
 
-        self.reflection_api: PlatformProvider = get_platform_provider(platform)()
+        self.platform_provider: PlatformProvider = get_platform_provider(platform)()
 
-        self.gif_api = None
-        if PixiFeatures.GIFSearch in features:
+        if PixiFeatures.GIFSearch in self.features:
             try:
                 from .apis.tenor import AsyncTenorAPI
-                self.gif_api = AsyncTenorAPI()
-            except KeyError:
-                self.logger.warning("TENOR_API_KEY is not set, TENOR API features will not be available.")
+                SendGifAction.gif_api = AsyncTenorAPI()
+            except Exception:
+                self.logger.warning("gif search api failed to initialize, gif features will not be available.")
 
         self.__register_builtin_actions()
 
-        if self.enable_tool_calls and datasets:
+        if PixiFeatures.ToolCalling in self.features and datasets:
             self.logger.info(f"registering {len(datasets)} dataset(s):")
             for dataset_config in datasets:
                 self.logger.info(f" - {dataset_config.name}")
                 self.datasets.append(self.register_database_tool(dataset_config))
 
-        if self.enable_tool_calls and PixiFeatures.WikiSearch in features and wikis:
+        if PixiFeatures.ToolCalling in self.features and PixiFeatures.WikiSearch in features and wikis:
             self.logger.info(f"registering {len(wikis)} wiki(s):")
             for wiki_config in wikis:
                 self.logger.info(f" - {wiki_config.name}: {wiki_config.url}")
                 self.register_mediawiki_tools(url=wiki_config.url, wiki_name=wiki_config.name)
 
-        if platform == Platform.DISCORD and self.enable_tool_calls:
+        if platform == Platform.DISCORD and PixiFeatures.ToolCalling in self.features:
             self.__register_discord_specific_tools()
 
         self.__register_builtin_slash_commands()
+        
+        if platform == Platform.TELEGRAM:
+            self.__register_telegram_specific_slash_commands()
 
         self.logger.info(f"loading addons...")
         self.addon_manager = AddonManager(self)
         self.addon_manager.load_addons()
 
-        self.reflection_api.register_on_message_event(self.on_message)
+        self.platform_provider.register_on_message_event(self.on_message)
 
         self.logger.info(f"Pixi finished initalizing!")
 
+    def __register_telegram_specific_slash_commands(self):
+        async def start_command(message: PlatformMessage):
+            await message.send("Hiiiii, how's it going?")
+
+        self.register_slash_command(name="start", function=start_command)
+
     async def _start_news_instances(self):
         self.logger.info("Starting proactive news for available guilds...")
-        for guild in await self.reflection_api.get_available_guilds():
+        for guild in await self.platform_provider.get_available_guilds():
             instance_id = f"forum#{guild.id}"
             self.logger.info(f" - \"{guild.name}\" (members: {guild.member_count})")
             self.get_chatbot_instance(instance_id)
@@ -193,31 +194,18 @@ class PixiClient:
                 "model verification will be skipped. This is expected for some OpenAI-compatible backends."
             )
 
-    def register_tool(self, name: str, func, parameters: dict, description: Optional[str], predicate: Optional[Predicate] = None):
-        if not self.enable_tool_calls:
+    def register_tool(self, tool: AsyncTool):
+        if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
-        ChatbotInstanceRegistry.register_tool(AsyncTool(
-            name=name,
-            function=func,
-            parameters=parameters,
-            description=description,
-            predicate=predicate
-        ))
+        ChatbotInstanceRegistry.register_tool(tool)
 
-    def register_action(self, name: str, function, field_name: str, description: str, is_visible: bool = True, predicate: Optional[Predicate] = None):
-        ChatbotInstanceRegistry.register_action(AsyncAction(
-            name=name,
-            function=function,
-            field_name=field_name,
-            description=description,
-            is_visible=is_visible,
-            predicate=predicate,
-        ))
+    def register_action(self, action: AsyncAction):
+        ChatbotInstanceRegistry.register_action(action)
 
     def create_agent_instance[A: AgentBase](self, agent_cls: type[A], **agent_kwargs) -> A:
-        return agent_cls(auth=self.auth, model=self.helper_model, log_tool_calls=self.log_tool_calls, **agent_kwargs)
+        return agent_cls(auth=self.auth, model=self.helper_model, log_tool_calls=PixiFeatures.ToolLogging in self.features, **agent_kwargs)
 
     def register_slash_command(self, name: str, function, description: str | None = None):
         async def checked_function(message: PlatformMessage):
@@ -228,7 +216,7 @@ class PixiClient:
                 await message.send("This command is not allowed here.")
                 return
             await function(message)
-        self.reflection_api.register_slash_command(name, checked_function, description)
+        self.platform_provider.register_slash_command(name, checked_function, description)
 
     async def typing_delay(self, message: PlatformMessage, delay: float):
         delay_served = 0.0
@@ -238,241 +226,29 @@ class PixiClient:
             delay_served += 3.0
 
     def __register_builtin_actions(self):
-        @dataclass(frozen=True)
-        class ScheduleData:
-            action: str
-            value: str
-            delay: float
-            id: str
-
-        async def schedule_action(ctx: ActionContext, value: str):
-            if not value:
-                return
-            if ctx.reference_message is None:
-                self.logger.error("reference_message is None")
-                return
-            if ctx.parent_instance is None:
-                self.logger.error("parent_instance is None")
-                return
-
-            try:
-                schedule_data = ScheduleData(**json.loads(value))
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                self.logger.exception(f"Invalid schedule JSON: {e}")
-                return
-
-            if not schedule_data.action or not schedule_data.value or schedule_data.delay is None or not schedule_data.id:
-                self.logger.error("Schedule JSON must include 'action', 'value', 'delay', and 'id' fields.")
-                return
-
-            if not isinstance(schedule_data.delay, (int, float)) or schedule_data.delay <= 0:
-                self.logger.error("'delay' must be a positive number.")
-                return
-
-            instance = ctx.parent_instance
-
-            if instance.schedule_action(
-                action=f"[{schedule_data.action}: {schedule_data.value}]",
-                action_context=ctx,
-                id=schedule_data.id,
-                delay=schedule_data.delay
-            ):
-                self.logger.info(f"scheduled action for {format_time_later(schedule_data.delay)}: {value}")
-            else:
-                self.logger.info(f"schedule action failed: {value}")
-
-        self.register_action(
-            name="schedule",
-            field_name="json",
-            function=schedule_action,
-            description="schedules an action to be executed later, the value for this action is a json with the following schema: {\"action\": <action-name>, \"value\": <action-value>, \"delay\": <delay-in-seconds>, \"id\": <unique-number>}"
-        )
-
-        async def cancel_schedule_action(ctx: ActionContext, value: str):
-            if not value or ctx.reference_message is None:
-                return
-            assert ctx.reference_message.origin is not None
-            message: PlatformMessage = ctx.reference_message.origin
-
-            schedule_id = value.strip()
-            if not schedule_id:
-                self.logger.error("Model did not provide a schedule id to cancel.")
-                return
-
-            if ctx.parent_instance and ctx.parent_instance.cancel_schedule(schedule_id):
-                self.logger.info(f"Cancelled the schedule with id '{schedule_id}'.")
-            else:
-                self.logger.info(f"No schedule found with id '{schedule_id}'.")
-
-        self.register_action(
-            name="cancel_schedule",
-            field_name="id",
-            function=cancel_schedule_action,
-            description="cancels a previously scheduled action by its id (the ID for each schedule should be a unique number)"
-        )
-
-        async def send_action(ctx: ActionContext, value: str):
-            if not value or ctx.reference_message is None:
-                return
-            assert ctx.reference_message.origin is not None
-            message: PlatformMessage = ctx.reference_message.origin
-
-            # wait_time = (1.8 ** math.log2(1+len(value))) * 0.1
-            # await self.typing_delay(message, wait_time)
-            await message.send(value)
-
-        self.register_action(
-            name="send",
-            field_name="message",
-            function=send_action,
-            description="sends a message in the current chat"
-        )
-        if self.gif_api is not None:
-            async def send_gif_action(ctx: ActionContext, value: str):
-                if not value or ctx.reference_message is None:
-                    return
-                assert ctx.reference_message.origin is not None
-                message: PlatformMessage = ctx.reference_message.origin
-
-                assert self.gif_api is not None
-                resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
-                results = []
-                for gif_content in resp.get("results", []):
-                    results.append(dict(
-                        content_description=gif_content.get("content_description", ""),
-                        content_rating=gif_content.get("content_rating", ""),
-                        url=gif_content.get("media", [{}])[0].get("gif", {}).get("url", "")
-                    ))
-                if results:
-                    await message.send(results[0]["url"])
-
-            self.register_action(
-                name="send_gif",
-                field_name="gif description",
-                function=send_gif_action,
-                description="sends a gif in the current chat, the gif is chosen based on the provided description (description must be in English)"
-            )
-
-        async def note_action(ctx: ActionContext, value: str):
-            if not value or ctx.reference_message is None:
-                return
-            assert ctx.reference_message.origin is not None
-            message: PlatformMessage = ctx.reference_message.origin
-
-            if ctx.parent_instance and ctx.parent_instance.is_notes_visible:
-                await message.send(f"> thoughts: {value}")
-
-        self.register_action(
-            name="note",
-            field_name="thoughts",
-            function=note_action,
-            description="annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words",
-            is_visible=False,
-        )
-
-        async def react_action(ctx: ActionContext, value: str):
-            if not value or ctx.reference_message is None:
-                return
-            assert ctx.reference_message.origin is not None
-            message: PlatformMessage = ctx.reference_message.origin
-
-            try:
-                await message.add_reaction(value)
-            except Exception:
-                self.logger.exception(f"Failed to add reaction {value} to message {message.id}")
-
-        self.register_action(
-            name="react",
-            field_name="emoji",
-            function=react_action,
-            description="react with an emoji (presented in utf-8) to the current message that you are responding to, you may react to messages that are shocking or otherwise in need of immediate emotional reaction, you can send multiple reactions by using this command multuple times."
-        )
+        self.register_action(ScheduleAction())
+        self.register_action(CancelScheduleAction())
+        self.register_action(SendAction())
+        self.register_action(SendGifAction())
+        self.register_action(NoteAction())
+        self.register_action(ReactAction())
 
     def register_database_tool(self, dataset_config: DatasetConfig):
         from .storage.database import DirectoryDatabase
 
-        if not self.enable_tool_calls:
+        if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
             return
 
         database_name = dataset_config.name
         database_api = DirectoryDatabase.from_directory(dataset_config.name)
 
-        async def get_entry_as_str(entry_id: int):
-            dataset_entry = await database_api.get_entry(entry_id)
-            return json.dumps(asdict(dataset_entry), ensure_ascii=False, indent=3)
-
-        async def search_database(ctx: ToolContext, keyword: str):
-            return [asdict(match) for match in await database_api.search(keyword)]
-
-        self.register_tool(
-            name=f"search_{database_name}_database",
-            func=search_database,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    keyword=dict(
-                        type="string",
-                        description=f"The search keyword to find matches in the database text from the {database_name} database",
-                    ),
-                ),
-                required=["keyword"],
-                additionalProperties=False
-            ),
-            description=f"Searches the {database_name} database based on a keyword and returns the entry metadata. you may use this function multiple times to find the specific information you're looking for."
-        )
-
-        async def query_database(ctx: ToolContext, query: str, ids: str):
-            if ids is None:
-                return "no result: no id specified"
-
-            if self.embedding_model:
-                from .rag.client import AsyncRAGClient
-                rag = AsyncRAGClient(self.auth, self.embedding_model)
-                entries = await asyncio.gather(*[
-                    database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
-                ])
-                for entry in entries:
-                    await rag.add_document(entry.content, entry.title, entry.id)
-                query_embed = await rag.embed(query)
-                matches = [
-                    asdict(doc_match)
-                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
-                ]
-                return matches
-            else:
-                agent = self.create_agent_instance(
-                    agent_cls=RetrievalAgent,
-                    context=await asyncio.gather(*[
-                        get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
-                    ])
-                )
-                return await agent.execute_query(query)
-
-        self.register_tool(
-            name=f"query_{database_name}_database",
-            func=query_database,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    query=dict(
-                        type="string",
-                        description=f"A question or a statement that you want to find information about.",
-                    ),
-                    ids=dict(
-                        type="string",
-                        description=f"Comma-seperated numerical entry ids to fetch and query information from, use `search_{database_name}_database` to optain entry ids based a search term.",
-                    ),
-                ),
-                required=["query", "ids"],
-                additionalProperties=False
-            ),
-            description=f"fetch and retrieve relevent information from the content of the {database_name} database based on a query."
-        )
+        for tool in create_database_tools(self, database_name, database_api):
+            self.register_tool(tool)
         return database_api
 
     def register_mediawiki_tools(self, url: str, wiki_name: str):
-        if not self.enable_tool_calls:
+        if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
 
@@ -480,113 +256,19 @@ class PixiClient:
 
         wiki_api = AsyncWikimediaAPI(url)
 
-        async def fetch_wiki_page(title: str) -> tuple[str, str]:
-            page_content, title = await wiki_api.get_plaintext(title.strip())
-            return (page_content, title)
-
-        async def search_wiki(ctx: ToolContext, keyword: str):
-            return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
-
-        self.register_tool(
-            name=f"search_wiki_{wiki_name}",
-            func=search_wiki,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    keyword=dict(
-                        type="string",
-                        description=f"The search keyword to find matches in the wiki text from the {wiki_name} wiki",
-                    ),
-                ),
-                required=["keyword"],
-                additionalProperties=False
-            ),
-            description=f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
-        )
-
-        async def query_wiki_content(ctx: ToolContext, titles: str, query: str):
-            if not titles:
-                return "no result: no page specified"
-
-            _titles = [t for t in titles.split("|") if t]
-            if not _titles:
-                return "no result: no page specified"
-
-            context = await asyncio.gather(*[
-                fetch_wiki_page(t) for t in _titles
-            ])
-
-            if self.embedding_model:
-                from .rag.client import AsyncRAGClient
-                rag = AsyncRAGClient(self.auth, self.embedding_model)
-                for i, (page, title) in enumerate(context):
-                    await rag.add_document(page, title, i)
-                query_embed = await rag.embed(query)
-                matches = [
-                    asdict(doc_match)
-                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
-                ]
-                return matches
-            else:
-                agent = self.create_agent_instance(
-                    agent_cls=RetrievalAgent,
-                    context=[page for page, title in context]
-                )
-                return await agent.execute_query(query)
-
-        self.register_tool(
-            name=f"query_wiki_content_{wiki_name}",
-            func=query_wiki_content,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    query=dict(
-                        type="string",
-                        description=f"A statement that is searched inside the content of the wiki, it should clearly name what you're looking for, example: \"how to craft an arrow?\" not \"how to craft it\" and not \"craft\"",
-                    ),
-                    titles=dict(
-                        type="string",
-                        description=f"Page titles to fetch and query information from, seperated by a delimiter character: `|`. use `search_wiki_{wiki_name}` to optain page titles based a search term.",
-                    ),
-                ),
-                required=["query", "titles"],
-                additionalProperties=False
-            ),
-            description=f"fetch wiki content and retrieve relevent information from them based on a query."
-        )
+        for tool in create_mediawiki_tools(self, wiki_name, wiki_api):
+            self.register_tool(tool)
 
     def __register_discord_specific_tools(self):
-        if not self.enable_tool_calls:
+        if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to initalize discord specific tools, but tool calls are disabled")
             return
 
-        async def fetch_channel_history(ctx: ToolContext, channel_id: str, n: int):
-            return await self.reflection_api.fetch_channel_history(int(channel_id), n=n)
-
-        self.register_tool(
-            name="fetch_channel_history",
-            func=fetch_channel_history,
-            parameters=dict(
-                type="object",
-                properties=dict(
-                    channel_id=dict(
-                        type="string",
-                        description="The numerical channel id, which is used to identify the channel.",
-                    ),
-                    n=dict(
-                        type="integer",
-                        description="the number of messages to fetch from the channel",
-                    ),
-                ),
-                required=["channel_id"],
-                additionalProperties=False
-            ),
-            description="Fetches the last `n` message from a text channel"
-        )
+        self.register_tool(FetchChannelHistoryTool())
 
     def __register_builtin_slash_commands(self):
         async def notes_slash_command(message: PlatformMessage):
-            if not await self.reflection_api.is_dm_or_admin(message):
+            if not await self.platform_provider.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
             try:
@@ -599,7 +281,7 @@ class PixiClient:
                 await message.send("Failed to toggle notes.")
 
         async def reset_slash_command(message: PlatformMessage):
-            if not await self.reflection_api.is_dm_or_admin(message):
+            if not await self.platform_provider.is_dm_or_admin(message):
                 await message.send("You must be a guild admin or use this in DMs.")
                 return
 
@@ -614,15 +296,6 @@ class PixiClient:
 
             await message.send("Wha- Where am I?!")
 
-        if self.platform == Platform.TELEGRAM:
-            # for some reason event handlers in telegram are order dependent, meaning we should
-            # run register_on_message_event after all slash commands are registered or else the
-            # slash commands will not work.
-            async def start_command(message: PlatformMessage):
-                await message.send("Hiiiii, how's it going?")
-
-            self.register_slash_command(name="start", function=start_command)
-
         self.register_slash_command(
             name="reset",
             function=reset_slash_command,
@@ -636,11 +309,12 @@ class PixiClient:
         )
 
     def get_chatbot_instance(self, identifier: str) -> AsyncChatbotInstance:
-        instance = ChatbotInstanceRegistry.get(identifier,
-                                               auth=self.auth,
-                                               model=self.model,
-                                               log_tool_calls=self.log_tool_calls
-                                               )
+        instance = ChatbotInstanceRegistry.get(
+            identifier,
+            auth=self.auth,
+            model=self.model,
+            log_tool_calls=PixiFeatures.ToolLogging in self.features
+        )
         assert instance
         # Start news background task if feature is enabled and not already running
         if (
@@ -651,7 +325,7 @@ class PixiClient:
         ):
             instance.start_news_background_task(
                 news_config=self.news_config,
-                reflection_api=self.reflection_api,
+                reflection_api=self.platform_provider,
             )
         return instance
 
@@ -730,7 +404,7 @@ class PixiClient:
 
     async def should_respond(self, message: PlatformMessage) -> bool:
         # we should not process our own messages again
-        if self.reflection_api.is_message_from_the_bot(message):
+        if self.platform_provider.is_message_from_the_bot(message):
             return False
 
         environment_id = message.environment_id
@@ -738,7 +412,7 @@ class PixiClient:
             self.logger.warning(f"ignoring message in {environment_id} because it's not in an allowed environment.")
             return False
 
-        if self.reflection_api.is_bot_mentioned(message) or message.is_inside_dm():
+        if self.platform_provider.is_bot_mentioned(message) or message.is_inside_dm():
             return True
 
         message_text = message.content
@@ -774,7 +448,7 @@ class PixiClient:
             if reply_optimization == 2:
                 # completely ignore reply context
                 self.logger.debug(f"completely ignore reply context for {message.environment_id=}")
-            elif reply_message and self.reflection_api.is_message_from_the_bot(reply_message):
+            elif reply_message and self.platform_provider.is_message_from_the_bot(reply_message):
                 if reply_optimization == 1:
                     metadata["in_reply_to"] = {  # pyright: ignore[reportArgumentType]
                         "from": "[YOU]",
@@ -824,7 +498,7 @@ class PixiClient:
                     return False
                 return msg_channel_id == current_channel_id
 
-            instance.update_realtime(self.reflection_api.get_realtime_data(message))
+            instance.update_realtime(self.platform_provider.get_realtime_data(message))
             instance.set_rearrange_predicate(rearrage_predicate)
 
             # convert everything into `ChatMessageMeta`
@@ -832,8 +506,8 @@ class PixiClient:
                 role=ChatRole.USER,
                 content=message_text,
                 metadata=metadata,
-                image_hashes=await message.fetch_images() if self.accept_images else [],
-                audio_hashes=await message.fetch_audio() if self.accept_audio else [],
+                image_hashes=await message.fetch_images() if PixiFeatures.ImageSupport in self.features else [],
+                audio_hashes=await message.fetch_audio() if PixiFeatures.AudioSupport in self.features else [],
                 # the following properties are intended to be used internally and are NOT reload persistant
                 instance_id=environment_id,
                 # origin is used for actions and tool calls
@@ -861,7 +535,7 @@ class PixiClient:
         self.post_startup_hooks.append(hook)
 
     async def __post_startup_task(self):
-        await self.reflection_api.wait_until_ready()
+        await self.platform_provider.wait_until_ready()
         if self.post_startup_hooks:
             self.logger.info(f"Running {len(self.post_startup_hooks)} post-startup hook(s)...")
             await asyncio.gather(*(f() for f in self.post_startup_hooks))
@@ -878,7 +552,7 @@ class PixiClient:
         eviction_task = asyncio.create_task(self._evict_idle_instances(), name="idle-instance-eviction")
 
         try:
-            await self.reflection_api.start_async()
+            await self.platform_provider.start_async()
             await post_task
         except asyncio.CancelledError:
             pass
@@ -886,7 +560,7 @@ class PixiClient:
             post_task.cancel()
             eviction_task.cancel()
             await asyncio.gather(post_task, eviction_task, return_exceptions=True)
-            await self.reflection_api.close_async()
+            await self.platform_provider.close_async()
 
     def run(self):
         """Run the bot (blocking with async support for startup hooks)."""

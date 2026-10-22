@@ -1,9 +1,13 @@
-import asyncio
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Concatenate, Coroutine, Optional, ParamSpec
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 from ..storage.message import ChatMessageMeta, ToolCallMeta
+
+if TYPE_CHECKING:
+    from ...chatting import AsyncChatbotInstance
 
 
 @dataclass
@@ -25,71 +29,60 @@ class PartialToolCallMeta:
 @dataclass
 class ToolContext:
     reference_message: Optional[ChatMessageMeta] = None
-    parent_instance: Optional[Any] = None
+    parent_instance: Optional[AsyncChatbotInstance] = None
     # more to be added
-
-
-P = ParamSpec("P")
-ToolFunction = Callable[Concatenate[ToolContext, P], Coroutine[Any, Any, Any]]
 
 
 @dataclass
 class ActionContext:
     reference_message: Optional[ChatMessageMeta] = None
-    parent_instance: Optional[Any] = None
+    parent_instance: Optional[AsyncChatbotInstance] = None
     # more fields to be added
 
 
 Predicate = Callable[..., bool]
-ActionFunction = Callable[[ActionContext, str], Coroutine[Any, Any, None]]
 
 
-@dataclass(frozen=True)
-class AsyncAction:
-    name: str
-    field_name: str
-    function: ActionFunction
-    description: Optional[str] = None
-    is_visible: bool = True  # whether or not the action has a visible effect from the user's perspective
-    predicate: Optional[Predicate] = None
+class AsyncAction(Protocol):
+    """An inline action. Implementations may conform without inheriting."""
 
-    def get_syntax(self):
-        desc = self.description or "no description"
-        return f"[{self.name}:<{self.field_name}>]: {desc}"
+    @property
+    def name(self) -> str: ...
 
-    async def call(self, *args, **kwds):
-        return await self.function(*args, **kwds)
+    @property
+    def field_name(self) -> str: ...
 
-    def __str__(self):
-        return f"<async-action {self.name}>"
+    @property
+    def description(self) -> str | None: ...
 
-    def should_register(self, *args, **kwargs):
-        return self.predicate(*args, **kwargs) if self.predicate else True
+    @property
+    def is_visible(self) -> bool: ...
+
+    @classmethod
+    async def call(cls, context: ActionContext, value: str | None) -> None: ...
+
+    @classmethod
+    def should_register(cls, instance: "AsyncChatbotInstance") -> bool:
+        """Whether this action is available in the given chat."""
+        return True
 
 
-@dataclass(frozen=True)
-class AsyncTool:
-    name: str
-    function: ToolFunction
-    parameters: Optional[dict] = None
-    description: Optional[str] = None
-    predicate: Optional[Predicate] = None
+class AsyncTool(Protocol):
+    """An asynchronous tool with an OpenAI-compatible parameters schema."""
 
-    def get_syntax(self):
-        desc = self.description or "no description"
-        func_args_str = ""
-        if self.parameters:
-            func_args_str = ", ".join([
-                (f"{k}=\"{v}\"" if isinstance(v, str) else f"{k}={v}")
-                for k, v in self.parameters.items()
-            ])
-        return f"{self.name}({func_args_str}): {desc}"
+    @property
+    def name(self) -> str: ...
 
-    async def call(self, *args, **kwds):
-        return await self.function(*args, **kwds)
+    @property
+    def parameters(self) -> dict | None: ...
 
-    def __str__(self):
-        return f"<async-tool {self.name}>"
+    @property
+    def description(self) -> str | None: ...
 
-    def should_register(self, *args, **kwargs):
-        return self.predicate(*args, **kwargs) if self.predicate else True
+    @classmethod
+    async def call(cls, context: ToolContext, *args: Any, **kwargs: Any) -> Any: ...
+
+    @classmethod
+    def should_register(cls, instance: "AsyncChatbotInstance") -> bool:
+        """Whether this tool is available in the given chat."""
+        return True
