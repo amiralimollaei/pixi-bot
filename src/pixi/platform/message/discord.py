@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import discord
 
-from ...caching import MediaCache, get_caching_provider
+from ...caching import MediaCacheSystem, get_caching_provider
 from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
 
@@ -94,36 +94,30 @@ class DiscordMessageImpl(PlatformMessage):
         if channel and hasattr(channel, "typing"):
             await channel.typing()  # pyright: ignore[reportAttributeAccessIssue]
 
-    async def fetch_images(self) -> list[MediaCache]:
+    async def fetch_images(self) -> list[bytes]:
         if isinstance(self.origin, discord.Interaction):
             return []
 
         supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
-        provider = None
         for attachment in self.origin.attachments:
             if attachment.content_type in supported_mime_types:
-                if provider is None:
-                    provider = get_caching_provider()()
-                attachments.append(provider.cache_image(await attachment.read()))
+                attachments.append(get_caching_provider().cache_image(await attachment.read()))
         return attachments
 
-    async def fetch_audio(self) -> list[MediaCache]:
+    async def fetch_audio(self) -> list[bytes]:
         if isinstance(self.origin, discord.Interaction):
             return []
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
         supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
         attachments = []
-        provider = None
         for attachment in self.origin.attachments:
             mime = attachment.content_type
             ext = attachment.filename.lower().rsplit('.', 1)[-1] if '.' in attachment.filename else ''
             ext = f'.{ext}'
             if (mime and mime in supported_mime_types) or (ext in supported_extensions):
-                if provider is None:
-                    provider = get_caching_provider()()
-                attachments.append(provider.cache_audio(await attachment.read()))
+                attachments.append(get_caching_provider().cache_audio(await attachment.read()))
         return attachments
 
     async def fetch_reference(self) -> 'DiscordMessageImpl | None':

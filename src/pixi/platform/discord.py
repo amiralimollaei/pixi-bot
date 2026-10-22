@@ -6,7 +6,7 @@ from typing import IO, Any, Callable
 import discord
 from discord import app_commands
 
-from ..caching import MediaCache, UnsupportedMediaException, get_caching_provider
+from ..caching import MediaCacheSystem, UnsupportedMediaException, get_caching_provider
 from ..model.enums import Platform
 from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.discord import DiscordMessageImpl
@@ -197,16 +197,16 @@ class DiscordProvider(PlatformProvider):
         except Exception:
             self.logger.exception("unknown error while sending a file")
 
-    async def get_user_avatar(self, user_id: int) -> MediaCache | None:
+    async def get_user_avatar(self, user_id: int) -> bytes | None:
         """
-        Fetches the avatar of a user and returns it as a media cache object.
+        Fetches the avatar of a user, caches it, and returns its hash.
         """
         try:
             user = await self.bot.fetch_user(user_id)
             if user is None or user.avatar is None:
                 raise UnsupportedMediaException("User avatar not found or has an unsupported media type.")
             avatar_bytes = await user.avatar.read()
-            return get_caching_provider()().cache_image(avatar_bytes)
+            return get_caching_provider().cache_image(avatar_bytes)
         except discord.NotFound:
             self.logger.error(f"User with ID {user_id} not found.")
             return None

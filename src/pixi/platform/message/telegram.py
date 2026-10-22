@@ -5,7 +5,7 @@ import telegram
 from telegram.constants import ChatAction
 from telegram.constants import ChatType as TChatType
 
-from ...caching import MediaCache, get_caching_provider
+from ...caching import MediaCacheSystem, get_caching_provider
 from . import (PlatformMessage, ChatType, Platform, ReflectionEnvironment,
                ReflectionMessageAuthor)
 
@@ -71,7 +71,7 @@ class TelegramMessageImpl(PlatformMessage):
     async def typing(self):
         await self.origin.chat.send_chat_action(ChatAction.TYPING)
 
-    async def fetch_images(self) -> list[MediaCache]:
+    async def fetch_images(self) -> list[bytes]:
         origin: telegram.Message = self.origin
 
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
@@ -87,11 +87,10 @@ class TelegramMessageImpl(PlatformMessage):
             file = await origin.document.get_file()
             image_bytes = await file.download_as_bytearray()
         if image_bytes:
-            provider = get_caching_provider()()
-            attachments.append(provider.cache_image(bytes(image_bytes)))
+            attachments.append(get_caching_provider().cache_image(bytes(image_bytes)))
         return attachments
 
-    async def fetch_audio(self) -> list[MediaCache]:
+    async def fetch_audio(self) -> list[bytes]:
         origin = self.origin
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
@@ -116,8 +115,7 @@ class TelegramMessageImpl(PlatformMessage):
             file = await origin.document.get_file()
             audio_bytes = await file.download_as_bytearray()
         if audio_bytes:
-            provider = get_caching_provider()()
-            attachments.append(provider.cache_audio(bytes(audio_bytes)))
+            attachments.append(get_caching_provider().cache_audio(bytes(audio_bytes)))
         return attachments
 
     async def fetch_reference(self) -> 'TelegramMessageImpl | None':

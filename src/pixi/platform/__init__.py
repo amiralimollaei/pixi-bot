@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
-from ..caching import MediaCache
+from ..caching import MediaCacheSystem
 from ..model.enums import Platform
 from .message import PlatformMessage
 
@@ -82,7 +82,7 @@ class PlatformProvider(Protocol):
     async def send_file(self, chat_id: int, filepath: str, filename: str,
                         caption: str | None = None) -> None: ...
 
-    async def get_user_avatar(self, user_id: int) -> MediaCache | None: ...
+    async def get_user_avatar(self, user_id: int) -> bytes | None: ...
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10) -> list[dict]: ...
 

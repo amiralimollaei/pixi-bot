@@ -4,7 +4,7 @@ from typing import Optional
 import av
 
 from ....storage.paths import PixiPaths
-from ... import CompressedMedia, DiskMediaCache
+from ... import InMemoryMedia, DiskMediaCacheSystem
 
 
 # constants
@@ -12,18 +12,12 @@ from ... import CompressedMedia, DiskMediaCache
 THUMBNAIL_SIZE = 512
 
 
-class ImageCache(DiskMediaCache):
-    def __init__(self, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None):
-        super().__init__(
-            str(PixiPaths.cache() / "images"),
-            format="jpg",
-            mime_type="image/jpeg",
-            data_bytes=data_bytes,
-            hash_value=hash_value
-        )
+class ImageCache(DiskMediaCacheSystem):
+    directory = PixiPaths.cache() / "media"
 
-    def compress(self, data_bytes: bytes) -> CompressedMedia:
-        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=f".{self.format}") as tmp_out:
+    @classmethod
+    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
+        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.TemporaryFile() as tmp_out:
             tmp_in.write(data_bytes)
             tmp_in.flush()
 
@@ -42,8 +36,8 @@ class ImageCache(DiskMediaCache):
             tmp_out.seek(0)
             image_bytes = tmp_out.read()
 
-        return CompressedMedia(
-            mime_type=self.mime_type,
-            bytes=image_bytes,
-            format=self.format
+        return InMemoryMedia(
+            mime_type="image/jpeg",
+            buffer=image_bytes,
+            metadata=metadata
         )

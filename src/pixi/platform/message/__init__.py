@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Any, Protocol
 
-from ...caching import MediaCache
+from ...caching import MediaCacheSystem
 from ...model.enums import ChatType, Platform
 
 
@@ -48,9 +48,9 @@ class PlatformMessage(Protocol):
 
     async def typing(self) -> None: ...
 
-    async def fetch_images(self) -> list[MediaCache]: ...
+    async def fetch_images(self) -> list[bytes]: ...
 
-    async def fetch_audio(self) -> list[MediaCache]: ...
+    async def fetch_audio(self) -> list[bytes]: ...
 
     async def fetch_reference(self) -> 'PlatformMessage | None': ...
 

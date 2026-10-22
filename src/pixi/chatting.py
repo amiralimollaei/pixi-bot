@@ -8,6 +8,8 @@ from collections import defaultdict
 from typing import (Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
                     Generator, Iterator, Optional)
 
+from pixi.caching import get_caching_provider
+
 from .openai import AsyncOpenAI, AsyncStream, ChatCompletionChunk
 
 from .coroutine import AsyncScheduler, CoroutineQueueExecutor
@@ -40,6 +42,7 @@ def get_rearranged_messages(messages: list[ChatMessageMeta], predicate: Predicat
 class ChatMessageUtils:
     def __init__(self, meta: ChatMessageMeta):
         self.meta = meta
+        self.logger = logging.getLogger(self.__class__.__name__)
 
         self.validate_params(meta)
 
@@ -49,23 +52,15 @@ class ChatMessageUtils:
 
     @staticmethod
     def validate_params(meta: ChatMessageMeta):
-        for image in meta.images or []:
-            assert image.get_mime_type().startswith("image/"), (
-                f"expected an image cache, but got {image.get_mime_type()}."
-            )
-
-        for audio in meta.audio or []:
-            assert audio.get_mime_type().startswith("audio/"), (
-                f"expected an audio cache, but got {audio.get_mime_type()}."
-            )
-
         # validating each role's requirements
 
         if meta.role != ChatRole.USER:
             assert not exists(
                 meta.metadata), f"Metadata can only be attached to USER messages (e.g. the metadata should be None) but got `{meta.metadata}`"
             assert not exists(
-                meta.images), f"Images can only be attached to USER messages, but got {meta.images} for role ASSISTANT"
+                meta.image_hashes), f"Image attachements to non-USER messages are not allowed, but got {meta.image_hashes} for role ASSISTANT"
+            assert not exists(
+                meta.audio_hashes), f"Audio attachements to non-USER messages are not allowed, but got {meta.image_hashes} for role ASSISTANT"
 
         if meta.role != ChatRole.TOOL:
             assert not exists(
@@ -118,17 +113,26 @@ class ChatMessageUtils:
                         "```"
                     ]
                 content_dict: list[dict] = [dict(type="text", text="\n".join(content))]
-                for img in self.meta.images:
+                for hash in self.meta.image_hashes:
+                    image = get_caching_provider().load_media(hash)
+                    if image is None:
+                        self.logger.warning("Failed to load image from cache.")
+                        continue
                     content_dict.append(dict(
                         type="image_url",
-                        image_url=dict(url=img.to_data_url())
+                        image_url=dict(url=image.to_data_url())
                     ))
-                for audio in self.meta.audio:
+                for hash in self.meta.audio_hashes:
+                    audio = get_caching_provider().load_media(hash)
+                    if audio is None:
+                        self.logger.warning("Failed to load audio from cache.")
+                        continue
                     content_dict.append(dict(
                         input_audio=dict(
                             data=audio.to_base64(),
-                            # for some reason this value is required to be mp3 or wav, but
-                            # not used for decoding the audio, so we can send any format
+                            # for some reason this value is required to be mp3 or wav, but is
+                            # not used for decoding the audio, the API may support more formats;
+                            # so we can hardcode it to wav as the universally supported format.
                             format="wav"
                         ),
                         type="input_audio",
@@ -595,7 +599,8 @@ class AsyncChatClient:
             context = message.content or ""
             # TODO: better approximate images
             # TODO: audio should be approximated with a function of it's duration
-            request_size += len(role) + len(context) + 1024 * len(message.audio) + 1024 * len(message.images)
+            request_size += len(role) + len(context) + 1024 * len(message.audio_hashes) + \
+                1024 * len(message.image_hashes)
             # approximate size of the message in tokens, assuming 4 characters per token
             if request_size > self.model.max_context * 4:
                 break
@@ -686,7 +691,8 @@ class AsyncChatClient:
                         yield char
 
                 if verbose and hasattr(choice.delta, "reasoning_content"):
-                    print(choice.delta.reasoning_content, end="", flush=True) # pyright: ignore[reportAttributeAccessIssue]
+                    # pyright: ignore[reportAttributeAccessIssue]
+                    print(choice.delta.reasoning_content, end="", flush=True)
 
             if verbose:
                 print()

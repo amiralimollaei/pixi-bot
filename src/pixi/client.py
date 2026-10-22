@@ -820,8 +820,8 @@ class PixiClient:
             role=ChatRole.USER,
             content=message_text,
             metadata=metadata,
-            images=await message.fetch_images() if self.accept_images else [],
-            audio=await message.fetch_audio() if self.accept_audio else [],
+            image_hashes=await message.fetch_images() if self.accept_images else [],
+            audio_hashes=await message.fetch_audio() if self.accept_audio else [],
             # the following properties are intended to be used internally and are NOT reload persistant
             instance_id=environment_id,
             # origin is used for actions and tool calls

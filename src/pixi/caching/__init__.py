@@ -1,11 +1,10 @@
 import hashlib
-import os
-from abc import abstractmethod
+import json
+import struct
 from base64 import b64encode
 from dataclasses import dataclass
-from typing import Optional, Protocol
-
-from ..utils import exists
+from pathlib import Path
+from typing import Optional, Protocol, Self, Tuple
 
 
 class UnsupportedMediaException(Exception):
@@ -15,175 +14,177 @@ class UnsupportedMediaException(Exception):
         super().__init__(message)
 
 
-@dataclass
-class CompressedMedia:
+@dataclass(frozen=True)
+class InMemoryMedia:
     mime_type: str
-    bytes: bytes
-    format: Optional[str] = None
+    buffer: bytes
+
+    # extra metadata such as the files original extension, duration, etc. can be stored here for later use
     metadata: Optional[dict] = None
 
+    def to_bytes(self) -> bytes:
+        mime_bytes = self.mime_type.encode("utf-8")
+        metadata_bytes = (
+            json.dumps(self.metadata, ensure_ascii=False).encode("utf-8")
+            if self.metadata is not None
+            else b""
+        )
+        return b"".join((
+            struct.pack(">I", len(mime_bytes)),
+            mime_bytes,
+            struct.pack(">I", len(self.buffer)),
+            self.buffer,
+            struct.pack(">I", len(metadata_bytes)),
+            metadata_bytes,
+        ))
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> Self:
+        offset = 0
+
+        def read_field() -> bytes:
+            nonlocal offset
+
+            if len(data) - offset < 4:
+                raise ValueError("Truncated length prefix")
+
+            length = struct.unpack_from(">I", data, offset)[0]
+            offset += 4
+
+            end = offset + length
+            if end > len(data):
+                raise ValueError("Truncated field data")
+
+            field = data[offset:end]
+            offset = end
+            return field
+
+        mime_bytes = read_field()
+        buffer = read_field()
+        metadata_bytes = read_field()
+
+        if offset != len(data):
+            raise ValueError("Unexpected trailing bytes")
+
+        mime_type = mime_bytes.decode("utf-8")
+        metadata = (
+            json.loads(metadata_bytes.decode("utf-8"))
+            if metadata_bytes
+            else None
+        )
+
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a JSON object or null")
+
+        return cls(
+            mime_type=mime_type,
+            buffer=buffer,
+            metadata=metadata,
+        )
+
     def to_base64(self):
-        return b64encode(self.bytes).decode("utf-8")
+        return b64encode(self.buffer).decode("utf-8")
 
     def to_data_url(self):
         return f"data:{self.mime_type};base64,{self.to_base64()}"
 
 
-class MediaCache(Protocol):
-    hash: Optional[str]
-    cache_dir: str
-    format: str
-    mime_type: str
-    media: Optional[CompressedMedia]
-
-    @property
-    def cache_path(self) -> Optional[str]: ...
-
-    @abstractmethod
-    def compress(self, data_bytes: bytes) -> CompressedMedia: ...
-
-    @staticmethod
-    def compute_hash(data_bytes: bytes) -> str: ...
+class MediaCacheSystem(Protocol):
+    """Protocol class for media caching, interface for caching media files."""
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MediaCache": ...
+    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
+        """Compute the in-memory data to be written in the cache, returning a InMemoryMedia instance."""
+        ...
 
-    def to_dict(self) -> dict: ...
-    def exists(self) -> bool: ...
-    def load_cache(self) -> Optional[CompressedMedia]: ...
-    def get_bytes(self) -> Optional[bytes]: ...
-    def get_mime_type(self) -> str: ...
-    def get_format(self) -> str: ...
-    def to_data_url(self) -> str: ...
-    def to_base64(self) -> str: ...
+    @staticmethod
+    def compute_hash(data_bytes: bytes) -> bytes:
+        """Compute the hash of the input, and return it as bytes"""
+        return hashlib.sha256(data_bytes).digest()
+
+    @classmethod
+    def write(cls, media: InMemoryMedia, hash: bytes):
+        """Write the InMemoryMedia to cache, returning the hash in bytes"""
+        ...
+
+    @classmethod
+    def exists(cls, hash: bytes) -> bool:
+        """Checks whether an entry exists in the cache"""
+        ...
+
+    @classmethod
+    def read(cls, hash: bytes) -> Optional[InMemoryMedia]:
+        """Read the media from cache and return a InMemoryMedia instance, or None if not found."""
+        ...
+
+    @classmethod
+    def compute_if_absent(cls, data_bytes: Optional[bytes], hash: Optional[bytes], **metadata) -> bytes:
+        """Read cached data if they exist, or compute the in-memory cache data, and write them to the cache, returning the hash in bytes"""
+        if hash is None and data_bytes is not None:
+            hash = cls.compute_hash(data_bytes)
+        if hash is not None and cls.exists(hash):
+            return hash
+        else:
+            assert data_bytes, "data_bytes is None, can't compute cache"
+            media = cls.compute_cache(data_bytes=data_bytes, **metadata)
+            if hash is None:
+                hash = cls.compute_hash(data_bytes)
+            cls.write(media, hash)
+            return hash
 
 
-class DiskMediaCache(MediaCache):
+class DiskMediaCacheSystem(MediaCacheSystem):
     """Shared on-disk implementation for compressed media caches."""
 
-    def __init__(self, cache_dir: str, format: str, mime_type: str, data_bytes: Optional[bytes] = None, hash_value: Optional[str] = None):
-        assert isinstance(cache_dir, str), f"expected `cache_dir` to be of type str but got {cache_dir}."
-        assert isinstance(format, str), f"expected `format` to be of type str but got {format}."
-        assert isinstance(mime_type, str), f"expected `mime_type` to be of type str but got {mime_type}."
-        assert exists(data_bytes) ^ exists(hash_value), "Only `data_bytes` OR `hash_value` must be provided."
-
-        self.cache_dir = cache_dir
-        self.hash = None
-        self.media = None
-        self.format = format
-        self.mime_type = mime_type
-
-        if exists(data_bytes):
-            assert isinstance(data_bytes, bytes), "data_bytes must be of type bytes."
-            self.hash = self.compute_hash(data_bytes)
-            if self.exists():
-                self.load_cache()
-            else:
-                self.media = self.compress(data_bytes)
-
-                os.makedirs(self.cache_dir, exist_ok=True)
-
-                path = self.cache_path
-                if path and not os.path.isfile(path):
-                    with open(path, "wb") as f:
-                        f.write(self.media.bytes)
-
-        if exists(hash_value):
-            assert isinstance(hash_value, str), "hash_value must be of type str."
-            self.hash = hash_value
-            self.load_cache()
-
-    @staticmethod
-    def compute_hash(data_bytes: bytes) -> str:
-        # hash only the first 16 megabytes for performance
-        return hashlib.sha256(data_bytes[:2**24]).hexdigest()
-
-    @property
-    def cache_path(self) -> Optional[str]:
-        if self.hash:
-            return os.path.join(self.cache_dir, f"{self.hash}.{self.format}")
-        return None
+    directory: Path
 
     @classmethod
-    def from_dict(cls, data: dict):
-        if not (hash_value := data.get("hash")):
-            raise ValueError("Hash value is required to load media cache instance.")
-        return cls(hash_value=hash_value)  # type: ignore
+    def __save_path(cls, hash: bytes) -> Path:
+        return cls.directory / hash.hex()
 
-    def to_dict(self) -> dict:
-        return dict(hash=self.hash)
+    @classmethod
+    def write(cls, media: InMemoryMedia, hash: bytes):
+        path = cls.__save_path(hash)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(media.to_bytes())
+    
+    @classmethod
+    def exists(cls, hash: bytes) -> bool:
+        return cls.__save_path(hash).exists()
 
-    def exists(self) -> bool:
-        path = self.cache_path
-        return exists(path) and os.path.isfile(path)  # type: ignore
-
-    def __ensure_initialized(self):
-        if self.media is None:
-            raise RuntimeError("attemted to access uninitialized cache")
-
-    def load_cache(self):
-        if self.media is None:
-            path = self.cache_path
-            if path and os.path.exists(path):
-                with open(path, "rb") as f:
-                    self.media = CompressedMedia(
-                        mime_type=self.mime_type,
-                        bytes=f.read(),
-                        format=self.format,
-                    )
-            else:
-                raise FileNotFoundError("Media not found in cache.")
-        return self.media
-
-    def get_bytes(self) -> Optional[bytes]:
-        if self.media is None:
-            self.load_cache()
-        assert self.media
-        return self.media.bytes
-
-    def get_mime_type(self) -> str:
-        return self.mime_type
-
-    def get_format(self) -> str:
-        return self.format
-
-    def to_data_url(self) -> str:
-        self.__ensure_initialized()
-        assert self.media
-        return self.media.to_data_url()
-
-    def to_base64(self) -> str:
-        self.__ensure_initialized()
-        assert self.media
-        return self.media.to_base64()
+    @classmethod
+    def read(cls, hash: bytes) -> Optional[InMemoryMedia]:
+        if (path := cls.__save_path(hash)).exists():
+            return InMemoryMedia.from_bytes(path.read_bytes())
 
 
-class CachingProvider(Protocol):
+class DiskMediaCachingProvider(Protocol):
     """Media cache construction and restoration, independent of the codec backend.
 
     Select a concrete provider with get_caching_provider(), then construct it
     without arguments. Cache dictionaries retain only their source-data hash.
     """
 
-    def cache_image(self, data_bytes: bytes | None = None,
-                    hash_value: str | None = None) -> MediaCache: ...
+    @staticmethod
+    def cache_image(
+        data_bytes: Optional[bytes] = None,
+        hash_value: Optional[bytes] = None,
+        **metadata
+    ) -> bytes: ...
 
-    def cache_audio(self, data_bytes: bytes | None = None,
-                    hash_value: str | None = None,
-                    strict: bool = False) -> MediaCache: ...
+    @staticmethod
+    def cache_audio(
+        data_bytes: Optional[bytes] = None,
+        hash_value: Optional[bytes] = None,
+        **metadata
+    ) -> bytes: ...
 
-    def load_image(self, data: dict) -> MediaCache:
-        if not (hash_value := data.get("hash")):
-            raise ValueError("Hash value is required to load a media cache.")
-        return self.cache_image(hash_value=hash_value)
-
-    def load_audio(self, data: dict) -> MediaCache:
-        if not (hash_value := data.get("hash")):
-            raise ValueError("Hash value is required to load a media cache.")
-        return self.cache_audio(hash_value=hash_value)
+    @staticmethod
+    def load_media(hash: bytes) -> InMemoryMedia | None:
+        return DiskMediaCacheSystem.read(hash)
 
 
-def get_caching_provider() -> type[CachingProvider]:
+def get_caching_provider() -> type[DiskMediaCachingProvider]:
     try:
         from .providers.ffmpeg import FFmpegProvider
         return FFmpegProvider

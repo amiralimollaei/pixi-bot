@@ -8,7 +8,7 @@ from telegram.constants import ChatMemberStatus, ChatType
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
-from ..caching import MediaCache, get_caching_provider
+from ..caching import MediaCacheSystem, get_caching_provider
 from ..model.enums import Messages, Platform
 from ..platform import PlatformMessage, ChannelMeta, GuildMeta, PlatformProvider
 from .message.telegram import TelegramMessageImpl
@@ -152,13 +152,13 @@ class TelegramProvider(PlatformProvider):
             else:
                 break
 
-    async def get_user_avatar(self, user_id: int) -> MediaCache | None:
+    async def get_user_avatar(self, user_id: int) -> bytes | None:
         try:
             file = await self.application.bot.get_user_profile_photos(user_id)
             if file.photos:
                 photo = file.photos[0][-1]  # Get the highest resolution photo
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
-                return get_caching_provider()().cache_image(bytes(image_bytes))
+                return get_caching_provider().cache_image(bytes(image_bytes))
         except telegram.error.BadRequest as e:
             self.logger.error(f"Failed to fetch user avatar: {e}")
             return None

@@ -2,26 +2,18 @@ import subprocess
 import tempfile
 
 from ....storage.paths import PixiPaths
-from ... import CompressedMedia, DiskMediaCache, UnsupportedMediaException
+from ... import InMemoryMedia, DiskMediaCacheSystem
 
 CACHE_SAMPLERATE = 16000
 CACHE_BITRATE = 32000
 CACHE_MAX_DURATION = 30
 
 
-class AudioCache(DiskMediaCache):
-    def __init__(self, data_bytes: bytes | None = None,
-                 hash_value: str | None = None, strict: bool = False):
-        self.strict = strict
-        super().__init__(
-            str(PixiPaths.cache() / "audio"),
-            format="aac",
-            mime_type="audio/aac",
-            data_bytes=data_bytes,
-            hash_value=hash_value,
-        )
+class AudioCache(DiskMediaCacheSystem):
+    directory = PixiPaths.cache() / "media"
 
-    def compress(self, data_bytes: bytes) -> CompressedMedia:
+    @classmethod
+    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
         max_samples = CACHE_SAMPLERATE * CACHE_MAX_DURATION
         # Keep decoded PCM out of Python memory. One extra sample detects cutoff.
         with tempfile.NamedTemporaryFile() as source, tempfile.TemporaryFile() as pcm:
@@ -42,10 +34,6 @@ class AudioCache(DiskMediaCache):
                 check=True,
             )
             exceeds_max_duration = pcm.tell() > max_samples * 2
-            if self.strict and exceeds_max_duration:
-                raise UnsupportedMediaException(
-                    f"Audio should not be longer than {CACHE_MAX_DURATION} seconds."
-                )
             pcm.seek(0)
             result = subprocess.run(
                 [
@@ -61,9 +49,12 @@ class AudioCache(DiskMediaCache):
                 stderr=subprocess.PIPE,
                 check=True,
             )
-        return CompressedMedia(
-            mime_type=self.mime_type,
-            bytes=result.stdout,
-            format=self.format,
-            metadata=dict(duration=CACHE_MAX_DURATION, is_cut_off=exceeds_max_duration),
+        return InMemoryMedia(
+            mime_type="audio/aac",
+            buffer=result.stdout,
+            metadata=dict(
+                duration=CACHE_MAX_DURATION,
+                is_cut_off=exceeds_max_duration,
+                **metadata
+            ),
         )
