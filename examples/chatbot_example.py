@@ -1,7 +1,7 @@
-import json
 import asyncio
+import json
 
-from pixi.chatting import AsyncChatbotInstance, AssistantPersona
+from pixi.ai.chatting import AssistantPersona, AsyncChatbotInstance
 from pixi.utils import load_dotenv
 
 

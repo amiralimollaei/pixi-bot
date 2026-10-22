@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, AsyncIterator, Generic, Optional, TypeVar
 
-from ..apis.http import get_http_client_provider
+from ..http import get_http_client_provider
 
 HTTPClient = get_http_client_provider()  # type: ignore[reportUnknownVariableType]
 

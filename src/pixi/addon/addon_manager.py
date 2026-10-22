@@ -1,9 +1,10 @@
-import os
 import glob
-import logging
 import importlib.util
+import logging
+import os
 
 from ..storage.paths import PixiPaths
+
 
 class AddonManager:
     def __init__(self, bot):

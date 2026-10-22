@@ -5,14 +5,14 @@ import json
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
-from .agents import RetrievalAgent
-from .model.chatting.callbacks import AsyncTool, ToolContext
+from ..ai.agents import RetrievalAgent
+from ..ai.chatting.callbacks import AsyncTool, ToolContext
 
 if TYPE_CHECKING:
-    from .apis.wikimedia import AsyncWikimediaAPI
-    from .chatting import AsyncChatbotInstance
+    from ..ai.chatting import AsyncChatbotInstance
+    from ..apis.wikimedia import AsyncWikimediaAPI
+    from ..storage.database import DirectoryDatabase
     from .client import PixiClient
-    from .storage.database import DirectoryDatabase
 
 
 def create_database_tools(
@@ -80,7 +80,7 @@ def create_database_tools(
                 return "no result: no id specified"
 
             if client.embedding_model:
-                from .rag.client import AsyncRAGClient
+                from ..ai.rag.client import AsyncRAGClient
 
                 rag = AsyncRAGClient(client.auth, client.embedding_model)
                 entries = await asyncio.gather(*[
@@ -179,7 +179,7 @@ def create_mediawiki_tools(
             ])
 
             if client.embedding_model:
-                from .rag.client import AsyncRAGClient
+                from ..ai.rag.client import AsyncRAGClient
 
                 rag = AsyncRAGClient(client.auth, client.embedding_model)
                 for i, (page, title) in enumerate(page_context):

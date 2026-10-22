@@ -8,26 +8,25 @@ import os
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator, Awaitable, Callable,
-                    Generator, Iterator, Optional)
+from typing import (TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator,
+                    Awaitable, Callable, Generator, Iterator, Optional)
 
 from pixi.caching import get_caching_provider
 
 if TYPE_CHECKING:
-    from pixi.client import PixiClient
+    from pixi.bot.client import PixiClient
 
-from .openai import AsyncOpenAI, AsyncStream, ChatCompletionChunk
-
-from .coroutine import AsyncScheduler, CoroutineQueueExecutor
-from .model.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
-                                       ToolCallMeta, PartialToolCallMeta,
-                                       Predicate, ToolContext)
-from .model.chatting.persona import AssistantPersona
-from .model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
-from .model.enums import ChatRole
-from .model.storage.message import ChatMessageMeta
-from .storage.paths import PixiPaths, open_resource
-from .utils import clean_dict, exists, format_time_ago
+from ...apis.openai import AsyncOpenAI, AsyncStream, ChatCompletionChunk
+from ...model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
+from ...model.enums import ChatRole
+from ...model.storage.message import ChatMessageMeta
+from ...storage.paths import PixiPaths, open_resource
+from ...utils import (AsyncScheduler, CoroutineQueueExecutor, clean_dict,
+                      exists, format_time_ago)
+from .callbacks import (ActionContext, AsyncAction, AsyncTool,
+                        PartialToolCallMeta, Predicate, ToolCallMeta,
+                        ToolContext)
+from .persona import AssistantPersona
 
 
 # takes the last N messages in the message list that match a predicate, and moves them to the
@@ -934,7 +933,7 @@ class AsyncChatbotInstance(AsyncChatClient):
 
     def start_news_background_task(self, news_config, reflection_api):
         """Start the proactive news background task for this instance."""
-        from .news import NewsBackgroundTask
+        from ...bot.news import NewsBackgroundTask
 
         self.news_task = NewsBackgroundTask(
             news_config=news_config,

@@ -3,7 +3,7 @@ from typing import Any, AsyncIterator, Optional
 
 import httpx
 
-from . import HTTPClient, ClientResponse, build_url
+from . import ClientResponse, HTTPClient, build_url
 
 
 class HTTPXClientResponse(ClientResponse):

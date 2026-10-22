@@ -1,12 +1,11 @@
 from typing import Optional
 
-from .api import APIBase
-
+from . import HTTPAPI
 
 BASE_URL = "https://g.tenor.com/v1/"
 
 
-class AsyncTenorAPI(APIBase):
+class AsyncTenorAPI(HTTPAPI):
 
     def __init__(self, api_key: Optional[str] = None):
         super().__init__(base=BASE_URL, api_key=api_key, api_key_env_var="TENOR_API_KEY", api_key_key="key")

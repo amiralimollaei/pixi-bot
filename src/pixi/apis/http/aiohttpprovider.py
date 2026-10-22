@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp.client import _RequestContextManager
 from yarl import URL
 
-from . import HTTPClient, ClientResponse, build_url
+from . import ClientResponse, HTTPClient, build_url
 
 
 class AIOHTTPClientResponse(ClientResponse):

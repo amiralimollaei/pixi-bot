@@ -2,11 +2,11 @@ import array
 import logging
 import math
 
-from .. import openai
-from ..model.config.openai import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
-from ..model.search.document import (DocumentReference, TextPieceMatch,
-                                     VectorTextPiece)
-from .embedding import EmbeddingCache
+from ...apis import openai
+from ...caching.embedding import EmbeddingCache
+from ...model.config.openai import OpenAIAuthConfig, OpenAIEmbeddingModelConfig
+from ...model.search.document import (DocumentReference, TextPieceMatch,
+                                      VectorTextPiece)
 from .splitter import SmartSplitter
 
 

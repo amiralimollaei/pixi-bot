@@ -4,10 +4,10 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
-from ..storage.message import ChatMessageMeta, ToolCallMeta
+from ...model.storage.message import ChatMessageMeta, ToolCallMeta
 
 if TYPE_CHECKING:
-    from ...chatting import AsyncChatbotInstance
+    from . import AsyncChatbotInstance
 
 
 @dataclass

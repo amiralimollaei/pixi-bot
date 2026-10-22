@@ -1,11 +1,20 @@
+from dataclasses import dataclass
 import logging
 from typing import Optional
 
-from ..model.search.wikimedia import WikiMediaSearchResult
-from .api import APIBase
+from . import HTTPAPI
 
 
-class AsyncWikimediaAPI(APIBase):
+@dataclass(frozen=True)
+class WikiMediaSearchResult:
+    title: str
+    snippet: Optional[str] = None
+    url: Optional[str] = None
+    description: Optional[str] = None
+    pageid: Optional[str] = None
+
+
+class AsyncWikimediaAPI(HTTPAPI):
     def __init__(self, base_url: str):
         super().__init__(base=base_url, api_key=None, api_key_env_var=None)
 

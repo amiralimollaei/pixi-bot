@@ -5,12 +5,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .model.chatting.callbacks import ActionContext
-from .utils import format_time_later
-from .apis.tenor import AsyncTenorAPI
+from ..ai.chatting.callbacks import ActionContext
+from ..apis.tenor import AsyncTenorAPI
+from ..utils import format_time_later
 
 if TYPE_CHECKING:
-    from .chatting import AsyncChatbotInstance
+    from ..ai.chatting import AsyncChatbotInstance
 
 
 @dataclass(frozen=True)

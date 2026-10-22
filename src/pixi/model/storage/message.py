@@ -2,7 +2,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
-from ...platform.message import PlatformMessage
+from ...platform import PlatformMessage
 from ...utils import clean_dict
 from ..enums import ChatRole
 

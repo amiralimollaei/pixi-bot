@@ -4,20 +4,20 @@ import math
 from dataclasses import asdict
 from typing import Any, Callable, Coroutine, Optional
 
+from ..addon import AddonManager
+from ..ai.agents import AgentBase
+from ..ai.chatting import AsyncChatbotInstance, ChatbotInstanceRegistry
+from ..ai.chatting.callbacks import AsyncAction, AsyncTool
+from ..caching import get_caching_provider
+from ..model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
+                            NewsConfig, OpenAIAuthConfig,
+                            OpenAIEmbeddingModelConfig,
+                            OpenAILanguageModelConfig, PixiFeatures)
+from ..model.enums import ChatRole, Platform
+from ..model.storage.message import ChatMessageMeta
+from ..platform import PlatformMessage, PlatformProvider, get_platform_provider
 from .actions import (CancelScheduleAction, NoteAction, ReactAction,
                       ScheduleAction, SendAction, SendGifAction)
-from .addon import AddonManager
-from .agents import AgentBase
-from .caching import get_caching_provider
-from .chatting import AsyncChatbotInstance, ChatbotInstanceRegistry
-from .model.chatting.callbacks import AsyncAction, AsyncTool
-from .model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
-                           NewsConfig, OpenAIAuthConfig,
-                           OpenAIEmbeddingModelConfig,
-                           OpenAILanguageModelConfig, PixiFeatures)
-from .model.enums import ChatRole, Platform
-from .model.storage.message import ChatMessageMeta
-from .platform import PlatformMessage, PlatformProvider, get_platform_provider
 from .tools import (FetchChannelHistoryTool, create_database_tools,
                     create_mediawiki_tools)
 
@@ -90,7 +90,7 @@ class PixiClient:
 
         if PixiFeatures.GIFSearch in self.features:
             try:
-                from .apis.tenor import AsyncTenorAPI
+                from ..apis.tenor import AsyncTenorAPI
                 SendGifAction.gif_api = AsyncTenorAPI()
             except Exception:
                 self.logger.warning("gif search api failed to initialize, gif features will not be available.")
@@ -149,7 +149,7 @@ class PixiClient:
         Logs a warning for any configured model IDs not found in the API's model list.
         Raises RuntimeError if the API is unreachable.
         """
-        from . import openai
+        from ..apis import openai
 
         self.logger.info(f"Verifying API connectivity and model availability at {self.auth.base_url}...")
 
@@ -234,7 +234,7 @@ class PixiClient:
         self.register_action(ReactAction())
 
     def register_database_tool(self, dataset_config: DatasetConfig):
-        from .storage.database import DirectoryDatabase
+        from ..storage.database import DirectoryDatabase
 
         if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
@@ -252,7 +252,7 @@ class PixiClient:
             self.logger.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
             return
 
-        from .apis.wikimedia import AsyncWikimediaAPI
+        from ..apis.wikimedia import AsyncWikimediaAPI
 
         wiki_api = AsyncWikimediaAPI(url)
 

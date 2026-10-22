@@ -4,13 +4,13 @@ import logging
 import random
 from typing import Optional
 
-from .apis.rss import AsyncRSSAPI
-from .chatting import AsyncChatbotInstance
-from .model.config.news import NewsConfig
-from .model.enums import ChatRole
-from .model.storage.message import ChatMessageMeta
-from .platform import PlatformProvider
-from .storage.paths import open_resource
+from ..apis.rss import AsyncRSSAPI
+from ..ai.chatting import AsyncChatbotInstance
+from ..model.config.news import NewsConfig
+from ..model.enums import ChatRole
+from ..model.storage.message import ChatMessageMeta
+from ..platform import PlatformProvider
+from ..storage.paths import open_resource
 
 
 class NewsBackgroundTask:

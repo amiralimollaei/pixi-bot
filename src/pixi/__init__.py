@@ -326,7 +326,7 @@ def main():
     PixiPaths.set_root(args.pixi_directory)
     copy_default_resources()
 
-    from .client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
+    from .bot.client import PixiClient  # shouldn't have to be imported after PixiPaths.set_root but just in case
 
     return PixiClient(
         platform=Platform[args.platform.upper()],

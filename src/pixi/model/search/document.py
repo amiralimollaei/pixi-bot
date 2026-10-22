@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from pixi.rag.embedding import EmbeddingCache
+from pixi.caching.embedding import EmbeddingCache
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Optional
 
-from .api import APIBase
+from . import HTTPAPI
 
 # helpers
 
@@ -28,7 +28,7 @@ class NewsItem:
 
 # main
 
-class AsyncRSSAPI(APIBase):
+class AsyncRSSAPI(HTTPAPI):
     """Fetches news headlines from an RSS/Atom feed URL."""
 
     def __init__(self, url: str, api_key: Optional[str] = None):
