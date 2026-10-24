@@ -1,7 +1,6 @@
 import subprocess
 import tempfile
 
-from ....storage.paths import PixiPaths
 from ... import InMemoryMedia, DiskMediaCacheSystem
 
 CACHE_SAMPLERATE = 16000
@@ -10,8 +9,6 @@ CACHE_MAX_DURATION = 30
 
 
 class AudioCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
-
     @classmethod
     def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
         max_samples = CACHE_SAMPLERATE * CACHE_MAX_DURATION

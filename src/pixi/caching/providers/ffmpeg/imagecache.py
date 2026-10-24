@@ -1,15 +1,11 @@
 import subprocess
 
-from pixi.storage.paths import PixiPaths
-
 from ... import InMemoryMedia, DiskMediaCacheSystem
 
 THUMBNAIL_SIZE = 512
 
 
 class ImageCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
-    
     @classmethod
     def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
         result = subprocess.run(

@@ -1,9 +1,7 @@
 import tempfile
-from typing import Optional
 
 import av
 
-from ....storage.paths import PixiPaths
 from ... import InMemoryMedia, DiskMediaCacheSystem
 
 
@@ -13,8 +11,6 @@ THUMBNAIL_SIZE = 512
 
 
 class ImageCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
-
     @classmethod
     def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
         with tempfile.NamedTemporaryFile() as tmp_in, tempfile.TemporaryFile() as tmp_out:
@@ -41,3 +37,5 @@ class ImageCache(DiskMediaCacheSystem):
             buffer=image_bytes,
             metadata=metadata
         )
+
+print(ImageCache.directory)

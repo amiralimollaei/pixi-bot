@@ -4,7 +4,9 @@ import struct
 from base64 import b64encode
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Protocol, Self, Tuple
+from typing import Optional, Protocol, Self
+
+from pixi.storage.paths import PixiPaths
 
 
 class UnsupportedMediaException(Exception):
@@ -136,7 +138,7 @@ class MediaCacheSystem(Protocol):
 class DiskMediaCacheSystem(MediaCacheSystem):
     """Shared on-disk implementation for compressed media caches."""
 
-    directory: Path
+    directory: Path = PixiPaths.cache() / "media"
 
     @classmethod
     def __save_path(cls, hash: bytes) -> Path:

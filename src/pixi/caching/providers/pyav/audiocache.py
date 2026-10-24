@@ -1,10 +1,8 @@
 import tempfile
-from typing import Optional
 
 import av
 
-from ....storage.paths import PixiPaths
-from ... import InMemoryMedia, DiskMediaCacheSystem, UnsupportedMediaException
+from ... import InMemoryMedia, DiskMediaCacheSystem
 
 # constants
 
@@ -14,8 +12,6 @@ CACHE_MAX_DURATION = 30
 
 
 class AudioCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
-
     @classmethod
     def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
         with tempfile.NamedTemporaryFile() as tmp_in, tempfile.TemporaryFile() as tmp_out:
