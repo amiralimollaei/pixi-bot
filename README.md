@@ -26,6 +26,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - python-telegram-bot  (optional, for telegram platform)
 - ffmpeg (on `PATH`, for default media caching)
 - av (legacy fallback for when ffmpeg is not available)
+- llama-server with native Hugging Face/HTTPS download support (optional, for `--llama-hf`, `--llama-helper-hf`, or `--llama-embedding-hf`)
 - uv (recommended, for setting up all the requirements easily in a python virtual environemnt)
 
 ## Getting Started
@@ -40,9 +41,13 @@ There are many extra optional dependecy groups that you may need to install base
 
 > \[\*\] you have to install at least one of these dependecy groups for the bot to function
 
-You should also have your own OpenAI compatible API URL and API Key and provide that to pixi, using the command line interface and/or environment variables
-and you should also choose a large langauge model to use for the bot and optionally a seperate one for agentic tools, e.g. online/offline search tools, based on my testing, it works best with `google/gemini-2.0-flash-001`, works best with agentic models.
-optionally you may also choose an embedding model to process web search or offline search content, works best with `BAAI/bge-m3-multi` but you can use any other model.
+Choose either an OpenAI-compatible API model with `--model`, or a local GGUF
+language model with `--llama-hf`. API models use the configured API URL and
+`OPENAI_API_KEY` (or `--no-auth` for unauthenticated backends). An entirely local
+configuration does not require an API key or contact the remote API for model
+verification. Helper models for agentic tools can independently use either backend;
+without an explicit helper selection, they share the main model adapter and process.
+Optionally choose API embeddings with `--embedding-model`, or explicitly select a local GGUF model with `--llama-embedding-hf CompendiumLabs/bge-small-en-v1.5-gguf:Q4_K_M`. The local `llama-server` starts on the first cache miss, downloads weights using its own Hugging Face support, and stops after 60 idle seconds by default. `--llama-embedding-idle-timeout` changes that interval; the next miss restarts the server. Local inference is never selected as an API fallback.
 
 ### Installation using UV (Recommended)
 
@@ -92,129 +97,286 @@ pixi-cli -p [platform] [options]
 
 ## CLI Usage
 
-> the following message is provided by running `pixi-cli --help`
+Run `pixi-cli --help` for all platform, feature, storage, and model options.
 
-```text
-usage: pixi-cli [-h] --platform {discord,telegram}
-                [--pixi-directory PIXI_DIRECTORY]
-                [--log-level {debug,info,warning,error,critical}]
-                [--instance-idle-timeout INSTANCE_IDLE_TIMEOUT]
-                [--api-url API_URL] [--auth | --no-auth] --model MODEL
-                [--model-max-context MODEL_MAX_CONTEXT]
-                [--helper-model HELPER_MODEL]
-                [--helper-model-max-context HELPER_MODEL_MAX_CONTEXT]
-                [--embedding-model EMBEDDING_MODEL]
-                [--embedding-model-max-context EMBEDDING_MODEL_MAX_CONTEXT]
-                [--embedding-model-dimension EMBEDDING_MODEL_DIMENSION]
-                [--embedding-model-min-size EMBEDDING_MODEL_MIN_SIZE]
-                [--embedding-model-max-size EMBEDDING_MODEL_MAX_SIZE]
-                [--tool-calling | --no-tool-calling]
-                [--tool-logging | --no-tool-logging]
-                [--wiki-search | --no-wiki-search]
-                [--gif-search | --no-gif-search]
-                [--image-support | --no-image-support]
-                [--audio-support | --no-audio-support]
-                [--news-feed-url NEWS_FEED_URL]
-                [--news-interval NEWS_INTERVAL]
-                [--news-probability NEWS_PROBABILITY]
-                [--environment-whitelist | --no-environment-whitelist]
-                [--environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]]
-                [--database-names DATABASE_NAMES [DATABASE_NAMES ...]]
-                [--mediawiki-wikis MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]]
+| Role | API selection | Native llama.cpp selection |
+|---|---|---|
+| Main chat (required) | `--model MODEL` | `--llama-hf REPO[:QUANT]` |
+| Helper chat (optional) | `--helper-model MODEL` | `--llama-helper-hf REPO[:QUANT]` |
+| Embeddings (optional) | `--embedding-model MODEL` | `--llama-embedding-hf REPO[:QUANT]` |
 
-Run the Pixi bot, a multi-platform AI chatbot.
+Selections within each role are mutually exclusive. Native inference never acts
+as an API fallback. Main, helper, and embedding servers are loaded lazily and
+unloaded after 60 idle seconds by default; the timeout does not run during a request.
 
-options:
-  -h, --help            show this help message and exit
-  --platform, -p {discord,telegram}
-                        Platform to run the bot on.
-  --pixi-directory, -pd PIXI_DIRECTORY
-                        The root directory for configuration files,
-                        addons, userdata, assets and cache, defaults to
-                        "~/.pixi/"
-  --log-level, -l {debug,info,warning,error,critical}
-                        Set the logging level.
-  --instance-idle-timeout INSTANCE_IDLE_TIMEOUT
-                        Save and unload inactive conversations after this many
-                        seconds (default: 900).
-  --api-url, -a API_URL
-                        OpenAI Compatible API URL to use for the bot
-  --auth, --no-auth     whether or not to authorize to the API backends
-  --model, -m MODEL     Language Model to use for the main chatbot bot
-  --model-max-context, -ctx MODEL_MAX_CONTEXT
-                        Maximum model context size (in tokens), pixi
-                        tries to apporiximately stay within this
-                        context size, Default is '16192`.
-  --helper-model, -hm HELPER_MODEL
-                        Language Model to use for agentic tools
-  --helper-model-max-context, -hctx HELPER_MODEL_MAX_CONTEXT
-                        Maximum helper model context size (in tokens),
-                        pixi tries to apporiximately stay within this
-                        context size, Default is '16192`.
-  --embedding-model, -em EMBEDDING_MODEL
-                        Embedding Model to use for embedding tools
-  --embedding-model-max-context, -ectx EMBEDDING_MODEL_MAX_CONTEXT
-                        Maximum embedding model context size (in
-                        tokens), pixi tries to apporiximately stay
-                        within this context size, Default is '16192`.
-  --embedding-model-dimension, -ed EMBEDDING_MODEL_DIMENSION
-                        Dimension to use for the embedding model,
-                        Default is '768`.
-  --embedding-model-min-size, -emin EMBEDDING_MODEL_MIN_SIZE
-                        Minimum chunk size to use for the embedding
-                        chunk tokenizer, Default is '256`.
-  --embedding-model-max-size, -emax EMBEDDING_MODEL_MAX_SIZE
-                        Maximum chunk size to use for the embedding
-                        chunk tokenizer, Default is '1024`.
-  --tool-calling, --no-tool-calling
-                        allows pixi to use built-in and/or plugin
-                        tools, tool calling can only be used if the
-                        model supports them
-  --tool-logging, --no-tool-logging
-                        verbose logging for tool calls (enabled by
-                        default when running with logging level DEBUG)
-  --wiki-search, --no-wiki-search
-                        allows pixi to search any mediawiki compatible
-                        Wiki
-  --gif-search, --no-gif-search
-                        allows pixi to search for gifs online, and send
-                        them in chat
-  --image-support, --no-image-support
-                        allows pixi to download and process image files
-  --audio-support, --no-audio-support
-                        allows pixi to download and process audio files
-  --news-feed-url, -n NEWS_FEED_URL
-                        RSS/Atom feed URL for proactive news feature.
-                        Enables the news feature if provided.
-  --news-interval NEWS_INTERVAL
-                        Seconds between news checks for proactive news
-                        feature. Default is 3600 (1 hour).
-  --news-probability NEWS_PROBABILITY
-                        Probability of sending a proactive news message
-                        each check (0.0 to 1.0). Default is 0.1.
-  --environment-whitelist, --no-environment-whitelist
-                        whether or not the ids passed to environment
-                        ids are whitelisted or blacklisted
-  --environment-ids ENVIRONMENT_IDS [ENVIRONMENT_IDS ...]
-                        add the id of the environment that the bot is
-                        or is not allowed to respond in (space-
-                        separated). If not provided, the bot will
-                        respond everywhere.
-  --database-names, -db DATABASE_NAMES [DATABASE_NAMES ...]
-                        add the name of databases to use (space-
-                        separated).
-  --mediawiki-wikis, -mw MEDIAWIKI_WIKIS [MEDIAWIKI_WIKIS ...]
-                        add the mediawiki wikis to use (space-
-                        separated), it should follow the format of
-                        `name=url`, Example:
-                        wikipedia=https://www.wikipedia.org/w/
+On shutdown, active conversation, scheduled, and proactive-news tasks (including
+tool workers) are cancelled and awaited before platform shutdown and native-model
+cleanup. No new chat generations or proactive-news loops start during shutdown.
+
+Native main options are `--llama-file FILE`, `--llama-binary PATH`, and
+`--llama-idle-timeout SECONDS`. Helper options use the `--llama-helper-` prefix;
+embedding options use `--llama-embedding-`. These options require the corresponding
+native model selection. The binary defaults to `llama-server` on `PATH`.
+
+`--model-max-context` and `--helper-model-max-context` set chat context sizes
+(default: 16192 tokens; positive values required for local chat). Embedding context
+uses `--embedding-model-max-context`; local embeddings default to the model's native
+context. `--embedding-model-dimension` is API-only.
+
+For a small local text-only chat model:
+
+```sh
+pixi-cli -p discord \
+  --llama-hf LiquidAI/LFM2.5-350M-GGUF \
+  --llama-file LFM2.5-350M-Q4_0.gguf \
+  --model-max-context 4096 \
+  --no-image-support --no-audio-support
 ```
+
+The selected platform's bot token is still required. This model is suitable for
+small smoke checks; response quality and tool-calling ability depend on the model.
+Native chat enables llama.cpp's Jinja chat templates for supported tool calls.
+This adapter does not configure multimodal projector files.
+
+To mix an API main model with a local helper, combine `--model API_MODEL` with
+`--llama-helper-hf REPO[:QUANT]` and, if needed, `--llama-helper-file FILE`.
+API authentication is still required when any selected model uses the API.
+
+### Message storage
+
+Select a backend with `--messages-storage`:
+
+| Backend | Connection configuration | Optional install extra |
+|---|---|---|
+| `disk` (default) | `userdata/messages/` under `--pixi-directory` | None |
+| `sql` | `--messages-storage-url URL`, otherwise `DATABASE_URL` | `sql` |
+| `redis` | `--messages-storage-url URL`, otherwise `REDIS_URL` | `redis` |
+
+An explicit URL takes precedence over the selected backend's environment
+variable. Disk storage ignores database environment variables and rejects a URL.
+`--redis-key-prefix PREFIX` changes the Redis namespace (default:
+`pixi:messages:`); use distinct prefixes for deployments sharing one Redis DB.
+
+### Cache storage
+
+Select media and embedding cache persistence independently with
+`--cache-storage {disk,sql,redis}` (default: `disk`).
+`--cache-storage-url URL` overrides the connection URL; otherwise SQL uses
+`DATABASE_URL` and Redis uses `REDIS_URL`, just like message storage.
+The existing `sql` and `redis` install extras cover both uses.
+`--cache-redis-key-prefix PREFIX` changes the cache prefix (default:
+`pixi:cache:`), independently of the message-history prefix.
+
+Message histories and caches can use the same service URL without mixing data.
+No cache TTL is applied. Redis durability and eviction remain service settings.
+Backend selection does not enable media or configure an embedding model;
+the existing `--image-support`, `--audio-support`, and `--embedding-model`
+options still apply.
+
+### Railway
+
+Use Railway's existing SQL/Redis services; Pixi does not provision containers
+or require a Compose stack. In the bot service's Railway variables, reference
+the database service's connection URL as `DATABASE_URL` or `REDIS_URL`.
+Use the private URL containing its `*.railway.internal` hostname and internal
+port, not the public TCP proxy. Connection URLs carry authentication and any
+SSL options; no application-specific DNS configuration is needed.
+
+Install the matching extra alongside your platform extra, for example:
+
+```sh
+pip install 'pixi-bot[telegram,sql,redis]'
+```
+
+For SQL histories and Redis caches, set both URL variables and use:
+
+```sh
+pixi-cli -p telegram --model YOUR_MODEL --messages-storage sql --cache-storage redis
+```
+
+SQL storage accepts SQLAlchemy URLs. SQLite uses `sqlite:////absolute/path.db`;
+plain `postgresql://` and `postgres://` URLs use psycopg 3, included in the `sql`
+extra. Explicit driver URLs are preserved; other databases need their driver
+installed separately, for example `pymysql` for `mysql+pymysql://...`.
+The database must already exist and the account must be able to create tables.
+Redis accepts `redis://`, `rediss://`, and `unix://` URLs.
+
+## Architecture
+
+Pixi keeps feature-oriented packages with explicit ports between application
+behavior and external systems:
+
+| Module | Responsibility |
+|---|---|
+| `pixi.cli` | Arguments, dotenv settings, and logging |
+| `pixi.bootstrap` | Production composition: selects adapters, loads resources, registers built-ins and addons |
+| `pixi.bot` | Message handling, conversation lifecycle, scheduled actions, and proactive news |
+| `pixi.ai.chatting` | Provider-independent completion, tool execution, and inline action processing |
+| `pixi.ai.rag` | Chunking and retrieval using injected embedding and cache services |
+| `pixi.model` | Portable message, platform metadata, and embedding values |
+| `pixi.interfaces` | Platform, model-stream, embedding-cache, and message-storage contracts |
+| `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters |
+
+Application code consumes ports; adapters implement them. Concrete adapter
+selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
+`create_bot(...)` builds the production application. Construct `PixiClient`
+directly when supplying your own platform, model, message storage, and prompt
+resources. Neither the chat client nor the RAG client constructs an API client.
+
+Model streams use portable `ContentDelta`, `ReasoningDelta`, `ToolCallDelta`, and
+`ChatFinished` events. Streams must support `aclose()` so cancellation releases
+their transport. OpenAI request serialization and stream translation live in
+`pixi.apis.openai`; HTTP implementation details do not enter the chat engine.
+
+OpenAI response values and their JSON conversion live in `pixi.model.openai`.
+HTTP requests and SSE framing live in `pixi.apis.openai.transport`; client/resource
+classes live in `pixi.apis.openai.client`, and API errors in
+`pixi.apis.openai.exceptions`. The generic closable `AsyncStream` belongs to
+`pixi.async_utils`. Import these modules explicitly: the OpenAI package initializer
+has no implementation, re-exports, or third-party `openai.*` module registration.
+
+Tool calls execute serially in first-seen order as soon as their streamed arguments
+form complete JSON objects, while the model stream continues. Results are buffered
+until the source stream ends and tool execution finishes, then added to history
+before any continuation request. Calls with omitted arguments execute at the end
+of the stream.
+
+`AsyncChatbotInstance` and its per-bot `ChatbotInstanceRegistry` live in
+`pixi.bot.conversations`. `AsyncChatClient` receives a `MessagesStorage` adapter
+and a `history_key`; storage is the source of truth, not a resident history list.
+Its synchronous storage contract is:
+
+| Operation | Behavior |
+|---|---|
+| `exists(key)` / `count(key)` | Inspect a history without reading its messages; missing histories have count zero |
+| `append(key, messages)` | Atomically append only new messages; an empty batch creates an existing empty history |
+| `iter_messages(key, start=0, stop=None, reverse=False)` | Lazily read the absolute half-open range `[start, stop)` using bounded pages |
+| `truncate(key, length)` | Remove a tail without rewriting the retained messages or growing the history |
+| `delete(key)` | Remove a history; deleting an absent key is a no-op |
+
+The client fetches a recent context within its approximate model-context budget
+for each inference request and releases it afterward. Rearrangement operates on
+that bounded context, not the entire stored history. `iter_messages()`,
+`message_count`, and `last_message` expose history without loading a full snapshot.
+Idle eviction releases conversation runtime state; it neither saves nor reloads
+message histories.
+
+Messages added outside a request are appended immediately. During a request,
+only its new messages are held in a task-local delta, including tool calls and
+results. Successful requests append that delta as one batch. Failed, cancelled,
+or explicitly closed requests discard it; `temporal=True` discards it even on
+success. Temporary requests do not persist their input prompt. Rollback therefore
+does not copy history or truncate messages committed by another concurrent request.
+Nested requests have independent deltas and merge into their parent only on
+success. Scheduled callbacks start detached from the originating request and
+read the current stored history rather than retaining an expired request delta.
+
+`pixi.storage.messages.MessagesDiskStorage(directory)` uses the standard-library
+SQLite implementation and stores individual indexed message rows in
+`directory/messages.sqlite3`; it needs no SQL install extra. Production histories
+live under `userdata/messages/` in the configured data root. `PixiClient` and
+`create_bot` accept `messages_storage=...`; chatbot instances and registries accept
+`store=...` and use keys of the form `{platform_or_prefix}:{identifier}`.
+
+`pixi.storage.sql.MessagesSQLStorage(url)` stores individual JSON message rows in
+`pixi_history_messages`, with atomic append positions tracked by
+`pixi_history_heads`. `pixi.storage.redis.MessagesRedisStorage(url,
+key_prefix="pixi:messages:")` uses Redis lists under `{key_prefix}v2:{key}`.
+Neither backend rewrites the previous messages when appending. Both preserve
+ordering and distinguish missing histories from existing empty histories.
+Call `close()` on SQL/Redis storage when finished. CLI-created backends are closed
+on exit; callers own storage injected into `create_bot` or `PixiClient`.
+
+Only message data is persisted, including metadata, timestamps, media hashes,
+tool calls/results, and channel IDs. Persona, prompts, note visibility, scheduler
+state, agent context, and other runtime settings are not stored. Note visibility
+resets after eviction. The former JSON-array snapshots, SQL snapshot table, and
+unversioned Redis keys are left untouched but are not read or automatically
+migrated; this is a storage-layout cutover.
+
+Agents receive storage and a history key when constructed:
+
+```python
+from pixi.ai.agents import RetrievalAgent
+from pixi.storage.messages import MessagesDiskStorage
+
+storage = MessagesDiskStorage("./histories")
+agent = RetrievalAgent(
+    storage=storage, history_key="agent:research",
+    context=["Current reference material"], chat_model=chat_model, model=model,
+)
+await agent.execute_query("What is relevant?", temporal=False)
+```
+
+Constructing another client with the same adapter and key accesses the same
+history without a load step. Agent queries default to `temporal=True`; use
+`temporal=False` to persist the query and response. Agents created by the bot
+share its storage and receive distinct history keys unless one is supplied.
+The snapshot `save`/`load` and `get_messages`/`set_messages` APIs are removed.
+Storage errors propagate from the backend.
+
+For Python integrations, construct `CacheDiskStorage(directory)` from
+`pixi.caching.disk`, `CacheSQLStorage(url)` from `pixi.caching.sql`, or
+`CacheRedisStorage(url, key_prefix=...)` from `pixi.caching.redis`.
+Pass it to `create_bot(cache_storage=storage)` to use it throughout the bot.
+Individual consumers can use `get_media_cache(storage=storage)` and
+`get_embedding_cache(storage=storage, embedding_model=backend)`.
+Call `close()` on injected SQL/Redis storage when finished; the caller owns
+those connections. CLI-created connections are closed automatically.
+Disk remains the default under the configured root's `cache/` directory.
+Old disk cache layouts are not read or migrated.
+
+Construct `LlamaEmbeddingModel(config)`
+from `pixi.inference.embeddings` for native llama.cpp inference, and call its
+`aclose()` when finished. Production bootstrap registers that method as a bot
+shutdown hook, so stopping the bot reaps its local `llama-server` process.
+
+`LlamaChatModel(LlamaLanguageModelConfig(...))` in `pixi.inference.chat` implements
+the same `ChatModel` streaming protocol as the API adapter, including content,
+reasoning, and tool-call events. It and `LlamaEmbeddingModel` inherit the shared
+`LlamaServer` lifecycle ABC in `pixi.inference.server`: process startup, readiness,
+request serialization, idle shutdown, cancellation-safe cleanup, and explicit
+`aclose()`. Each adapter owns its process; the default helper reuses the main adapter.
+Closing a partial chat stream releases its HTTP connection and reaps the local
+server. Applications that stop consuming a stream early must call its `aclose()`
+(for example, through `contextlib.aclosing`).
+
+SQL/Redis caching still requires FFmpeg or the optional `media` install extra
+for image/audio conversion.
+
+Chat history contains portable `ChatMessageMeta` values from `pixi.model.chat`.
+Live platform messages belong to action/tool contexts, not saved history.
+`context.reference_message` is conversation data;
+`context.platform_message` is the current reply/reaction handle. Scheduled
+actions retain their original execution context. Cancelling a schedule frees
+its ID immediately; cleanup of the cancelled task cannot remove a replacement
+scheduled with the same ID.
+
+Imports use their owning modules: `pixi.ai.chatting.client.AsyncChatClient`,
+`pixi.bot.conversations.AsyncChatbotInstance`, and
+`pixi.interfaces.platform.PlatformProvider`. Package initializers do not retain
+compatibility aliases for the former locations.
+
+Run the storage and cache regression checks (no external API calls or model downloads):
+
+```sh
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+SQL tests run against temporary SQLite databases when the `sql` extra is
+installed. Redis integration tests require the `redis` extra and an existing
+server; they use unique namespaces and delete only their own keys:
+
+```sh
+PIXI_TEST_REDIS_URL=redis://localhost:6379/15 PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
 
 ## Custom Actions and Tools
 
 `PixiClient.register_action(action)` and `register_tool(tool)` accept instances
 implementing `AsyncAction` and `AsyncTool` from
-`pixi.model.chatting.callbacks`.
+`pixi.ai.chatting.callbacks`.
 
 Actions provide `name`, `field_name`, `description`, `is_visible`,
 `should_register(instance)`, and `async call(context, value)`. The value is a
@@ -223,7 +385,7 @@ string, or `None` when the model omits it. Tools provide `name`, `description`,
 `should_register(instance)`, and `async call(context, **arguments)`. Define metadata on the class.
 
 ```python
-from pixi.model.chatting.callbacks import ActionContext, ToolContext
+from pixi.ai.chatting.callbacks import ActionContext, ToolContext
 
 
 class ShoutAction:
@@ -238,10 +400,8 @@ class ShoutAction:
 
     @classmethod
     async def call(cls, context: ActionContext, value: str | None) -> None:
-        if value and context.reference_message:
-            message = context.reference_message.origin
-            if message is not None:
-                await message.send(value.upper())
+        if value and context.platform_message is not None:
+            await context.platform_message.send(value.upper())
 
 
 class CounterTool:
@@ -273,9 +433,10 @@ client.register_tool(CounterTool())
 
 Client registrations apply to subsequently created chats. Each chat calls
 `should_register(self)` when it is constructed; return `False` to exclude an
-action or tool from that chat. State belongs to the class, not the registered
-instance; use `context.parent_instance` for chat-specific state. Both contexts also expose
-`reference_message`. Invisible actions (`is_visible = False`) do not count as a
+action or tool from that chat. Use instance attributes for per-bot state and
+`context.parent_instance` for chat-specific state; classmethod-based actions and
+tools are also supported. Both contexts expose `reference_message` and an optional
+live `platform_message`. Invisible actions (`is_visible = False`) do not count as a
 visible response. Tool registration is ignored when tool calling is disabled.
 
 ## Lisence

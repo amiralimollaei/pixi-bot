@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
-from ...model.storage.message import ChatMessageMeta, ToolCallMeta
+from ...model.chat import ChatMessageMeta, ToolCallMeta
 
 if TYPE_CHECKING:
-    from . import AsyncChatbotInstance
+    from ...bot.conversations import AsyncChatbotInstance
+    from ...interfaces.platform import PlatformMessage
 
 
 @dataclass
@@ -30,14 +31,14 @@ class PartialToolCallMeta:
 class ToolContext:
     reference_message: Optional[ChatMessageMeta] = None
     parent_instance: Optional[AsyncChatbotInstance] = None
-    # more to be added
+    platform_message: PlatformMessage | None = None
 
 
 @dataclass
 class ActionContext:
     reference_message: Optional[ChatMessageMeta] = None
     parent_instance: Optional[AsyncChatbotInstance] = None
-    # more fields to be added
+    platform_message: PlatformMessage | None = None
 
 
 Predicate = Callable[..., bool]

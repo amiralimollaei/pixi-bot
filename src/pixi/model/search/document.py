@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from pixi.caching.embedding import EmbeddingCache
+from ..embedding import Embedding
 
 
 @dataclass(frozen=True)
@@ -23,16 +23,13 @@ class DocumentReference:
 
 @dataclass(frozen=True)
 class VectorTextPiece:
-    data: EmbeddingCache
+    data: Embedding
     reference: DocumentReference
 
     @property
-    def vec(self):
-        return self.data.vec
-
+    def vec(self): return self.data.vec
     @property
-    def text(self):
-        return self.data.text
+    def text(self): return self.data.text
 
 
 @dataclass(frozen=True)

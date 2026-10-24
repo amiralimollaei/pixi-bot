@@ -7,24 +7,30 @@ from typing import IO, Any, Callable
 import discord
 from discord import app_commands
 
-from ..caching import UnsupportedMediaException, get_caching_provider
+from ..caching import MediaCacheProvider, UnsupportedMediaException
 from ..model.enums import ChatType, Platform
-from ..platform import (ChannelMeta, GuildMeta, PlatformMessage,
-                        PlatformProvider, ReflectionEnvironment,
-                        ReflectionMessageAuthor)
+from ..model.platform import (ChannelMeta, GuildMeta, PlatformEnvironment,
+                              PlatformMessageAuthor)
+from ..interfaces.platform import PlatformMessage, PlatformProvider
 
 
 @dataclass(frozen=True)
 class DiscordMessage(PlatformMessage):
     content: str | None
-    author: ReflectionMessageAuthor
+    author: PlatformMessageAuthor
     id: int
-    environment: ReflectionEnvironment
+    environment: PlatformEnvironment
     platform: Platform
     origin: discord.Message | discord.Interaction
+    media_cache: MediaCacheProvider | None = None
 
     @classmethod
-    def from_origin(cls, message: discord.Message | discord.Interaction) -> 'DiscordMessage':
+    def from_origin(
+        cls,
+        message: discord.Message | discord.Interaction,
+        *,
+        media_cache: MediaCacheProvider | None = None,
+    ) -> 'DiscordMessage':
         user = None
         content = ""
         if isinstance(message, discord.Message):
@@ -46,7 +52,7 @@ class DiscordMessage(PlatformMessage):
             case discord.ChannelType.text:
                 chat_type = ChatType.TEXT
 
-        environment = ReflectionEnvironment(
+        environment = PlatformEnvironment(
             chat_id=channel.id if channel else -1,
             chat_title=chat_title,
             chat_type=chat_type,
@@ -55,7 +61,7 @@ class DiscordMessage(PlatformMessage):
         )
         return DiscordMessage(
             content=content,
-            author=ReflectionMessageAuthor(
+            author=PlatformMessageAuthor(
                 id=user.id,
                 first_name=user.name,
                 last_name="",
@@ -65,24 +71,25 @@ class DiscordMessage(PlatformMessage):
             id=message.id,
             environment=environment,
             platform=Platform.DISCORD,
-            origin=message
+            origin=message,
+            media_cache=media_cache,
         )
 
     async def send(self, content: str) -> 'DiscordMessage':
         if isinstance(self.origin, discord.Message):
-            return self.from_origin(await self.origin.channel.send(content))
+            return self.from_origin(await self.origin.channel.send(content), media_cache=self.media_cache)
         elif isinstance(self.origin, discord.Interaction):
             await self.origin.response.send_message(content)
-            return self.from_origin(await self.origin.original_response())
+            return self.from_origin(await self.origin.original_response(), media_cache=self.media_cache)
         else:
             raise TypeError(f"unknown origin of type {type(self.origin)}")
 
     async def edit(self, content: str) -> 'DiscordMessage':
         if isinstance(self.origin, discord.Message):
-            return self.from_origin(await self.origin.edit(content=content))
+            return self.from_origin(await self.origin.edit(content=content), media_cache=self.media_cache)
         elif isinstance(self.origin, discord.Interaction):
             await self.origin.response.edit_message(content=content)
-            return self.from_origin(await self.origin.original_response())
+            return self.from_origin(await self.origin.original_response(), media_cache=self.media_cache)
         else:
             raise TypeError(f"unknown origin of type {type(self.origin)}")
 
@@ -101,18 +108,18 @@ class DiscordMessage(PlatformMessage):
             await channel.typing()  # pyright: ignore[reportAttributeAccessIssue]
 
     async def fetch_images(self) -> list[bytes]:
-        if isinstance(self.origin, discord.Interaction):
+        if self.media_cache is None or isinstance(self.origin, discord.Interaction):
             return []
 
         supported_mime_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
         for attachment in self.origin.attachments:
             if attachment.content_type in supported_mime_types:
-                attachments.append(get_caching_provider().cache_image(await attachment.read()))
+                attachments.append(self.media_cache.cache_image(await attachment.read()))
         return attachments
 
     async def fetch_audio(self) -> list[bytes]:
-        if isinstance(self.origin, discord.Interaction):
+        if self.media_cache is None or isinstance(self.origin, discord.Interaction):
             return []
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
@@ -123,7 +130,7 @@ class DiscordMessage(PlatformMessage):
             ext = attachment.filename.lower().rsplit('.', 1)[-1] if '.' in attachment.filename else ''
             ext = f'.{ext}'
             if (mime and mime in supported_mime_types) or (ext in supported_extensions):
-                attachments.append(get_caching_provider().cache_audio(await attachment.read()))
+                attachments.append(self.media_cache.cache_audio(await attachment.read()))
         return attachments
 
     async def fetch_reference(self) -> 'DiscordMessage | None':
@@ -134,10 +141,13 @@ class DiscordMessage(PlatformMessage):
         if ref is None:
             return
         if ref.cached_message:
-            return DiscordMessage.from_origin(ref.cached_message)
+            return DiscordMessage.from_origin(ref.cached_message, media_cache=self.media_cache)
         if ref.message_id is None:
             return
-        return DiscordMessage.from_origin(await origin.channel.fetch_message(ref.message_id))
+        return DiscordMessage.from_origin(
+            await origin.channel.fetch_message(ref.message_id),
+            media_cache=self.media_cache,
+        )
 
     async def add_reaction(self, emoji: str):
         origin: discord.Message | discord.Interaction = self.origin
@@ -170,7 +180,8 @@ class DiscordMessage(PlatformMessage):
 
 
 class DiscordProvider(PlatformProvider):
-    def __init__(self):
+    def __init__(self, *, media_cache: MediaCacheProvider | None = None):
+        self.media_cache = media_cache
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.platform = Platform.DISCORD
@@ -213,7 +224,7 @@ class DiscordProvider(PlatformProvider):
     def register_on_message_event(self, function: Callable[[DiscordMessage], Any]):
         @self.bot.event
         async def on_message(message):
-            message = DiscordMessage.from_origin(message)
+            message = DiscordMessage.from_origin(message, media_cache=self.media_cache)
             if asyncio.iscoroutinefunction(function):
                 return await function(message)
             else:
@@ -222,7 +233,7 @@ class DiscordProvider(PlatformProvider):
     def register_slash_command(self, name: str, function: Callable, description: str | None = None):
         @self.bot.tree.command(name=name, description=description)  # pyright: ignore[reportArgumentType]
         async def slash_command(interaction: discord.Interaction):
-            message = DiscordMessage.from_origin(interaction)
+            message = DiscordMessage.from_origin(interaction, media_cache=self.media_cache)
             await function(message)
 
     def get_guild_info(self, message: PlatformMessage) -> dict:
@@ -358,12 +369,14 @@ class DiscordProvider(PlatformProvider):
         """
         Fetches the avatar of a user, caches it, and returns its hash.
         """
+        if self.media_cache is None:
+            return None
         try:
             user = await self.bot.fetch_user(user_id)
             if user is None or user.avatar is None:
                 raise UnsupportedMediaException("User avatar not found or has an unsupported media type.")
             avatar_bytes = await user.avatar.read()
-            return get_caching_provider().cache_image(avatar_bytes)
+            return self.media_cache.cache_image(avatar_bytes)
         except discord.NotFound:
             self.logger.error(f"User with ID {user_id} not found.")
             return None
@@ -376,7 +389,7 @@ class DiscordProvider(PlatformProvider):
         messages = []
         # TODO: check channel type
         async for message in channel.history(limit=int(n)):  # type: ignore
-            message = DiscordMessage.from_origin(message)
+            message = DiscordMessage.from_origin(message, media_cache=self.media_cache)
             messages.append(dict(
                 from_user=message.author.display_name or "unknown",
                 message_text=message.content,

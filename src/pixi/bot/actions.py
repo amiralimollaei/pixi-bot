@@ -6,12 +6,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..ai.chatting.callbacks import ActionContext
-from ..apis.tenor import AsyncTenorAPI
 from ..utils import format_time_later
 
 if TYPE_CHECKING:
-    from ..ai.chatting import AsyncChatbotInstance
-
+    from ..bot.conversations import AsyncChatbotInstance
+    from ..apis.tenor import AsyncTenorAPI
 
 @dataclass(frozen=True)
 class ScheduleData:
@@ -113,12 +112,9 @@ class SendAction:
 
     @classmethod
     async def call(cls, context: ActionContext, value: str | None) -> None:
-        if not value or context.reference_message is None:
+        if not value or context.platform_message is None:
             return
-        assert context.reference_message.origin is not None
-        message = context.reference_message.origin
-        await message.send(value)
-
+        await context.platform_message.send(value)
 
 class SendGifAction:
     name = "send_gif"
@@ -126,22 +122,19 @@ class SendGifAction:
     description = "sends a gif in the current chat, the gif is chosen based on the provided description (description must be in English)"
     is_visible = True
 
-    gif_api: AsyncTenorAPI | None = None  # must be set externally
+    def __init__(self, gif_api: AsyncTenorAPI | None):
+        self.gif_api = gif_api
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
-        return cls.gif_api is not None
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
+        return self.gif_api is not None
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
-        if not value or context.reference_message is None:
+    async def call(self, context: ActionContext, value: str | None) -> None:
+        message = context.platform_message
+        if not value or message is None:
             return
-        assert context.reference_message.origin is not None
-        message = context.reference_message.origin
-        assert context.parent_instance is not None
-        assert cls.gif_api is not None, "gif_api is not initialized"
+        assert self.gif_api is not None, "gif_api is not initialized"
 
-        resp: dict = await cls.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
+        resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
         results = []
         for gif_content in resp.get("results", []):
             results.append(dict(
@@ -165,10 +158,9 @@ class NoteAction:
 
     @classmethod
     async def call(cls, context: ActionContext, value: str | None) -> None:
-        if not value or context.reference_message is None:
+        message = context.platform_message
+        if not value or message is None:
             return
-        assert context.reference_message.origin is not None
-        message = context.reference_message.origin
 
         if context.parent_instance and context.parent_instance.is_notes_visible:
             await message.send(f"> thoughts: {value}")
@@ -187,10 +179,9 @@ class ReactAction:
 
     @classmethod
     async def call(cls, context: ActionContext, value: str | None) -> None:
-        if not value or context.reference_message is None:
+        if not value or context.platform_message is None:
             return
-        assert context.reference_message.origin is not None
-        message = context.reference_message.origin
+        message = context.platform_message
 
         try:
             await message.add_reaction(value)

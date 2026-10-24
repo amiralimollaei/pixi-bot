@@ -1,8 +1,14 @@
 import asyncio
 import json
+import os
 
-from pixi.ai.chatting import AssistantPersona, AsyncChatbotInstance
-from pixi.utils import load_dotenv
+from pixi.ai.chatting.persona import AssistantPersona
+from pixi.apis.openai.adapter import OpenAIChatModel
+from pixi.bot.conversations import AsyncChatbotInstance
+from pixi.cli import load_dotenv
+from pixi.model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
+from pixi.storage.messages import MessagesDiskStorage
+from pixi.storage.paths import PixiPaths, copy_default_resources, open_resource
 
 
 class ConsoleSendAction:
@@ -37,21 +43,42 @@ class ConsoleYeetAction(ConsoleSendAction):
 
 
 async def main():
+    load_dotenv()
+    PixiPaths.set_root("~/.pixi-example/")
+    copy_default_resources()
+    model = OpenAILanguageModelConfig(id=os.environ["OPENAI_MODEL"], max_context=16192)
+    auth = OpenAIAuthConfig(
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        api_key=os.environ["OPENAI_API_KEY"],
+    )
+    with open_resource("persona.json", "r") as resource:
+        persona = AssistantPersona.from_dict(json.load(resource))
+    with open_resource("system.md", "r") as resource:
+        system_prompt_template = resource.read()
+    with open_resource("examples.txt", "r") as resource:
+        examples = resource.read()
+
+    instance = AsyncChatbotInstance(
+        "console",
+        "example",
+        chat_model=OpenAIChatModel(auth, model),
+        model=model,
+        store=MessagesDiskStorage(PixiPaths.userdata() / "messages"),
+        persona=persona,
+        system_prompt_template=system_prompt_template,
+        examples=examples,
+        actions=(ConsoleSendAction(), ConsoleNoteAction(), ConsoleYeetAction()),
+    )
+    print(instance.action_manager.get_prompt())
     while True:
-        reference_message = instance.add_message(input("You: "))
+        try:
+            text = input("You: ")
+        except EOFError:
+            break
+        reference_message = instance.add_message(text)
         noncall_result = await instance.stream_call(reference_message=reference_message)
         print(f"{noncall_result=}")
 
+
 if __name__ == "__main__":
-    load_dotenv()
-
-    persona = AssistantPersona.from_dict(json.load(open("persona.json", "rb")))
-    instance = AsyncChatbotInstance(0, "test")
-
-    instance.add_action(ConsoleSendAction())
-    instance.add_action(ConsoleNoteAction())
-    instance.add_action(ConsoleYeetAction())
-
-    print(instance.action_manager.get_prompt())
-
     asyncio.run(main())

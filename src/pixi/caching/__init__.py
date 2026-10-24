@@ -1,37 +1,38 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import struct
+from abc import ABC, abstractmethod
 from base64 import b64encode
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Protocol, Self, Tuple
+from typing import TYPE_CHECKING, Awaitable, Optional, Protocol, Self, TypeVar
+
+from ..interfaces.caching import CacheStorage
+
+if TYPE_CHECKING:
+    from ..interfaces.models import EmbeddingModel
+    from .embedding import EmbeddingCache
 
 
 class UnsupportedMediaException(Exception):
-    """Exception raised when an unsupported media type or format is encountered."""
-
-    def __init__(self, message="Unsupported media type or format."):
-        super().__init__(message)
+    """The requested media is unavailable or has an unsupported format."""
 
 
 @dataclass(frozen=True)
-class InMemoryMedia:
-    mime_type: str
+class InMemoryCache:
     buffer: bytes
 
     # extra metadata such as the files original extension, duration, etc. can be stored here for later use
     metadata: Optional[dict] = None
 
     def to_bytes(self) -> bytes:
-        mime_bytes = self.mime_type.encode("utf-8")
         metadata_bytes = (
             json.dumps(self.metadata, ensure_ascii=False).encode("utf-8")
             if self.metadata is not None
             else b""
         )
         return b"".join((
-            struct.pack(">I", len(mime_bytes)),
-            mime_bytes,
             struct.pack(">I", len(self.buffer)),
             self.buffer,
             struct.pack(">I", len(metadata_bytes)),
@@ -59,14 +60,12 @@ class InMemoryMedia:
             offset = end
             return field
 
-        mime_bytes = read_field()
         buffer = read_field()
         metadata_bytes = read_field()
 
         if offset != len(data):
             raise ValueError("Unexpected trailing bytes")
 
-        mime_type = mime_bytes.decode("utf-8")
         metadata = (
             json.loads(metadata_bytes.decode("utf-8"))
             if metadata_bytes
@@ -77,7 +76,6 @@ class InMemoryMedia:
             raise ValueError("Metadata must be a JSON object or null")
 
         return cls(
-            mime_type=mime_type,
             buffer=buffer,
             metadata=metadata,
         )
@@ -85,114 +83,133 @@ class InMemoryMedia:
     def to_base64(self):
         return b64encode(self.buffer).decode("utf-8")
 
-    def to_data_url(self):
-        return f"data:{self.mime_type};base64,{self.to_base64()}"
+    def to_data_url(self) -> str:
+        mime_type = (self.metadata or {}).get("mime_type")
+        if not isinstance(mime_type, str) or not mime_type:
+            raise ValueError("Cache metadata must contain a MIME type to create a data URL.")
+        return f"data:{mime_type};base64,{self.to_base64()}"
 
 
-class MediaCacheSystem(Protocol):
-    """Protocol class for media caching, interface for caching media files."""
+CacheInput = TypeVar("CacheInput", bytes, str, contravariant=True)
 
-    @classmethod
-    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
-        """Compute the in-memory data to be written in the cache, returning a InMemoryMedia instance."""
-        ...
+
+class CacheSystem(Protocol[CacheInput]):
+    """Compute and persist cache values from a source value."""
 
     @staticmethod
-    def compute_hash(data_bytes: bytes) -> bytes:
-        """Compute the hash of the input, and return it as bytes"""
-        return hashlib.sha256(data_bytes).digest()
+    def compute_hash(source: CacheInput, /) -> bytes: ...
 
-    @classmethod
-    def write(cls, media: InMemoryMedia, hash: bytes):
-        """Write the InMemoryMedia to cache, returning the hash in bytes"""
-        ...
+    def compute_cache(
+        self, source: CacheInput, /, **metadata,
+    ) -> InMemoryCache | Awaitable[InMemoryCache]: ...
 
-    @classmethod
-    def exists(cls, hash: bytes) -> bool:
-        """Checks whether an entry exists in the cache"""
-        ...
+    def compute_if_absent(
+        self, source: CacheInput | None = None, /, hash: bytes | None = None, **metadata,
+    ) -> bytes | Awaitable[bytes]: ...
 
-    @classmethod
-    def read(cls, hash: bytes) -> Optional[InMemoryMedia]:
-        """Read the media from cache and return a InMemoryMedia instance, or None if not found."""
-        ...
+    def write(self, cache: InMemoryCache, hash: bytes) -> None: ...
 
-    @classmethod
-    def compute_if_absent(cls, data_bytes: Optional[bytes], hash: Optional[bytes], **metadata) -> bytes:
-        """Read cached data if they exist, or compute the in-memory cache data, and write them to the cache, returning the hash in bytes"""
+    def exists(self, hash: bytes) -> bool: ...
+
+    def read(self, hash: bytes) -> InMemoryCache | None: ...
+
+
+class StoredCacheSystem:
+    """Bind cache computation to a namespace in an injected storage backend."""
+
+    def __init__(self, storage: CacheStorage, *, namespace: str):
+        self.storage = storage
+        self.namespace = namespace
+
+    @staticmethod
+    def compute_hash(source: bytes | str) -> bytes:
+        data = source.encode("utf-8") if isinstance(source, str) else source
+        return hashlib.sha256(data).digest()
+
+    def write(self, cache: InMemoryCache, hash: bytes) -> None:
+        self.storage.write(cache, hash, namespace=self.namespace)
+
+    def exists(self, hash: bytes) -> bool:
+        return self.storage.exists(hash, namespace=self.namespace)
+
+    def read(self, hash: bytes) -> InMemoryCache | None:
+        return self.storage.read(hash, namespace=self.namespace)
+
+
+class MediaCache(StoredCacheSystem, CacheSystem[bytes], ABC):
+    """Media conversion layered on the common cache storage contract."""
+
+    @abstractmethod
+    def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
+        """Convert source media into its cached representation."""
+
+    def compute_if_absent(
+        self,
+        data_bytes: bytes | None = None,
+        hash: bytes | None = None,
+        **metadata,
+    ) -> bytes:
         if hash is None and data_bytes is not None:
-            hash = cls.compute_hash(data_bytes)
-        if hash is not None and cls.exists(hash):
+            hash = self.compute_hash(data_bytes)
+        if hash is not None and self.exists(hash):
             return hash
-        else:
-            assert data_bytes, "data_bytes is None, can't compute cache"
-            media = cls.compute_cache(data_bytes=data_bytes, **metadata)
-            if hash is None:
-                hash = cls.compute_hash(data_bytes)
-            cls.write(media, hash)
-            return hash
+        assert data_bytes is not None, "data_bytes is None, can't compute cache"
+        cache = self.compute_cache(data_bytes, **metadata)
+        if hash is None:
+            hash = self.compute_hash(data_bytes)
+        self.write(cache, hash)
+        return hash
 
 
-class DiskMediaCacheSystem(MediaCacheSystem):
-    """Shared on-disk implementation for compressed media caches."""
+class MediaCacheProvider(Protocol):
+    """Media operations supplied by the selected codec backend."""
 
-    directory: Path
-
-    @classmethod
-    def __save_path(cls, hash: bytes) -> Path:
-        return cls.directory / hash.hex()
-
-    @classmethod
-    def write(cls, media: InMemoryMedia, hash: bytes):
-        path = cls.__save_path(hash)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(media.to_bytes())
-    
-    @classmethod
-    def exists(cls, hash: bytes) -> bool:
-        return cls.__save_path(hash).exists()
-
-    @classmethod
-    def read(cls, hash: bytes) -> Optional[InMemoryMedia]:
-        if (path := cls.__save_path(hash)).exists():
-            return InMemoryMedia.from_bytes(path.read_bytes())
-
-
-class DiskMediaCachingProvider(Protocol):
-    """Media cache construction and restoration, independent of the codec backend.
-
-    Select a concrete provider with get_caching_provider(), then construct it
-    without arguments. Cache dictionaries retain only their source-data hash.
-    """
-
-    @staticmethod
     def cache_image(
-        data_bytes: Optional[bytes] = None,
-        hash_value: Optional[bytes] = None,
-        **metadata
+        self,
+        data_bytes: bytes | None = None,
+        hash_value: bytes | None = None,
+        **metadata,
     ) -> bytes: ...
 
-    @staticmethod
     def cache_audio(
-        data_bytes: Optional[bytes] = None,
-        hash_value: Optional[bytes] = None,
-        **metadata
+        self,
+        data_bytes: bytes | None = None,
+        hash_value: bytes | None = None,
+        **metadata,
     ) -> bytes: ...
 
-    @staticmethod
-    def load_media(hash: bytes) -> InMemoryMedia | None:
-        return DiskMediaCacheSystem.read(hash)
+    def load_cache(self, hash: bytes) -> InMemoryCache | None: ...
 
 
-def get_caching_provider() -> type[DiskMediaCachingProvider]:
+def get_media_cache(*, storage: CacheStorage | None = None) -> MediaCacheProvider:
+    if storage is None:
+        from ..storage.paths import PixiPaths
+        from .disk import CacheDiskStorage
+        storage = CacheDiskStorage(PixiPaths.cache())
     try:
-        from .providers.ffmpeg import FFmpegProvider
-        return FFmpegProvider
+        from .providers.media.ffmpeg import FFmpegProvider
+        return FFmpegProvider(storage)
     except (ImportError, FileNotFoundError):
         try:
-            from .providers.pyav import PyAVProvider
-            return PyAVProvider
-        except ImportError:
+            from .providers.media.pyav import PyAVProvider
+            return PyAVProvider(storage)
+        except ImportError as error:
             raise RuntimeError(
-                "No caching provider is available; install optional dependencies: pip install pixi-bot[media]"
-            )
+                "No media cache provider is available; install optional dependencies: pip install pixi-bot[media]"
+            ) from error
+
+
+def get_embedding_cache(
+    *,
+    embedding_model: EmbeddingModel,
+    storage: CacheStorage | None = None,
+) -> EmbeddingCache:
+    """Cache embeddings from an explicitly owned model."""
+    from .embedding import EmbeddingCache
+
+    if storage is None:
+        from ..storage.paths import PixiPaths
+        from .disk import CacheDiskStorage
+        storage = CacheDiskStorage(PixiPaths.cache())
+
+    return EmbeddingCache(storage, embedding_model=embedding_model)

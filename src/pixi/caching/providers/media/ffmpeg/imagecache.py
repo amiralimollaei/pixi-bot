@@ -1,17 +1,13 @@
 import subprocess
 
-from pixi.storage.paths import PixiPaths
-
-from ... import InMemoryMedia, DiskMediaCacheSystem
+from .... import InMemoryCache, MediaCache
 
 THUMBNAIL_SIZE = 512
 
 
-class ImageCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
+class ImageCache(MediaCache):
     
-    @classmethod
-    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
+    def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
         result = subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -30,8 +26,7 @@ class ImageCache(DiskMediaCacheSystem):
             stderr=subprocess.PIPE,
             check=True,
         )
-        return InMemoryMedia(
-            mime_type="image/jpeg",
+        return InMemoryCache(
             buffer=result.stdout,
-            metadata=metadata
+            metadata={**metadata, "mime_type": "image/jpeg"},
         )

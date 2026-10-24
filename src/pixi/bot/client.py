@@ -1,25 +1,25 @@
 import asyncio
 import logging
 import math
+from contextlib import closing
 from dataclasses import asdict
-from typing import Any, Callable, Coroutine, Optional
+from typing import Any, Callable, Coroutine
+from uuid import uuid4
 
-from ..addon import AddonManager
 from ..ai.agents import AgentBase
-from ..ai.chatting import AsyncChatbotInstance, ChatbotInstanceRegistry
 from ..ai.chatting.callbacks import AsyncAction, AsyncTool
-from ..caching import get_caching_provider
-from ..model.config import (DatasetConfig, IdFilter, MediaWikiConfig,
-                            NewsConfig, OpenAIAuthConfig,
-                            OpenAIEmbeddingModelConfig,
+from ..ai.chatting.persona import AssistantPersona
+from ..ai.rag.client import AsyncRAGClient
+from ..model.chat import ChatMessageMeta
+from ..model.config import (IdFilter, LlamaEmbeddingModelConfig,
+                            LlamaLanguageModelConfig, OpenAIEmbeddingModelConfig,
                             OpenAILanguageModelConfig, PixiFeatures)
-from ..model.enums import ChatRole, Platform
-from ..model.storage.message import ChatMessageMeta
-from ..platform import PlatformMessage, PlatformProvider, get_platform_provider
-from .actions import (CancelScheduleAction, NoteAction, ReactAction,
-                      ScheduleAction, SendAction, SendGifAction)
-from .tools import (FetchChannelHistoryTool, create_database_tools,
-                    create_mediawiki_tools)
+from ..model.enums import ChatRole
+from ..interfaces.messages import MessagesStorage
+from ..interfaces.models import ChatModel
+from ..interfaces.platform import PlatformMessage, PlatformProvider
+from .conversations import AsyncChatbotInstance, ChatbotInstanceRegistry
+from .news import NewsBackgroundTask
 
 # constants
 
@@ -39,97 +39,59 @@ def remove_prefixes(text: str):
 class PixiClient:
     def __init__(
         self,
-        platform: Platform,
+        platform_provider: PlatformProvider,
         *,
-        auth: OpenAIAuthConfig,
-        model: OpenAILanguageModelConfig,
-        helper_model: OpenAILanguageModelConfig | None,
-        embedding_model: OpenAIEmbeddingModelConfig | None,
+        chat_model: ChatModel,
+        model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
+        messages_storage: MessagesStorage,
+        persona: AssistantPersona,
+        system_prompt_template: str,
+        examples: str,
+        helper_chat_model: ChatModel | None = None,
+        helper_model: OpenAILanguageModelConfig | LlamaLanguageModelConfig | None = None,
+        embedding_model: OpenAIEmbeddingModelConfig | LlamaEmbeddingModelConfig | None = None,
+        rag_factory: Callable[[], AsyncRAGClient] | None = None,
+        news_task_factory: Callable[[AsyncChatbotInstance], NewsBackgroundTask] | None = None,
         features: PixiFeatures = PixiFeatures.default(),
-        datasets: list[DatasetConfig] = [],
-        wikis: list[MediaWikiConfig] = [],
-        environment_filter: IdFilter = IdFilter.allow(),
-        news_config: Optional[NewsConfig] = None,
+        environment_filter: IdFilter | None = None,
         instance_idle_timeout: float = 900.0,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info(f"Initalizing Pixi with feature set {features} and platform {platform}...")
         if not math.isfinite(instance_idle_timeout) or instance_idle_timeout <= 0:
             raise ValueError("instance_idle_timeout must be a positive finite number of seconds.")
 
-        self.auth = auth
+        self.platform_provider = platform_provider
+        self.chat_model = chat_model
         self.model = model
+        self.helper_chat_model = helper_chat_model or chat_model
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
+        self._rag_factory = rag_factory
+        self._news_task_factory = news_task_factory
+        self._stopping = False
         self.features = features
-        self.news_config = news_config
         self.instance_idle_timeout = instance_idle_timeout
+        self.environment_filter = environment_filter if environment_filter is not None else IdFilter.allow()
         self.pre_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
         self.post_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
+        self.shutdown_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
+        self.datasets = []
+        self.messages_storage = messages_storage
+        self.conversations = ChatbotInstanceRegistry(
+            platform_provider.platform,
+            self,
+            store=messages_storage,
+            persona=persona,
+            system_prompt_template=system_prompt_template,
+            examples=examples,
+        )
 
-        # Verify models and API connectivity at startup
-        self.register_pre_startup_hook(self.verify_models)
-
-        # Proactive news needs its guild instances even before the first message.
-        if PixiFeatures.NewsProactive in self.features and news_config is not None:
+        if news_task_factory is not None:
             self.register_post_startup_hook(self._start_news_instances)
 
-        self.datasets = []
-        self.environment_filter = environment_filter
-
-        if PixiFeatures.ImageSupport in self.features or PixiFeatures.AudioSupport in self.features:
-            try:
-                get_caching_provider()
-            except RuntimeError as error:
-                self.logger.warning("%s Disabling image/audio support.", error)
-                self.features &= ~(PixiFeatures.ImageSupport | PixiFeatures.AudioSupport)
-
-        ChatbotInstanceRegistry.init(hash_prefix=platform, bot=self)
-
-        self.platform_provider: PlatformProvider = get_platform_provider(platform)()
-
-        if PixiFeatures.GIFSearch in self.features:
-            try:
-                from ..apis.tenor import AsyncTenorAPI
-                SendGifAction.gif_api = AsyncTenorAPI()
-            except Exception:
-                self.logger.warning("gif search api failed to initialize, gif features will not be available.")
-
-        self.__register_builtin_actions()
-
-        if PixiFeatures.ToolCalling in self.features and datasets:
-            self.logger.info(f"registering {len(datasets)} dataset(s):")
-            for dataset_config in datasets:
-                self.logger.info(f" - {dataset_config.name}")
-                self.datasets.append(self.register_database_tool(dataset_config))
-
-        if PixiFeatures.ToolCalling in self.features and PixiFeatures.WikiSearch in features and wikis:
-            self.logger.info(f"registering {len(wikis)} wiki(s):")
-            for wiki_config in wikis:
-                self.logger.info(f" - {wiki_config.name}: {wiki_config.url}")
-                self.register_mediawiki_tools(url=wiki_config.url, wiki_name=wiki_config.name)
-
-        if platform == Platform.DISCORD and PixiFeatures.ToolCalling in self.features:
-            self.__register_discord_specific_tools()
-
         self.__register_builtin_slash_commands()
-        
-        if platform == Platform.TELEGRAM:
-            self.__register_telegram_specific_slash_commands()
-
-        self.logger.info(f"loading addons...")
-        self.addon_manager = AddonManager(self)
-        self.addon_manager.load_addons()
-
         self.platform_provider.register_on_message_event(self.on_message)
 
-        self.logger.info(f"Pixi finished initalizing!")
-
-    def __register_telegram_specific_slash_commands(self):
-        async def start_command(message: PlatformMessage):
-            await message.send("Hiiiii, how's it going?")
-
-        self.register_slash_command(name="start", function=start_command)
 
     async def _start_news_instances(self):
         self.logger.info("Starting proactive news for available guilds...")
@@ -141,71 +103,34 @@ class PixiClient:
     async def _evict_idle_instances(self):
         while True:
             await asyncio.sleep(min(60.0, self.instance_idle_timeout))
-            ChatbotInstanceRegistry.evict_idle(self.instance_idle_timeout)
+            self.conversations.evict_idle(self.instance_idle_timeout)
 
-    async def verify_models(self):
-        """
-        Verifies that the configured models exist on the API server and that the API is reachable.
-        Logs a warning for any configured model IDs not found in the API's model list.
-        Raises RuntimeError if the API is unreachable.
-        """
-        from ..apis import openai
-
-        self.logger.info(f"Verifying API connectivity and model availability at {self.auth.base_url}...")
-
-        try:
-            session = openai.OpenAI(
-                api_key=self.auth.api_key,
-                base_url=self.auth.base_url,
-            )
-            models_page = session.models.list()
-            available_models = {model.id for model in models_page}
-            if available_models:
-                self.logger.info(f"Found {len(available_models)} model(s) available:")
-                for model in available_models:
-                    self.logger.info(" - " + model)
-            else:
-                raise RuntimeError("No model available on the API server.")
-
-            # Collect all configured model IDs
-            configured_models: dict[str, str] = {}
-            configured_models["main"] = self.model.id
-            if self.helper_model:
-                configured_models["helper"] = self.helper_model.id
-            if self.embedding_model:
-                configured_models["embedding"] = self.embedding_model.id
-
-            for role, model_id in configured_models.items():
-                if model_id not in available_models:
-                    raise RuntimeError(
-                        f"{role} model \"{model_id}\" was not found in the list of available models on the API server.")
-
-        except openai.APIConnectionError as e:
-            raise RuntimeError(
-                f"Failed to connect to API at {self.auth.base_url}: {e}"
-            ) from e
-        except openai.AuthenticationError as e:
-            raise RuntimeError(
-                f"Failed to authenticate to API at {self.auth.base_url}: {e}"
-            ) from e
-        except openai.APIError as e:
-            self.logger.warning(
-                f"API responded with an error when listing models (status={e.code}), "
-                "model verification will be skipped. This is expected for some OpenAI-compatible backends."
-            )
 
     def register_tool(self, tool: AsyncTool):
         if PixiFeatures.ToolCalling not in self.features:
             self.logger.warning("tried to register a tool, but tool calls are disabled, ignoring...")
             return
 
-        ChatbotInstanceRegistry.register_tool(tool)
+        self.conversations.register_tool(tool)
 
     def register_action(self, action: AsyncAction):
-        ChatbotInstanceRegistry.register_action(action)
+        self.conversations.register_action(action)
 
     def create_agent_instance[A: AgentBase](self, agent_cls: type[A], **agent_kwargs) -> A:
-        return agent_cls(auth=self.auth, model=self.helper_model, log_tool_calls=PixiFeatures.ToolLogging in self.features, **agent_kwargs)
+        history_key = agent_kwargs.pop("history_key", str(uuid4()))
+        return agent_cls(
+            chat_model=self.helper_chat_model,
+            model=self.helper_model,
+            storage=self.messages_storage,
+            history_key=history_key,
+            log_tool_calls=PixiFeatures.ToolLogging in self.features,
+            **agent_kwargs,
+        )
+
+    def create_rag_client(self) -> AsyncRAGClient:
+        if self._rag_factory is None:
+            raise RuntimeError("No embedding model is configured.")
+        return self._rag_factory()
 
     def register_slash_command(self, name: str, function, description: str | None = None):
         async def checked_function(message: PlatformMessage):
@@ -225,46 +150,9 @@ class PixiClient:
             await asyncio.sleep(3.0)
             delay_served += 3.0
 
-    def __register_builtin_actions(self):
-        self.register_action(ScheduleAction())
-        self.register_action(CancelScheduleAction())
-        self.register_action(SendAction())
-        self.register_action(SendGifAction())
-        self.register_action(NoteAction())
-        self.register_action(ReactAction())
 
-    def register_database_tool(self, dataset_config: DatasetConfig):
-        from ..storage.database import DirectoryDatabase
 
-        if PixiFeatures.ToolCalling not in self.features:
-            self.logger.warning("tried to initalize a database tool, but tool calls are disabled")
-            return
 
-        database_name = dataset_config.name
-        database_api = DirectoryDatabase.from_directory(dataset_config.name)
-
-        for tool in create_database_tools(self, database_name, database_api):
-            self.register_tool(tool)
-        return database_api
-
-    def register_mediawiki_tools(self, url: str, wiki_name: str):
-        if PixiFeatures.ToolCalling not in self.features:
-            self.logger.warning("tried to initalize a mediawiki tool, but tool calls are disabled")
-            return
-
-        from ..apis.wikimedia import AsyncWikimediaAPI
-
-        wiki_api = AsyncWikimediaAPI(url)
-
-        for tool in create_mediawiki_tools(self, wiki_name, wiki_api):
-            self.register_tool(tool)
-
-    def __register_discord_specific_tools(self):
-        if PixiFeatures.ToolCalling not in self.features:
-            self.logger.warning("tried to initalize discord specific tools, but tool calls are disabled")
-            return
-
-        self.register_tool(FetchChannelHistoryTool())
 
     def __register_builtin_slash_commands(self):
         async def notes_slash_command(message: PlatformMessage):
@@ -287,11 +175,11 @@ class PixiClient:
 
             environment_id = message.environment_id
 
-            instance = ChatbotInstanceRegistry.get(environment_id, or_create=False)
+            instance = self.conversations.get(environment_id, or_create=False)
             if instance:
                 instance.cancel_all_schedules()
                 instance.stop_news_background_task()
-            ChatbotInstanceRegistry.remove(environment_id)
+            self.conversations.remove(environment_id)
             self.logger.info(f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled.")
 
             await message.send("Wha- Where am I?!")
@@ -309,29 +197,32 @@ class PixiClient:
         )
 
     def get_chatbot_instance(self, identifier: str) -> AsyncChatbotInstance:
-        instance = ChatbotInstanceRegistry.get(
+        instance = self.conversations.get(
             identifier,
-            auth=self.auth,
+            chat_model=self.chat_model,
             model=self.model,
             log_tool_calls=PixiFeatures.ToolLogging in self.features
         )
         assert instance
-        # Start news background task if feature is enabled and not already running
         if (
-            PixiFeatures.NewsProactive in self.features
-            and self.news_config is not None
+            self._news_task_factory is not None
             and instance.forum_id is not None
             and instance.news_task is None
+            and not self._stopping
         ):
-            instance.start_news_background_task(
-                news_config=self.news_config,
-                reflection_api=self.platform_provider,
-            )
+            instance.news_task = self._news_task_factory(instance)
+            instance.news_task.start()
         return instance
 
-    async def pixi_resp(self, instance: AsyncChatbotInstance, reference_message: ChatMessageMeta):
-        assert reference_message.origin
-        message: PlatformMessage = reference_message.origin
+    async def pixi_resp(
+        self,
+        instance: AsyncChatbotInstance,
+        reference_message: ChatMessageMeta,
+        platform_message: PlatformMessage,
+    ):
+        if self._stopping:
+            return False, True
+        message = platform_message
 
         channel_id = message.environment.chat_id
 
@@ -350,6 +241,7 @@ class PixiClient:
                 task = await instance.concurrent_channel_stream_call(
                     channel_id=str(channel_id),
                     reference_message=reference_message,
+                    platform_message=platform_message,
                 )
                 while not task.done():
                     try:
@@ -366,25 +258,24 @@ class PixiClient:
                 cancelled = True
         except Exception:
             self.logger.exception(f"Unknown error while responding to a message in {instance.id}.")
-            # await message.send(Messages.UNKNOWN_ERROR)
+            raise
 
         return instance.action_manager.is_visible_actions_taken(), cancelled
 
-    async def pixi_resp_retry(self, instance: AsyncChatbotInstance, chat_message: ChatMessageMeta, num_retry: int = 10):
-        """
-        create a copy of all messages in the conversation instance and try to respond to the message.
-        if the response fails, it will retry up to `num_retry` times.
-        if the response is successful, it will save the conversation instance and return True.
-        if the response fails after all retries, it will return False.
-        """
-
+    async def pixi_resp_retry(
+        self,
+        instance: AsyncChatbotInstance,
+        chat_message: ChatMessageMeta,
+        platform_message: PlatformMessage,
+        num_retry: int = 10,
+    ):
+        """Retry requests while each failed stream discards its own uncommitted history delta."""
         instance.add_message(chat_message)
-        messages_checkpoint = instance.get_messages().copy()
         for i in range(num_retry):
             try:
-                responded, cancelled = await self.pixi_resp(instance, reference_message=chat_message)
-                if not cancelled:
-                    instance.save()
+                responded, cancelled = await self.pixi_resp(
+                    instance, reference_message=chat_message, platform_message=platform_message,
+                )
                 if responded or cancelled:
                     return True
                 else:
@@ -394,7 +285,6 @@ class PixiClient:
                         "[SYSTEM]: You didn't respond, if this is intentional use the SEND action with no value.")
             except Exception:
                 self.logger.exception(f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})")
-                instance.set_messages(messages_checkpoint)
 
     def is_environment_allowed(self, identifier: str) -> bool:
         """
@@ -436,15 +326,21 @@ class PixiClient:
             reply_message_text = remove_prefixes(reply_message.content)
             # if the reply is to the last message in the instance, we don't need to do anything.
             reply_optimization = -1
-            instance_messages = instance.get_messages()
-            matching_messages = [
-                msg.content for msg in instance_messages if msg.content is not None and reply_message_text in msg.content
-            ]
-            if matching_messages:
-                if instance_messages[-1].content in matching_messages:
-                    reply_optimization = 2
-                else:
-                    reply_optimization = 1
+            last_message = instance.last_message
+            last_matches = (
+                last_message is not None
+                and last_message.content is not None
+                and reply_message_text in last_message.content
+            )
+            if last_matches:
+                reply_optimization = 2
+            else:
+                with closing(instance.iter_messages(reverse=True)) as messages:
+                    if any(
+                        msg.content is not None and reply_message_text in msg.content
+                        for msg in messages
+                    ):
+                        reply_optimization = 1
             if reply_optimization == 2:
                 # completely ignore reply context
                 self.logger.debug(f"completely ignore reply context for {message.environment_id=}")
@@ -491,8 +387,8 @@ class PixiClient:
             await self.__add_reply_metadata(instance, metadata, message)
 
             def rearrage_predicate(msg: ChatMessageMeta):
-                msg_channel_id = msg.origin.environment.chat_id if msg.origin else None
-                current_channel_id = chat_message.origin.environment.chat_id if chat_message.origin else None
+                msg_channel_id = msg.channel_id
+                current_channel_id = message.environment.chat_id
 
                 if msg_channel_id is None or current_channel_id is None:
                     return False
@@ -508,13 +404,10 @@ class PixiClient:
                 metadata=metadata,
                 image_hashes=await message.fetch_images() if PixiFeatures.ImageSupport in self.features else [],
                 audio_hashes=await message.fetch_audio() if PixiFeatures.AudioSupport in self.features else [],
-                # the following properties are intended to be used internally and are NOT reload persistant
-                instance_id=environment_id,
-                # origin is used for actions and tool calls
-                origin=message
+                channel_id=message.environment.chat_id,
             )
 
-            await self.pixi_resp_retry(instance, chat_message)
+            await self.pixi_resp_retry(instance, chat_message, platform_message=message)
 
     def register_pre_startup_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
         """Register an async awaitable to run before the bot connects to Discord/Telegram.
@@ -534,6 +427,10 @@ class PixiClient:
         """
         self.post_startup_hooks.append(hook)
 
+    def register_shutdown_hook(self, hook: Callable[..., Coroutine[Any, Any, Any]]):
+        """Release external resources when the bot stops."""
+        self.shutdown_hooks.append(hook)
+
     async def __post_startup_task(self):
         await self.platform_provider.wait_until_ready()
         if self.post_startup_hooks:
@@ -542,25 +439,36 @@ class PixiClient:
             self.logger.info("All post-startup hooks completed.")
 
     async def start(self):
-        """Start the bot asynchronously, running all startup hooks first."""
-        if self.pre_startup_hooks:
-            self.logger.info(f"Running {len(self.pre_startup_hooks)} pre-startup hook(s)...")
-            await asyncio.gather(*(f() for f in self.pre_startup_hooks))
-            self.logger.info("All pre-startup hooks completed.")
-
-        post_task = asyncio.create_task(self.__post_startup_task())
-        eviction_task = asyncio.create_task(self._evict_idle_instances(), name="idle-instance-eviction")
-
+        """Run startup hooks and the platform, releasing dependencies on exit."""
+        background_tasks = []
         try:
+            if self.pre_startup_hooks:
+                self.logger.info(f"Running {len(self.pre_startup_hooks)} pre-startup hook(s)...")
+                await asyncio.gather(*(hook() for hook in self.pre_startup_hooks))
+                self.logger.info("All pre-startup hooks completed.")
+
+            post_task = asyncio.create_task(self.__post_startup_task())
+            background_tasks.append(post_task)
+            background_tasks.append(
+                asyncio.create_task(self._evict_idle_instances(), name="idle-instance-eviction")
+            )
             await self.platform_provider.start_async()
             await post_task
         except asyncio.CancelledError:
             pass
         finally:
-            post_task.cancel()
-            eviction_task.cancel()
-            await asyncio.gather(post_task, eviction_task, return_exceptions=True)
-            await self.platform_provider.close_async()
+            self._stopping = True
+            for task in background_tasks:
+                task.cancel()
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+            try:
+                await self.conversations.aclose()
+            finally:
+                try:
+                    await self.platform_provider.close_async()
+                finally:
+                    if self.shutdown_hooks:
+                        await asyncio.gather(*(hook() for hook in self.shutdown_hooks))
 
     def run(self):
         """Run the bot (blocking with async support for startup hooks)."""

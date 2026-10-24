@@ -9,7 +9,7 @@ from ..ai.agents import RetrievalAgent
 from ..ai.chatting.callbacks import AsyncTool, ToolContext
 
 if TYPE_CHECKING:
-    from ..ai.chatting import AsyncChatbotInstance
+    from .conversations import AsyncChatbotInstance
     from ..apis.wikimedia import AsyncWikimediaAPI
     from ..storage.database import DirectoryDatabase
     from .client import PixiClient
@@ -80,9 +80,7 @@ def create_database_tools(
                 return "no result: no id specified"
 
             if client.embedding_model:
-                from ..ai.rag.client import AsyncRAGClient
-
-                rag = AsyncRAGClient(client.auth, client.embedding_model)
+                rag = client.create_rag_client()
                 entries = await asyncio.gather(*[
                     database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
@@ -179,9 +177,7 @@ def create_mediawiki_tools(
             ])
 
             if client.embedding_model:
-                from ..ai.rag.client import AsyncRAGClient
-
-                rag = AsyncRAGClient(client.auth, client.embedding_model)
+                rag = client.create_rag_client()
                 for i, (page, title) in enumerate(page_context):
                     await rag.add_document(page, title, i)
                 query_embed = await rag.embed(query)
@@ -226,5 +222,5 @@ class FetchChannelHistoryTool:
     @classmethod
     async def call(cls, context: ToolContext, *, channel_id: str, n: int):
         assert context.parent_instance is not None
-        reflection_api = context.parent_instance.bot.platform_provider
-        return await reflection_api.fetch_channel_history(int(channel_id), n=n)
+        assert context.parent_instance.bot is not None
+        return await context.parent_instance.bot.platform_provider.fetch_channel_history(int(channel_id), n=n)

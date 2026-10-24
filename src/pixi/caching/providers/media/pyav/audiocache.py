@@ -1,10 +1,8 @@
 import tempfile
-from typing import Optional
 
 import av
 
-from ....storage.paths import PixiPaths
-from ... import InMemoryMedia, DiskMediaCacheSystem, UnsupportedMediaException
+from .... import InMemoryCache, MediaCache
 
 # constants
 
@@ -13,12 +11,10 @@ CACHE_BITRATE = 32000
 CACHE_MAX_DURATION = 30
 
 
-class AudioCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
+class AudioCache(MediaCache):
 
-    @classmethod
-    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
-        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.TemporaryFile() as tmp_out:
+    def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
+        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=".aac") as tmp_out:
             tmp_in.write(data_bytes)
             tmp_in.flush()
 
@@ -73,12 +69,12 @@ class AudioCache(DiskMediaCacheSystem):
             tmp_out.seek(0)
             audio_bytes = tmp_out.read()
 
-        return InMemoryMedia(
-            mime_type="audio/aac",
+        return InMemoryCache(
             buffer=audio_bytes,
-            metadata=dict(
-                duration=CACHE_MAX_DURATION,
-                is_cut_off=exceeds_max_duration,
-                **metadata
-            )
+            metadata={
+                **metadata,
+                "mime_type": "audio/aac",
+                "duration": CACHE_MAX_DURATION,
+                "is_cut_off": exceeds_max_duration,
+            },
         )

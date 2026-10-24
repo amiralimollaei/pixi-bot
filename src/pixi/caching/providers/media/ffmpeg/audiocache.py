@@ -1,19 +1,16 @@
 import subprocess
 import tempfile
 
-from ....storage.paths import PixiPaths
-from ... import InMemoryMedia, DiskMediaCacheSystem
+from .... import InMemoryCache, MediaCache
 
 CACHE_SAMPLERATE = 16000
 CACHE_BITRATE = 32000
 CACHE_MAX_DURATION = 30
 
 
-class AudioCache(DiskMediaCacheSystem):
-    directory = PixiPaths.cache() / "media"
+class AudioCache(MediaCache):
 
-    @classmethod
-    def compute_cache(cls, data_bytes: bytes, **metadata) -> InMemoryMedia:
+    def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
         max_samples = CACHE_SAMPLERATE * CACHE_MAX_DURATION
         # Keep decoded PCM out of Python memory. One extra sample detects cutoff.
         with tempfile.NamedTemporaryFile() as source, tempfile.TemporaryFile() as pcm:
@@ -49,12 +46,12 @@ class AudioCache(DiskMediaCacheSystem):
                 stderr=subprocess.PIPE,
                 check=True,
             )
-        return InMemoryMedia(
-            mime_type="audio/aac",
+        return InMemoryCache(
             buffer=result.stdout,
-            metadata=dict(
-                duration=CACHE_MAX_DURATION,
-                is_cut_off=exceeds_max_duration,
-                **metadata
-            ),
+            metadata={
+                **metadata,
+                "mime_type": "audio/aac",
+                "duration": CACHE_MAX_DURATION,
+                "is_cut_off": exceeds_max_duration,
+            },
         )

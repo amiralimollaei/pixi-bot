@@ -1,10 +1,9 @@
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
-from ...platform import PlatformMessage
-from ...utils import clean_dict
-from ..enums import ChatRole
+from ..utils import clean_dict
+from .enums import ChatRole
 
 
 @dataclass(frozen=True)
@@ -36,24 +35,13 @@ class ToolCallMeta:
 class ChatMessageMeta:
     role: ChatRole | str
     content: Optional[str] = None
-    image_hashes: list[bytes] = field(default_factory=list)  # byte hashes corresponding to cached images
-    audio_hashes: list[bytes] = field(default_factory=list)  # byte hashes corresponding to cached audio
+    image_hashes: list[bytes] = field(default_factory=list)
+    audio_hashes: list[bytes] = field(default_factory=list)
     tool_calls: Sequence[ToolCallMeta] = field(default_factory=list)
     tool_call_id: Optional[str] = None
-
-    # --- additional states---
     metadata: Optional[dict] = None
     message_time: Optional[float] = None
-
-    # --- references ---
-    instance_id: Optional[str] = None
-
-    # the original message that this message is instantiated from, should be of type
-    # discord.Message or telegram.Message, but the type is not specified here to avoid import
-    # errors if one library is not found, is used mostly to reply to the original message
-    origin: Optional[PlatformMessage] = None
-
-    bot: Any = None
+    channel_id: int | None = None
 
     def __post_init__(self):
         self.time = (self.message_time if self.message_time and self.message_time > 0 else time.time())
@@ -67,7 +55,8 @@ class ChatMessageMeta:
             image_hashes=[b.hex() for b in self.image_hashes or []],
             audio_hashes=[b.hex() for b in self.audio_hashes or []],
             tool_calls=[x.to_dict() for x in self.tool_calls or []],
-            tool_call_id=self.tool_call_id
+            tool_call_id=self.tool_call_id,
+            channel_id=self.channel_id,
         ))
 
     @classmethod
@@ -80,5 +69,6 @@ class ChatMessageMeta:
             image_hashes=[bytes.fromhex(h) for h in data.get("image_hashes", [])],
             audio_hashes=[bytes.fromhex(h) for h in data.get("audio_hashes", [])],
             tool_calls=[ToolCallMeta.from_dict(d) for d in data.get("tool_calls", [])],
-            tool_call_id=data.get("tool_call_id")
+            tool_call_id=data.get("tool_call_id"),
+            channel_id=data.get("channel_id"),
         )

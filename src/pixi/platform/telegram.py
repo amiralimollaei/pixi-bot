@@ -10,24 +10,30 @@ from telegram.constants import ChatType as TChatType
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
-from ..caching import get_caching_provider
+from ..caching import MediaCacheProvider
 from ..model.enums import ChatType, Messages, Platform
-from ..platform import (ChannelMeta, GuildMeta, PlatformMessage,
-                        PlatformProvider, ReflectionEnvironment,
-                        ReflectionMessageAuthor)
+from ..model.platform import (ChannelMeta, GuildMeta, PlatformEnvironment,
+                              PlatformMessageAuthor)
+from ..interfaces.platform import PlatformMessage, PlatformProvider
 
 
 @dataclass(frozen=True)
 class TelegramMessage(PlatformMessage):
     content: str | None
-    author: ReflectionMessageAuthor
+    author: PlatformMessageAuthor
     id: int
-    environment: ReflectionEnvironment
+    environment: PlatformEnvironment
     platform: Platform
     origin: telegram.Message
+    media_cache: MediaCacheProvider | None = None
 
     @classmethod
-    def from_origin(cls, message: telegram.Message) -> 'TelegramMessage':
+    def from_origin(
+        cls,
+        message: telegram.Message,
+        *,
+        media_cache: MediaCacheProvider | None = None,
+    ) -> 'TelegramMessage':
         user = message.from_user
         assert user is not None
         content = message.text_markdown_v2 or message.caption_markdown_v2
@@ -44,7 +50,7 @@ class TelegramMessage(PlatformMessage):
                 chat_type = ChatType.TEXT
         return TelegramMessage(
             content=content,
-            author=ReflectionMessageAuthor(
+            author=PlatformMessageAuthor(
                 id=user.id,
                 first_name=user.first_name,
                 last_name=user.last_name or "",
@@ -52,7 +58,7 @@ class TelegramMessage(PlatformMessage):
                 mention=f"@{user.username}",
             ),
             id=message.id,
-            environment=ReflectionEnvironment(
+            environment=PlatformEnvironment(
                 chat_id=chat.id,
                 chat_title=chat.title or "",
                 chat_type=chat_type,
@@ -60,16 +66,17 @@ class TelegramMessage(PlatformMessage):
                 is_forum=False,
             ),
             platform=Platform.TELEGRAM,
-            origin=message
+            origin=message,
+            media_cache=media_cache,
         )
 
     async def send(self, content: str) -> 'TelegramMessage':
-        return self.from_origin(await self.origin.chat.send_message(content))
+        return self.from_origin(await self.origin.chat.send_message(content), media_cache=self.media_cache)
 
     async def edit(self, content: str) -> 'TelegramMessage | None':
         new_origin = await self.origin.edit_text(text=content)
         if isinstance(new_origin, telegram.Message):
-            return self.from_origin(new_origin)
+            return self.from_origin(new_origin, media_cache=self.media_cache)
         return None
 
     async def delete(self):
@@ -79,7 +86,9 @@ class TelegramMessage(PlatformMessage):
         await self.origin.chat.send_chat_action(ChatAction.TYPING)
 
     async def fetch_images(self) -> list[bytes]:
-        origin: telegram.Message = self.origin
+        if self.media_cache is None:
+            return []
+        origin = self.origin
 
         supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
         attachments = []
@@ -94,10 +103,12 @@ class TelegramMessage(PlatformMessage):
             file = await origin.document.get_file()
             image_bytes = await file.download_as_bytearray()
         if image_bytes:
-            attachments.append(get_caching_provider().cache_image(bytes(image_bytes)))
+            attachments.append(self.media_cache.cache_image(bytes(image_bytes)))
         return attachments
 
     async def fetch_audio(self) -> list[bytes]:
+        if self.media_cache is None:
+            return []
         origin = self.origin
 
         supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
@@ -122,12 +133,12 @@ class TelegramMessage(PlatformMessage):
             file = await origin.document.get_file()
             audio_bytes = await file.download_as_bytearray()
         if audio_bytes:
-            attachments.append(get_caching_provider().cache_audio(bytes(audio_bytes)))
+            attachments.append(self.media_cache.cache_audio(bytes(audio_bytes)))
         return attachments
 
     async def fetch_reference(self) -> 'TelegramMessage | None':
         ref = self.origin.reply_to_message
-        return TelegramMessage.from_origin(ref) if ref else None
+        return TelegramMessage.from_origin(ref, media_cache=self.media_cache) if ref else None
 
     async def add_reaction(self, emoji: str):
         await self.origin.set_reaction(emoji)
@@ -155,7 +166,8 @@ class TelegramMessage(PlatformMessage):
 
 
 class TelegramProvider(PlatformProvider):
-    def __init__(self):
+    def __init__(self, *, media_cache: MediaCacheProvider | None = None):
+        self.media_cache = media_cache
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.platform = Platform.TELEGRAM
@@ -215,7 +227,7 @@ class TelegramProvider(PlatformProvider):
                 self.known_chats.add(update.effective_chat.id)
             message = update.message
             assert message is not None
-            message = TelegramMessage.from_origin(message)
+            message = TelegramMessage.from_origin(message, media_cache=self.media_cache)
             if message is not None:
                 if asyncio.iscoroutinefunction(function):
                     return await function(message)
@@ -231,7 +243,7 @@ class TelegramProvider(PlatformProvider):
         async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
             message = update.message
             assert message is not None
-            message = TelegramMessage.from_origin(message)
+            message = TelegramMessage.from_origin(message, media_cache=self.media_cache)
             if message is not None:
                 if asyncio.iscoroutinefunction(function):
                     return await function(message)
@@ -292,12 +304,14 @@ class TelegramProvider(PlatformProvider):
                 break
 
     async def get_user_avatar(self, user_id: int) -> bytes | None:
+        if self.media_cache is None:
+            return None
         try:
             file = await self.application.bot.get_user_profile_photos(user_id)
             if file.photos:
                 photo = file.photos[0][-1]  # Get the highest resolution photo
                 image_bytes = await (await photo.get_file()).download_as_bytearray()
-                return get_caching_provider().cache_image(bytes(image_bytes))
+                return self.media_cache.cache_image(bytes(image_bytes))
         except telegram.error.BadRequest as e:
             self.logger.error(f"Failed to fetch user avatar: {e}")
             return None

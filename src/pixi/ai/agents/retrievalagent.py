@@ -37,18 +37,6 @@ class RetrievalAgent(AgentBase):
         ])
         self.client.set_system(self.system_prompt)
 
-    def to_dict(self) -> dict:
-        return super().to_dict() | dict(
-            context=self.context
-        )
-
-    @classmethod
-    def from_dict(cls, data: dict, **client_kwargs) -> 'RetrievalAgent':
-        return cls(
-            client=AgentBase.client_from_dict(data, **client_kwargs),
-            context=data.get("context", []),
-        )
-
     def add_context(self, context: str):
         """Convinent wrapper for `self.context.append(context)`"""
         self.context.append(context)

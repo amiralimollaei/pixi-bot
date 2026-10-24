@@ -13,10 +13,17 @@ dependencies = [
 package = true
 
 [project.scripts]
-pixi-cli = "pixi:main"
-pixi-bot = "pixi:main"
+pixi-cli = "pixi.cli:main"
+pixi-bot = "pixi.cli:main"
 
 [project.optional-dependencies]
+sql = [
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.2",
+]
+redis = [
+    "redis>=5.0",
+]
 media = [
     "av>=16.0",
 ]

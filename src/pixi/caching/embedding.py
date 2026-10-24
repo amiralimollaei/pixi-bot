@@ -1,50 +1,44 @@
-import array
+from __future__ import annotations
+
 import hashlib
-import os
-from typing import Optional
+import json
 
-from ..storage.paths import PixiPaths
+from ..interfaces.models import EmbeddingModel
+from ..interfaces.caching import CacheStorage
+from . import CacheSystem, StoredCacheSystem, InMemoryCache
 
 
-class EmbeddingCache:
-    """
-    Automatically caches the embedding vectors if initialized with `vec` and automatically
-    loads the cahced embedding vectors if not initialized with `vec`, raises OSError if the
-    cache file does not exist or cannot be read.
-    """
+class EmbeddingCache(StoredCacheSystem, CacheSystem[str]):
+    """Persist text embeddings in a namespace specific to the embedding model."""
 
-    def __init__(self, text: str, dim: int, vec: Optional[array.array[float]] = None):
-        self.text = text
-        self.dim = dim
-        self.vec = vec
+    def __init__(self, storage: CacheStorage, *, embedding_model: EmbeddingModel):
+        identity = json.dumps(embedding_model.cache_identity, ensure_ascii=False).encode("utf-8")
+        namespace = hashlib.sha256(identity).hexdigest()
+        super().__init__(storage, namespace=f"embeddings/{namespace}")
+        self.embedding_model = embedding_model
 
-        cache_dir = PixiPaths.cache() / "embeddings"
+    async def compute_cache(self, text: str, **metadata) -> InMemoryCache:
+        """Compute a text embedding without looking up or persisting a cache entry."""
+        embeddings = await self.embedding_model.embed([text])
+        return InMemoryCache(
+            buffer=embeddings[0].vec.tobytes(),
+            metadata=metadata or None,
+        )
 
-        if self.vec is None:
-            # loads the cached vector
-            self.load()
-        else:
-            assert self.vec.typecode == "f"
-            # caches the vector
-            if not os.path.exists(self.get_save_path(self.hash_hexdigest)):
-                os.makedirs(cache_dir, exist_ok=True)
-                self.save()
-
-    @property
-    def hash_hexdigest(self):
-        return hashlib.sha256(f"{self.text}@{self.dim}".encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def get_save_path(hash: str):
-        return str(PixiPaths.cache() / "embeddings" / f"{hash}.npz")
-
-    def save(self):
-        assert self.vec is not None
-        with open(self.get_save_path(self.hash_hexdigest), "wb") as f:
-            f.write(self.vec.tobytes())
-
-    def load(self):
-        vec = array.array("f")
-        with open(self.get_save_path(self.hash_hexdigest), "rb") as f:
-            vec.frombytes(f.read())
-        self.vec = vec
+    async def compute_if_absent(
+        self,
+        text: str | None = None,
+        hash: bytes | None = None,
+        **metadata,
+    ) -> bytes:
+        """Compute and store on a miss, then return the cache key."""
+        if hash is None and text is not None:
+            hash = self.compute_hash(text)
+        if hash is not None and self.exists(hash):
+            return hash
+        assert text is not None, "text is None, can't compute an embedding"
+        cache = await self.compute_cache(text, **metadata)
+        if hash is None:
+            hash = self.compute_hash(text)
+        self.write(cache, hash)
+        return hash
