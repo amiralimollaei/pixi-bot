@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import Protocol
 
 from ..model.storage.document import DocumentMeta
@@ -21,4 +22,22 @@ class KnowledgeStorage(Protocol):
 
     def delete(self, name: str) -> None:
         """Delete the knowledge base; deleting a missing knowledge base is a no-op."""
+        ...
+
+
+class KnowledgeImporter(Protocol):
+    """Read a local source independently of storage, bot state, or inference."""
+
+    def read_documents(self, path: Path) -> Iterator[DocumentMeta]:
+        """Yield nonempty documents with unique, deterministic integer IDs.
+
+        Preserve titles and source references where available. The same source
+        must produce the same documents on repeated calls; importer instances
+        must not retain per-import state. Implementations own their source
+        resources and release them when the iterator is exhausted or closed.
+
+        Invalid sources raise an exception, possibly during iteration. Callers
+        must exhaust the iterator before persisting a replacement snapshot.
+        Importers must never mutate knowledge storage.
+        """
         ...

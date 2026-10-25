@@ -14,6 +14,15 @@ def load_dotenv():
 
 def main():
     import argparse
+    import sys
+
+    if sys.argv[1:2] == ["import-knowledge"]:
+        from .cli_import import main as import_knowledge
+
+        load_dotenv()
+        return import_knowledge(sys.argv[2:])
+
+    from .cli_knowledge import add_storage_arguments, open_storage, resolve_storage_options
     import logging
     import math
     import os
@@ -62,7 +71,10 @@ def main():
     # load environment variables
     load_dotenv()
 
-    parser = argparse.ArgumentParser(description="Run the Pixi bot, a multi-platform AI chatbot.")
+    parser = argparse.ArgumentParser(
+        description="Run the Pixi bot, a multi-platform AI chatbot.",
+        epilog="Offline imports: pixi-cli import-knowledge --help",
+    )
     parser.add_argument(
         "--platform", "-p",
         type=str,
@@ -121,22 +133,7 @@ def main():
         metavar="PREFIX",
         help="Redis cache namespace (default: pixi:cache:); requires --cache-storage redis.",
     )
-    parser.add_argument(
-        "--knowledge-storage",
-        choices=("disk", "sql", "redis"),
-        default="disk",
-        help="Knowledge-base backend (default: disk under --pixi-directory).",
-    )
-    parser.add_argument(
-        "--knowledge-storage-url",
-        metavar="URL",
-        help="Knowledge SQLAlchemy or Redis URL; defaults to DATABASE_URL for sql, REDIS_URL for redis.",
-    )
-    parser.add_argument(
-        "--knowledge-redis-key-prefix",
-        metavar="PREFIX",
-        help="Knowledge Redis namespace (default: pixi:datasets:); requires --knowledge-storage redis.",
-    )
+    add_storage_arguments(parser)
     parser.add_argument(
         "--api-url", "-a",
         type=str,
@@ -343,17 +340,7 @@ def main():
         parser.error("SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL.")
     if args.cache_redis_key_prefix is not None and args.cache_storage != "redis":
         parser.error("--cache-redis-key-prefix requires --cache-storage redis.")
-    if args.knowledge_storage == "sql" and args.knowledge_storage_url is None:
-        args.knowledge_storage_url = os.getenv("DATABASE_URL")
-    elif args.knowledge_storage == "redis" and args.knowledge_storage_url is None:
-        args.knowledge_storage_url = os.getenv("REDIS_URL")
-    if args.knowledge_storage == "disk":
-        if args.knowledge_storage_url is not None:
-            parser.error("--knowledge-storage-url requires --knowledge-storage sql or redis.")
-    elif not args.knowledge_storage_url:
-        parser.error("SQL/Redis knowledge storage requires --knowledge-storage-url or DATABASE_URL/REDIS_URL.")
-    if args.knowledge_redis_key_prefix is not None and args.knowledge_storage != "redis":
-        parser.error("--knowledge-redis-key-prefix requires --knowledge-storage redis.")
+    resolve_storage_options(args, parser)
 
     local_options = (
         (args.llama_hf, (args.llama_file, args.llama_binary, args.llama_idle_timeout),
@@ -536,29 +523,7 @@ def main():
             )
             resources.callback(cache_storage.close)
 
-        knowledge_storage = None
-        if args.knowledge_storage == "sql":
-            assert args.knowledge_storage_url is not None
-            try:
-                from .storage.sql import KnowledgeSQLStorage
-            except ImportError:
-                parser.error("SQL knowledge storage requires pip install 'pixi-bot[sql]'.")
-            knowledge_storage = KnowledgeSQLStorage(args.knowledge_storage_url)
-            resources.callback(knowledge_storage.close)
-        elif args.knowledge_storage == "redis":
-            assert args.knowledge_storage_url is not None
-            try:
-                from .storage.redis import KnowledgeRedisStorage
-            except ImportError:
-                parser.error("Redis knowledge storage requires pip install 'pixi-bot[redis]'.")
-            knowledge_storage = KnowledgeRedisStorage(
-                args.knowledge_storage_url,
-                key_prefix=(
-                    args.knowledge_redis_key_prefix if args.knowledge_redis_key_prefix is not None
-                    else "pixi:datasets:"
-                ),
-            )
-            resources.callback(knowledge_storage.close)
+        knowledge_storage = open_storage(args, parser, resources)
 
         return create_bot(
             platform=Platform[args.platform.upper()],
