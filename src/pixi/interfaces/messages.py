@@ -1,7 +1,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Protocol
 
-from ..model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessageMeta
 
 
 class MessagesStorage(Protocol):
@@ -20,7 +20,12 @@ class MessagesStorage(Protocol):
         ...
 
     def iter_messages(
-        self, key: str, *, start: int = 0, stop: int | None = None, reverse: bool = False,
+        self,
+        key: str,
+        *,
+        start: int = 0,
+        stop: int | None = None,
+        reverse: bool = False,
     ) -> Iterator[ChatMessageMeta]:
         """Read [start, stop) lazily in either order using bounded pages.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from ..caching import InMemoryCache
+    from pixi.caching import InMemoryCache
 
 
 class CacheStorage(Protocol):
@@ -13,8 +13,7 @@ class CacheStorage(Protocol):
         """Replace the value for this namespace/key, including its metadata."""
         ...
 
-    def exists(self, hash: bytes, *, namespace: str) -> bool:
-        ...
+    def exists(self, hash: bytes, *, namespace: str) -> bool: ...
 
     def read(self, hash: bytes, *, namespace: str) -> InMemoryCache | None:
         """Return None for a missing entry; empty buffers are valid values."""

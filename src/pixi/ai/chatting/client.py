@@ -8,16 +8,24 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import AsyncGenerator
 
-from ...interfaces.messages import MessagesStorage
-from ...interfaces.models import ChatEvent, ChatFinished, ChatModel, ContentDelta, ReasoningDelta
-from ...model.chat import ChatMessageMeta
-from ...model.config import LlamaLanguageModelConfig, OpenAILanguageModelConfig
-from ...model.enums import ChatRole
-from .callbacks import AsyncTool, Predicate, ToolContext
-from .tools import AsyncToolManager
+from pixi.ai.chatting.callbacks import AsyncTool, Predicate, ToolContext
+from pixi.ai.chatting.tools import AsyncToolManager
+from pixi.interfaces.messages import MessagesStorage
+from pixi.interfaces.models import (
+    ChatEvent,
+    ChatFinished,
+    ChatModel,
+    ContentDelta,
+    ReasoningDelta,
+)
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.config import LlamaLanguageModelConfig, OpenAILanguageModelConfig
+from pixi.model.enums import ChatRole
 
 
-def get_rearranged_messages(messages: list[ChatMessageMeta], predicate: Predicate, n: int = 5) -> list[ChatMessageMeta]:
+def get_rearranged_messages(
+    messages: list[ChatMessageMeta], predicate: Predicate, n: int = 5
+) -> list[ChatMessageMeta]:
     selected: list[ChatMessageMeta] = []
     unselected: list[ChatMessageMeta] = []
     for message in reversed(messages):
@@ -56,7 +64,9 @@ class AsyncChatClient:
         self.enforce_system_header = enforce_system_header
         self.system_prompt: str | None = None
         self.rearrange_predicate: Predicate | None = None
-        self._history_branch: ContextVar[_HistoryBranch | None] = ContextVar("history_branch", default=None)
+        self._history_branch: ContextVar[_HistoryBranch | None] = ContextVar(
+            "history_branch", default=None
+        )
         self.tool_manager = AsyncToolManager(log_tool_calls=log_tool_calls)
         self.tool_manager.tool_results_consumer = self._append_messages
 
@@ -77,7 +87,10 @@ class AsyncChatClient:
     def history_scope(self, *, temporal: bool = False):
         """Keep only this request's new messages; commit once on successful completion."""
         parent = self._active_branch()
-        branch = _HistoryBranch(parent.stop if parent is not None else self.storage.count(self.history_key), parent)
+        branch = _HistoryBranch(
+            parent.stop if parent is not None else self.storage.count(self.history_key),
+            parent,
+        )
         token = self._history_branch.set(branch)
         try:
             yield
@@ -111,7 +124,11 @@ class AsyncChatClient:
         return count
 
     def iter_messages(
-        self, *, start: int = 0, stop: int | None = None, reverse: bool = False,
+        self,
+        *,
+        start: int = 0,
+        stop: int | None = None,
+        reverse: bool = False,
     ) -> Generator[ChatMessageMeta, None, None]:
         if start < 0 or (stop is not None and stop < 0):
             raise ValueError("History bounds must be nonnegative.")
@@ -121,7 +138,9 @@ class AsyncChatClient:
             branches.append(branch)
             branch = branch.parent
         branches.reverse()
-        base_stop = branches[0].stop if branches else self.storage.count(self.history_key)
+        base_stop = (
+            branches[0].stop if branches else self.storage.count(self.history_key)
+        )
         total = base_stop + sum(len(item.messages) for item in branches)
         end = total if stop is None else min(stop, total)
         if start >= end:
@@ -134,7 +153,9 @@ class AsyncChatClient:
                     offset -= len(item.messages)
                 first = max(0, start - offset)
                 last = min(len(item.messages), end - offset)
-                indexes = range(last - 1, first - 1, -1) if reverse else range(first, last)
+                indexes = (
+                    range(last - 1, first - 1, -1) if reverse else range(first, last)
+                )
                 for index in indexes:
                     yield item.messages[index]
                 if not reverse:
@@ -144,7 +165,10 @@ class AsyncChatClient:
             yield from pending_messages()
         if start < base_stop:
             source = self.storage.iter_messages(
-                self.history_key, start=start, stop=min(end, base_stop), reverse=reverse,
+                self.history_key,
+                start=start,
+                stop=min(end, base_stop),
+                reverse=reverse,
             )
             try:
                 yield from source
@@ -197,23 +221,36 @@ class AsyncChatClient:
         if message.metadata is not None:
             size += len(json.dumps(message.metadata, ensure_ascii=False))
         for call in message.tool_calls:
-            size += len(call.name) + len(call.id) + len(json.dumps(call.arguments, ensure_ascii=False)) + 64
+            size += (
+                len(call.name)
+                + len(call.id)
+                + len(json.dumps(call.arguments, ensure_ascii=False))
+                + 64
+            )
         return size
 
-    def get_portable_messages(self, system_prompt: str | ChatMessageMeta | None = None) -> list[ChatMessageMeta]:
+    def get_portable_messages(
+        self, system_prompt: str | ChatMessageMeta | None = None
+    ) -> list[ChatMessageMeta]:
         """Materialize only the recent context needed by this model request."""
         prompt = system_prompt or self.get_system_prompt()
-        prompt_text = prompt.content if isinstance(prompt, ChatMessageMeta) else (prompt or "")
+        prompt_text = (
+            prompt.content if isinstance(prompt, ChatMessageMeta) else (prompt or "")
+        )
         budget = self.model.max_context * 4 - len(prompt_text or "") - 96
         if budget <= 0:
-            raise ValueError("System prompt exceeds the approximate model context budget.")
+            raise ValueError(
+                "System prompt exceeds the approximate model context budget."
+            )
         messages: list[ChatMessageMeta] = []
         with closing(self.iter_messages(reverse=True)) as history:
             for message in history:
                 size = self._message_size(message)
                 if size > budget:
                     if not messages:
-                        raise ValueError("Latest message exceeds the approximate model context budget.")
+                        raise ValueError(
+                            "Latest message exceeds the approximate model context budget."
+                        )
                     break
                 budget -= size
                 messages.append(message)
@@ -227,7 +264,11 @@ class AsyncChatClient:
         if self.rearrange_predicate is not None:
             messages = get_rearranged_messages(messages, self.rearrange_predicate)
         if prompt:
-            system_message = prompt if isinstance(prompt, ChatMessageMeta) else ChatMessageMeta(ChatRole.SYSTEM, prompt)
+            system_message = (
+                prompt
+                if isinstance(prompt, ChatMessageMeta)
+                else ChatMessageMeta(ChatRole.SYSTEM, prompt)
+            )
             insert_index = 0
             if not self.enforce_system_header:
                 for index, message in enumerate(messages):
@@ -258,7 +299,10 @@ class AsyncChatClient:
         tool_context: ToolContext | None = None,
     ) -> AsyncGenerator[str, None]:
         reference_message = reference_message or self.last_message
-        assert reference_message is not None and reference_message.role in (ChatRole.USER, ChatRole.SYSTEM), "reference_message must be USER or SYSTEM"
+        assert reference_message is not None and reference_message.role in (
+            ChatRole.USER,
+            ChatRole.SYSTEM,
+        ), "reference_message must be USER or SYSTEM"
         context = tool_context or self.create_tool_context(reference_message)
         source = await self.stream_chat_completion(system_prompt=system_prompt)
         response = ""
@@ -303,7 +347,9 @@ class AsyncChatClient:
             buffer = ""
             thinking = False
             width = max(len(start_think_tag), len(end_think_tag))
-            source = self.stream_request(system_prompt=system_prompt, tool_context=tool_context)
+            source = self.stream_request(
+                system_prompt=system_prompt, tool_context=tool_context
+            )
             async with aclosing(source):
                 async for char in source:
                     buffer += char
@@ -321,10 +367,14 @@ class AsyncChatClient:
                 for char in buffer:
                     yield char
 
-    async def stream_ask(self, message: ChatMessageMeta | str, temporal=False, system_prompt=None):
+    async def stream_ask(
+        self, message: ChatMessageMeta | str, temporal=False, system_prompt=None
+    ):
         if isinstance(message, str):
             message = ChatMessageMeta(ChatRole.USER, message)
-        assert isinstance(message, ChatMessageMeta), "Message must be a string or a ChatMessageMeta."
+        assert isinstance(message, ChatMessageMeta), (
+            "Message must be a string or a ChatMessageMeta."
+        )
         assert message.role == ChatRole.USER, "Message must be from the user."
         with self.history_scope(temporal=temporal):
             self.add_message(message)

@@ -2,19 +2,28 @@ import json
 import os
 from typing import Optional
 
-from .http import build_url, get_http_client_provider
+from pixi.apis.http import build_url, get_http_client_provider
 
 HTTPClient = get_http_client_provider()
 
+
 class HTTPAPI:
-    def __init__(self, base: str | None, api_key_env_var: Optional[str] = None, api_key: Optional[str] = None, api_key_key: str = "api_key"):
-        assert base, f"base url is not valid, got \"{base}\""
+    def __init__(
+        self,
+        base: str | None,
+        api_key_env_var: Optional[str] = None,
+        api_key: Optional[str] = None,
+        api_key_key: str = "api_key",
+    ):
+        assert base, f'base url is not valid, got "{base}"'
         self.base = base
 
         if api_key_env_var:
             api_key = api_key or os.getenv(api_key_env_var)
             if api_key is None:
-                raise KeyError(f"{api_key_env_var} must be set in environment variables or passed as an argument.")
+                raise KeyError(
+                    f"{api_key_env_var} must be set in environment variables or passed as an argument."
+                )
 
         self.api_key = api_key
         self.api_key_key = api_key_key
@@ -36,7 +45,9 @@ class HTTPAPI:
                 if response.status // 100 != 2:
                     text = await response.text()
                     # TODO: raise a more specific exception with the response content
-                    raise RuntimeError(f"Request to {full_url} failed with status {response.status}: {text}")
+                    raise RuntimeError(
+                        f"Request to {full_url} failed with status {response.status}: {text}"
+                    )
                 async for chunk in response.content:
                     content += chunk
         return content.strip(b"\n").strip(b" ")

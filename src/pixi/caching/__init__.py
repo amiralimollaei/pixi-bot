@@ -8,11 +8,11 @@ from base64 import b64encode
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Awaitable, Optional, Protocol, Self, TypeVar
 
-from ..interfaces.caching import CacheStorage
+from pixi.interfaces.caching import CacheStorage
 
 if TYPE_CHECKING:
-    from ..interfaces.models import EmbeddingModel
-    from .embedding import EmbeddingCache
+    from pixi.caching.embedding import EmbeddingCache
+    from pixi.interfaces.models import EmbeddingModel
 
 
 class UnsupportedMediaException(Exception):
@@ -32,12 +32,14 @@ class InMemoryCache:
             if self.metadata is not None
             else b""
         )
-        return b"".join((
-            struct.pack(">I", len(self.buffer)),
-            self.buffer,
-            struct.pack(">I", len(metadata_bytes)),
-            metadata_bytes,
-        ))
+        return b"".join(
+            (
+                struct.pack(">I", len(self.buffer)),
+                self.buffer,
+                struct.pack(">I", len(metadata_bytes)),
+                metadata_bytes,
+            )
+        )
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
@@ -67,9 +69,7 @@ class InMemoryCache:
             raise ValueError("Unexpected trailing bytes")
 
         metadata = (
-            json.loads(metadata_bytes.decode("utf-8"))
-            if metadata_bytes
-            else None
+            json.loads(metadata_bytes.decode("utf-8")) if metadata_bytes else None
         )
 
         if metadata is not None and not isinstance(metadata, dict):
@@ -86,7 +86,9 @@ class InMemoryCache:
     def to_data_url(self) -> str:
         mime_type = (self.metadata or {}).get("mime_type")
         if not isinstance(mime_type, str) or not mime_type:
-            raise ValueError("Cache metadata must contain a MIME type to create a data URL.")
+            raise ValueError(
+                "Cache metadata must contain a MIME type to create a data URL."
+            )
         return f"data:{mime_type};base64,{self.to_base64()}"
 
 
@@ -100,11 +102,18 @@ class CacheSystem(Protocol[CacheInput]):
     def compute_hash(source: CacheInput, /) -> bytes: ...
 
     def compute_cache(
-        self, source: CacheInput, /, **metadata,
+        self,
+        source: CacheInput,
+        /,
+        **metadata,
     ) -> InMemoryCache | Awaitable[InMemoryCache]: ...
 
     def compute_if_absent(
-        self, source: CacheInput | None = None, /, hash: bytes | None = None, **metadata,
+        self,
+        source: CacheInput | None = None,
+        /,
+        hash: bytes | None = None,
+        **metadata,
     ) -> bytes | Awaitable[bytes]: ...
 
     def write(self, cache: InMemoryCache, hash: bytes) -> None: ...
@@ -183,15 +192,18 @@ class MediaCacheProvider(Protocol):
 
 def get_media_cache(*, storage: CacheStorage | None = None) -> MediaCacheProvider:
     if storage is None:
-        from ..storage.paths import PixiPaths
-        from .disk import CacheDiskStorage
+        from pixi.caching.disk import CacheDiskStorage
+        from pixi.storage.paths import PixiPaths
+
         storage = CacheDiskStorage(PixiPaths.cache())
     try:
-        from .providers.media.ffmpeg import FFmpegProvider
+        from pixi.caching.providers.media.ffmpeg import FFmpegProvider
+
         return FFmpegProvider(storage)
     except (ImportError, FileNotFoundError):
         try:
-            from .providers.media.pyav import PyAVProvider
+            from pixi.caching.providers.media.pyav import PyAVProvider
+
             return PyAVProvider(storage)
         except ImportError as error:
             raise RuntimeError(
@@ -205,11 +217,12 @@ def get_embedding_cache(
     storage: CacheStorage | None = None,
 ) -> EmbeddingCache:
     """Cache embeddings from an explicitly owned model."""
-    from .embedding import EmbeddingCache
+    from pixi.caching.embedding import EmbeddingCache
 
     if storage is None:
-        from ..storage.paths import PixiPaths
-        from .disk import CacheDiskStorage
+        from pixi.caching.disk import CacheDiskStorage
+        from pixi.storage.paths import PixiPaths
+
         storage = CacheDiskStorage(PixiPaths.cache())
 
     return EmbeddingCache(storage, embedding_model=embedding_model)

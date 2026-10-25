@@ -2,9 +2,13 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-from ...model.openai import ChatCompletionChunk, EmbeddingResponse, ModelList
-from ..http import get_http_client_provider
-from .exceptions import APIConnectionError, APIError, AuthenticationError
+from pixi.apis.http import get_http_client_provider
+from pixi.apis.openai.exceptions import (
+    APIConnectionError,
+    APIError,
+    AuthenticationError,
+)
+from pixi.model.openai import ChatCompletionChunk, EmbeddingResponse, ModelList
 
 HTTPClient = get_http_client_provider()
 
@@ -22,12 +26,16 @@ def _handle_response_error(status: int, text: str) -> None:
 
 
 async def stream_chat_completions(
-    base_url: str, api_key: str, payload: dict[str, Any],
+    base_url: str,
+    api_key: str,
+    payload: dict[str, Any],
 ) -> AsyncIterator[ChatCompletionChunk]:
     headers = _build_headers(api_key)
     try:
         async with HTTPClient(base_url.rstrip("/")) as session:
-            async with session.post("/chat/completions", json=payload, headers=headers) as response:
+            async with session.post(
+                "/chat/completions", json=payload, headers=headers
+            ) as response:
                 if response.status != 200:
                     _handle_response_error(response.status, await response.text())
                 buffer = b""
@@ -52,11 +60,15 @@ async def stream_chat_completions(
 
 
 async def create_embeddings(
-    base_url: str, api_key: str, payload: dict[str, Any],
+    base_url: str,
+    api_key: str,
+    payload: dict[str, Any],
 ) -> EmbeddingResponse:
     try:
         async with HTTPClient(base_url) as session:
-            async with session.post("/embeddings", json=payload, headers=_build_headers(api_key)) as response:
+            async with session.post(
+                "/embeddings", json=payload, headers=_build_headers(api_key)
+            ) as response:
                 if response.status != 200:
                     _handle_response_error(response.status, await response.text())
                 return EmbeddingResponse.from_dict(await response.json())

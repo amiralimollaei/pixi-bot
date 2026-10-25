@@ -1,16 +1,16 @@
 import errno
 import shutil
 
-from .....interfaces.caching import CacheStorage
-
-from .... import MediaCacheProvider, InMemoryCache
-from .audiocache import AudioCache
-from .imagecache import ImageCache
+from pixi.caching import InMemoryCache, MediaCacheProvider
+from pixi.caching.providers.media.ffmpeg.audiocache import AudioCache
+from pixi.caching.providers.media.ffmpeg.imagecache import ImageCache
+from pixi.interfaces.caching import CacheStorage
 
 if shutil.which("ffmpeg") is None:
     raise FileNotFoundError(
         errno.ENOENT, "FFmpeg executable was not found on PATH", "ffmpeg"
     )
+
 
 class FFmpegProvider(MediaCacheProvider):
     """Cache media in short-lived FFmpeg processes without importing PyAV."""
@@ -21,17 +21,17 @@ class FFmpegProvider(MediaCacheProvider):
 
     def cache_image(
         self,
-        data_bytes: bytes | None = None, 
+        data_bytes: bytes | None = None,
         hash_value: bytes | None = None,
-        **metadata
+        **metadata,
     ) -> bytes:
         return self.image_cache.compute_if_absent(data_bytes, hash_value, **metadata)
 
     def cache_audio(
         self,
-        data_bytes: bytes | None = None, 
+        data_bytes: bytes | None = None,
         hash_value: bytes | None = None,
-        **metadata
+        **metadata,
     ) -> bytes:
         return self.audio_cache.compute_if_absent(data_bytes, hash_value, **metadata)
 

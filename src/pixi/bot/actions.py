@@ -5,12 +5,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..ai.chatting.callbacks import ActionContext
-from ..utils import format_time_later
+from pixi.ai.chatting.callbacks import ActionContext
+from pixi.utils import format_time_later
 
 if TYPE_CHECKING:
-    from ..bot.conversations import AsyncChatbotInstance
-    from ..apis.tenor import AsyncTenorAPI
+    from pixi.apis.tenor import AsyncTenorAPI
+    from pixi.bot.conversations import AsyncChatbotInstance
+
 
 @dataclass(frozen=True)
 class ScheduleData:
@@ -23,7 +24,7 @@ class ScheduleData:
 class ScheduleAction:
     name = "schedule"
     field_name = "json"
-    description = "schedules an action to be executed later, the value for this action is a json with the following schema: {\"action\": <action-name>, \"value\": <action-value>, \"delay\": <delay-in-seconds>, \"id\": <unique-number>}"
+    description = 'schedules an action to be executed later, the value for this action is a json with the following schema: {"action": <action-name>, "value": <action-value>, "delay": <delay-in-seconds>, "id": <unique-number>}'
     is_visible = True
     logger = logging.getLogger("ScheduleAction")
 
@@ -48,17 +49,31 @@ class ScheduleAction:
             cls.logger.exception(f"Invalid schedule JSON: {e}")
             return
 
-        if not schedule_data.action or not schedule_data.value or schedule_data.delay is None or not schedule_data.id:
-            cls.logger.error("Schedule JSON must include 'action', 'value', 'delay', and 'id' fields.")
+        if (
+            not schedule_data.action
+            or not schedule_data.value
+            or schedule_data.delay is None
+            or not schedule_data.id
+        ):
+            cls.logger.error(
+                "Schedule JSON must include 'action', 'value', 'delay', and 'id' fields."
+            )
             return
 
-        if not isinstance(schedule_data.delay, (int, float)) or schedule_data.delay <= 0:
+        if (
+            not isinstance(schedule_data.delay, (int, float))
+            or schedule_data.delay <= 0
+        ):
             cls.logger.error("'delay' must be a positive number.")
             return
 
-        action = context.parent_instance.action_manager.actions.get(schedule_data.action.strip().lower())
+        action = context.parent_instance.action_manager.actions.get(
+            schedule_data.action.strip().lower()
+        )
         if action is None:
-            cls.logger.error(f"Cannot schedule unknown action \"{schedule_data.action}\".")
+            cls.logger.error(
+                f'Cannot schedule unknown action "{schedule_data.action}".'
+            )
             return
 
         if context.parent_instance.schedule_action(
@@ -68,7 +83,9 @@ class ScheduleAction:
             id=schedule_data.id,
             delay=schedule_data.delay,
         ):
-            cls.logger.info(f"scheduled action for {format_time_later(schedule_data.delay)}: {value}")
+            cls.logger.info(
+                f"scheduled action for {format_time_later(schedule_data.delay)}: {value}"
+            )
         else:
             cls.logger.info(f"schedule action failed: {value}")
 
@@ -94,7 +111,9 @@ class CancelScheduleAction:
             cls.logger.error("Model did not provide a schedule id to cancel.")
             return
 
-        if context.parent_instance and context.parent_instance.cancel_schedule(schedule_id):
+        if context.parent_instance and context.parent_instance.cancel_schedule(
+            schedule_id
+        ):
             cls.logger.info(f"Cancelled the schedule with id '{schedule_id}'.")
         else:
             cls.logger.info(f"No schedule found with id '{schedule_id}'.")
@@ -115,6 +134,7 @@ class SendAction:
         if not value or context.platform_message is None:
             return
         await context.platform_message.send(value)
+
 
 class SendGifAction:
     name = "send_gif"
@@ -137,11 +157,13 @@ class SendGifAction:
         resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
         results = []
         for gif_content in resp.get("results", []):
-            results.append(dict(
-                content_description=gif_content.get("content_description", ""),
-                content_rating=gif_content.get("content_rating", ""),
-                url=gif_content.get("media", [{}])[0].get("gif", {}).get("url", "")
-            ))
+            results.append(
+                dict(
+                    content_description=gif_content.get("content_description", ""),
+                    content_rating=gif_content.get("content_rating", ""),
+                    url=gif_content.get("media", [{}])[0].get("gif", {}).get("url", ""),
+                )
+            )
         if results:
             await message.send(results[0]["url"])
 
@@ -186,4 +208,6 @@ class ReactAction:
         try:
             await message.add_reaction(value)
         except Exception:
-            cls.logger.exception(f"Failed to add reaction {value} to message {message.id}")
+            cls.logger.exception(
+                f"Failed to add reaction {value} to message {message.id}"
+            )

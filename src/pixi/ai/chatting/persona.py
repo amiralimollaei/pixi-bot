@@ -18,11 +18,11 @@ class AssistantPersona:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'AssistantPersona':
+    def from_dict(cls, data: dict) -> "AssistantPersona":
         return cls(**data)
 
     @classmethod
-    def from_json(cls, file: str) -> 'AssistantPersona':
+    def from_json(cls, file: str) -> "AssistantPersona":
         with open(file, "rb") as f:
             data = json.load(f)
         return cls.from_dict(data)

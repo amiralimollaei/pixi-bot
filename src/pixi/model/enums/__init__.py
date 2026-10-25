@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from .messages import Messages
+from pixi.model.enums.messages import Messages
 
 
 class Platform(StrEnum):

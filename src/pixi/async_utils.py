@@ -3,7 +3,6 @@ import logging
 from types import CoroutineType
 from typing import AsyncIterator, Awaitable, Callable, Generic, TypeVar
 
-
 T = TypeVar("T")
 
 
@@ -42,7 +41,9 @@ class AsyncScheduler:
         self.logger = logging.getLogger(self.__class__.__name__)
         self._tasks: dict[str, asyncio.Task] = {}
 
-    async def _run_scheduled(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]):
+    async def _run_scheduled(
+        self, id: str, delay: float, callback: Callable[[], Awaitable[None]]
+    ):
         try:
             await asyncio.sleep(delay)
             await callback()
@@ -55,7 +56,9 @@ class AsyncScheduler:
             if self._tasks.get(id) is asyncio.current_task():
                 self._tasks.pop(id)
 
-    def schedule(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]) -> bool:
+    def schedule(
+        self, id: str, delay: float, callback: Callable[[], Awaitable[None]]
+    ) -> bool:
         id = str(id)
         if id in self._tasks:
             self.logger.warning(f"A task with id '{id}' is already scheduled.")
@@ -102,7 +105,9 @@ class CoroutineQueueExecutor:
     def __init__(self, max_queue_size: int = 1000):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.max_queue_size = max_queue_size
-        self._queue: asyncio.Queue[CoroutineType] = asyncio.Queue(maxsize=max_queue_size)
+        self._queue: asyncio.Queue[CoroutineType] = asyncio.Queue(
+            maxsize=max_queue_size
+        )
 
     async def _worker(self):
         while True:

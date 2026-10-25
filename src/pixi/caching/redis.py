@@ -1,10 +1,11 @@
 import hashlib
+from typing import cast
 
 from redis.client import Redis
 from redis.connection import ConnectionPool
 
-from ..interfaces.caching import CacheStorage
-from . import InMemoryCache
+from pixi.caching import InMemoryCache
+from pixi.interfaces.caching import CacheStorage
 
 
 class CacheRedisStorage(CacheStorage):
@@ -33,7 +34,7 @@ class CacheRedisStorage(CacheStorage):
         value = self._client.get(self._key(hash, namespace=namespace))
         if value is None:
             return None
-        return InMemoryCache.from_bytes(value)
+        return InMemoryCache.from_bytes(cast(bytes, value))
 
     def close(self) -> None:
         try:

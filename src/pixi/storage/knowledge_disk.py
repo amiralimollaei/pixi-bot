@@ -7,7 +7,7 @@ from pathlib import Path
 
 import zstandard
 
-from ..model.storage.document import DocumentMeta
+from pixi.model.storage.document import DocumentMeta
 
 
 def _serialize_documents(documents: Sequence[DocumentMeta]) -> list[tuple[int, str]]:
@@ -61,7 +61,9 @@ class KnowledgeDiskStorage:
             or name in {".", ".."}
             or any(character in name for character in ("/", "\\", "\0"))
         ):
-            raise ValueError("knowledge-base names must be nonempty single path components")
+            raise ValueError(
+                "knowledge-base names must be nonempty single path components"
+            )
         path = self.directory / name
         if path.is_symlink() or path.resolve().parent != self.directory:
             raise ValueError("knowledge paths must stay within the knowledge root")
@@ -90,7 +92,9 @@ class KnowledgeDiskStorage:
             return
 
         self.directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix=".pixi-knowledge-", dir=self.directory) as staging:
+        with tempfile.TemporaryDirectory(
+            prefix=".pixi-knowledge-", dir=self.directory
+        ) as staging:
             staging_path = Path(staging)
             for filename, payload in compressed:
                 (staging_path / filename).write_bytes(payload)

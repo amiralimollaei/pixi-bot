@@ -7,13 +7,18 @@ from typing import Callable
 import telegram
 from telegram.constants import ChatAction, ChatMemberStatus
 from telegram.constants import ChatType as TChatType
-from telegram.ext import (Application, CommandHandler, ContextTypes,
-                          MessageHandler, filters)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-from ..caching import MediaCacheProvider
-from ..model.enums import ChatType, Messages, Platform
-from ..model.platform import PlatformEnvironment, PlatformMessageAuthor
-from ..interfaces.platform import PlatformMessage, PlatformProvider
+from pixi.caching import MediaCacheProvider
+from pixi.interfaces.platform import PlatformMessage, PlatformProvider
+from pixi.model.enums import ChatType, Messages, Platform
+from pixi.model.platform import PlatformEnvironment, PlatformMessageAuthor
 
 
 @dataclass(frozen=True)
@@ -32,7 +37,7 @@ class TelegramMessage(PlatformMessage):
         message: telegram.Message,
         *,
         media_cache: MediaCacheProvider | None = None,
-    ) -> 'TelegramMessage':
+    ) -> "TelegramMessage":
         user = message.from_user
         assert user is not None
         content = message.text_markdown_v2 or message.caption_markdown_v2
@@ -69,10 +74,12 @@ class TelegramMessage(PlatformMessage):
             media_cache=media_cache,
         )
 
-    async def send(self, content: str) -> 'TelegramMessage':
-        return self.from_origin(await self.origin.chat.send_message(content), media_cache=self.media_cache)
+    async def send(self, content: str) -> "TelegramMessage":
+        return self.from_origin(
+            await self.origin.chat.send_message(content), media_cache=self.media_cache
+        )
 
-    async def edit(self, content: str) -> 'TelegramMessage | None':
+    async def edit(self, content: str) -> "TelegramMessage | None":
         new_origin = await self.origin.edit_text(text=content)
         if isinstance(new_origin, telegram.Message):
             return self.from_origin(new_origin, media_cache=self.media_cache)
@@ -89,7 +96,7 @@ class TelegramMessage(PlatformMessage):
             return []
         origin = self.origin
 
-        supported_image_types = {'image/jpeg', 'image/png', 'image/webp'}
+        supported_image_types = {"image/jpeg", "image/png", "image/webp"}
         attachments = []
         # Telegram sends images as 'photo' (list of sizes) or as 'document' (if sent as file)
         image_bytes = None
@@ -98,7 +105,11 @@ class TelegramMessage(PlatformMessage):
             photo = origin.photo[-1]
             file = await photo.get_file()
             image_bytes = await file.download_as_bytearray()
-        elif origin.document and origin.document.mime_type and origin.document.mime_type in supported_image_types:
+        elif (
+            origin.document
+            and origin.document.mime_type
+            and origin.document.mime_type in supported_image_types
+        ):
             file = await origin.document.get_file()
             image_bytes = await file.download_as_bytearray()
         if image_bytes:
@@ -110,8 +121,23 @@ class TelegramMessage(PlatformMessage):
             return []
         origin = self.origin
 
-        supported_mime_types = {'audio/mp3', 'audio/aac', 'audio/ogg', 'audio/flac', 'audio/opus'}
-        supported_extensions = {'.mp3', '.aac', '.ogg', ".flac", ".opus", ".wav", ".webm", ".m4a"}
+        supported_mime_types = {
+            "audio/mp3",
+            "audio/aac",
+            "audio/ogg",
+            "audio/flac",
+            "audio/opus",
+        }
+        supported_extensions = {
+            ".mp3",
+            ".aac",
+            ".ogg",
+            ".flac",
+            ".opus",
+            ".wav",
+            ".webm",
+            ".m4a",
+        }
         attachments = []
         audio_bytes = None
         if origin.audio and origin.audio.mime_type in supported_mime_types:
@@ -127,7 +153,10 @@ class TelegramMessage(PlatformMessage):
         elif (
             origin.document
             and origin.document.file_name
-            and any(origin.document.file_name.lower().endswith(ext) for ext in supported_extensions)
+            and any(
+                origin.document.file_name.lower().endswith(ext)
+                for ext in supported_extensions
+            )
         ):
             file = await origin.document.get_file()
             audio_bytes = await file.download_as_bytearray()
@@ -135,9 +164,13 @@ class TelegramMessage(PlatformMessage):
             attachments.append(self.media_cache.cache_audio(bytes(audio_bytes)))
         return attachments
 
-    async def fetch_reference(self) -> 'TelegramMessage | None':
+    async def fetch_reference(self) -> "TelegramMessage | None":
         ref = self.origin.reply_to_message
-        return TelegramMessage.from_origin(ref, media_cache=self.media_cache) if ref else None
+        return (
+            TelegramMessage.from_origin(ref, media_cache=self.media_cache)
+            if ref
+            else None
+        )
 
     async def add_reaction(self, emoji: str):
         await self.origin.set_reaction(emoji)
@@ -154,7 +187,9 @@ class TelegramMessage(PlatformMessage):
                         write_timeout=600,
                     )
             except telegram.error.TimedOut as e:
-                logging.error(f"Timed out while sending file: {e}, retrying {i+1}/{3}")
+                logging.error(
+                    f"Timed out while sending file: {e}, retrying {i + 1}/{3}"
+                )
             except telegram.error.BadRequest as e:
                 logging.exception(f"BadRequest error while sending file: {e}")
                 break
@@ -174,13 +209,17 @@ class TelegramProvider(PlatformProvider):
 
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
         if self.token is None:
-            raise RuntimeError("TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot.")
+            raise RuntimeError(
+                "TELEGRAM_BOT_TOKEN environment variable is not set, unable to initialize telegram bot."
+            )
 
-        application = Application.builder() \
-            .token(self.token) \
-            .read_timeout(30) \
-            .write_timeout(30) \
+        application = (
+            Application.builder()
+            .token(self.token)
+            .read_timeout(30)
+            .write_timeout(30)
             .build()
+        )
         self.application = application
         self.known_chats: set[int] = set()
 
@@ -221,7 +260,9 @@ class TelegramProvider(PlatformProvider):
         self.application.run_polling()
 
     def register_on_message_event(self, function: Callable):
-        async def on_message(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+        async def on_message(
+            update: telegram.Update, context: ContextTypes.DEFAULT_TYPE
+        ):
             if update.effective_chat:
                 self.known_chats.add(update.effective_chat.id)
             message = update.message
@@ -235,13 +276,20 @@ class TelegramProvider(PlatformProvider):
 
         # Commands share the default handler group; never let this catch-all
         # shadow commands registered later by bootstrap or addons.
-        self.application.add_handler(MessageHandler(
-            (filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL) & ~filters.COMMAND,
-            callback=on_message
-        ))
+        self.application.add_handler(
+            MessageHandler(
+                (filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL)
+                & ~filters.COMMAND,
+                callback=on_message,
+            )
+        )
 
-    def register_slash_command(self, name: str, function: Callable, description: str | None = None):
-        async def slash_command(update: telegram.Update, context: ContextTypes.DEFAULT_TYPE):
+    def register_slash_command(
+        self, name: str, function: Callable, description: str | None = None
+    ):
+        async def slash_command(
+            update: telegram.Update, context: ContextTypes.DEFAULT_TYPE
+        ):
             message = update.message
             assert message is not None
             message = TelegramMessage.from_origin(message, media_cache=self.media_cache)
@@ -250,6 +298,7 @@ class TelegramProvider(PlatformProvider):
                     return await function(message)
                 else:
                     return function(message)
+
         self.application.add_handler(CommandHandler(name, slash_command))
 
     def get_guild_info(self, message: PlatformMessage) -> dict:
@@ -270,19 +319,30 @@ class TelegramProvider(PlatformProvider):
     def is_bot_mentioned(self, message: PlatformMessage) -> bool:
         assert isinstance(message, TelegramMessage)
         reply_message = message.origin.reply_to_message
-        if reply_message is not None and reply_message.from_user is not None and self.application.bot.id == reply_message.from_user.id:
+        if (
+            reply_message is not None
+            and reply_message.from_user is not None
+            and self.application.bot.id == reply_message.from_user.id
+        ):
             return True
-        return message.content is not None and f"@{self.application.bot.username}" in message.content
+        return (
+            message.content is not None
+            and f"@{self.application.bot.username}" in message.content
+        )
 
     async def is_dm_or_admin(self, message: PlatformMessage) -> bool:
         assert isinstance(message, TelegramMessage)
         if message.environment.chat_type == ChatType.PRIVATE:
             return True
         # Check if user has admin permissions to use the bot commands
-        member = await self.application.bot.get_chat_member(message.environment.chat_id, message.author.id)
+        member = await self.application.bot.get_chat_member(
+            message.environment.chat_id, message.author.id
+        )
         return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
 
-    async def send_file(self, chat_id: int, filepath: str, filename: str, caption: str | None = None):
+    async def send_file(
+        self, chat_id: int, filepath: str, filename: str, caption: str | None = None
+    ):
         chat = await self.application.bot.get_chat(chat_id)
         for i in range(3):
             try:
@@ -295,7 +355,9 @@ class TelegramProvider(PlatformProvider):
                         write_timeout=600,
                     )
             except telegram.error.TimedOut as e:
-                self.logger.error(f"Timed out while sending file: {e}, retrying {i+1}/{3}")
+                self.logger.error(
+                    f"Timed out while sending file: {e}, retrying {i + 1}/{3}"
+                )
             except telegram.error.BadRequest as e:
                 self.logger.exception(f"BadRequest error while sending file: {e}")
                 break
@@ -321,4 +383,6 @@ class TelegramProvider(PlatformProvider):
             return None
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):
-        raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_channel_history", self.platform))
+        raise NotImplementedError(
+            Messages.NOT_IMPLEMENTED % ("fetch_channel_history", self.platform)
+        )

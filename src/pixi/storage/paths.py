@@ -67,10 +67,17 @@ if __package__ is not None:
     def copy_if_absent(src: str, dst: str, *, follow_symlinks: bool = True):
         if os.path.exists(dst):
             if os.path.isdir(dst):
-                raise FileExistsError(f"directory exists with the same name as destination the file: {dst}")
+                raise FileExistsError(
+                    f"directory exists with the same name as destination the file: {dst}"
+                )
             return
         shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
 
     def copy_default_resources():
         os.makedirs(PixiPaths.resources(), exist_ok=True)
-        shutil.copytree(RESOURCES_PATH, PixiPaths.resources(), dirs_exist_ok=True, copy_function=copy_if_absent)
+        shutil.copytree(
+            RESOURCES_PATH,
+            PixiPaths.resources(),
+            dirs_exist_ok=True,
+            copy_function=copy_if_absent,
+        )

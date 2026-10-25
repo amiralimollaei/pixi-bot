@@ -1,15 +1,14 @@
 import asyncio
-from abc import ABC, abstractmethod
-from contextlib import asynccontextmanager, suppress
 import socket
 import tempfile
 import time
+from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncGenerator, Generic, TypeVar
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from ..model.config.llama import LlamaServerConfig
-
+from pixi.model.config.llama import LlamaServerConfig
 
 ClientT = TypeVar("ClientT")
 
@@ -94,19 +93,27 @@ class LlamaServer(ABC, Generic[ClientT]):
         if self.model.hf_file:
             args.extend(("--hf-file", self.model.hf_file))
         args.extend(self._server_arguments())
-        args.extend((
-            "--host", "127.0.0.1",
-            "--port", str(port),
-            "--ctx-size", str(self.model.max_context),
-            "--alias", self.model.hf_repo,
-            "--no-warmup",
-        ))
+        args.extend(
+            (
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--ctx-size",
+                str(self.model.max_context),
+                "--alias",
+                self.model.hf_repo,
+                "--no-warmup",
+            )
+        )
         try:
-            spawn = asyncio.create_task(asyncio.create_subprocess_exec(
-                *args,
-                stdout=self._log,
-                stderr=asyncio.subprocess.STDOUT,
-            ))
+            spawn = asyncio.create_task(
+                asyncio.create_subprocess_exec(
+                    *args,
+                    stdout=self._log,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            )
             try:
                 self._process = await asyncio.shield(spawn)
             except asyncio.CancelledError:
@@ -127,7 +134,9 @@ class LlamaServer(ABC, Generic[ClientT]):
         while time.monotonic() < deadline:
             process = self._process
             if process is None or process.returncode is not None:
-                raise RuntimeError(self._server_failure("llama-server exited before becoming ready"))
+                raise RuntimeError(
+                    self._server_failure("llama-server exited before becoming ready")
+                )
             try:
                 ready = await asyncio.to_thread(self._health_check, health_url)
             except (OSError, URLError, TimeoutError):
@@ -136,7 +145,9 @@ class LlamaServer(ABC, Generic[ClientT]):
                 self._client = self._create_client(port)
                 return
             await asyncio.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
-        raise RuntimeError(self._server_failure("Timed out waiting for llama-server readiness"))
+        raise RuntimeError(
+            self._server_failure("Timed out waiting for llama-server readiness")
+        )
 
     @staticmethod
     def _health_check(url: str) -> bool:

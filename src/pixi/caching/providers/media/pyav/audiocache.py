@@ -2,7 +2,7 @@ import tempfile
 
 import av
 
-from .... import InMemoryCache, MediaCache
+from pixi.caching import InMemoryCache, MediaCache
 
 # constants
 
@@ -12,9 +12,11 @@ CACHE_MAX_DURATION = 30
 
 
 class AudioCache(MediaCache):
-
     def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
-        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=".aac") as tmp_out:
+        with (
+            tempfile.NamedTemporaryFile() as tmp_in,
+            tempfile.NamedTemporaryFile(suffix=".aac") as tmp_out,
+        ):
             tmp_in.write(data_bytes)
             tmp_in.flush()
 
@@ -30,10 +32,7 @@ class AudioCache(MediaCache):
                 format="adts",
             )
             output_stream = output_file.add_stream(
-                "aac",
-                rate=CACHE_SAMPLERATE,
-                bit_rate=CACHE_BITRATE,
-                layout='mono'
+                "aac", rate=CACHE_SAMPLERATE, bit_rate=CACHE_BITRATE, layout="mono"
             )
 
             # Create a resampler to convert input audio to the cache format

@@ -14,15 +14,16 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.dialects.mysql import LONGTEXT, insert as mysql_insert
+from sqlalchemy.dialects.mysql import LONGTEXT
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 
-from ..model.chat import ChatMessageMeta
-from ..model.storage.document import DocumentMeta
-from .knowledge_disk import _deserialize_document, _serialize_documents
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.storage.document import DocumentMeta
+from pixi.storage.knowledge_disk import _deserialize_document, _serialize_documents
 
 
 class MessagesSQLStorage:
@@ -106,11 +107,14 @@ class MessagesSQLStorage:
 
     def exists(self, key: str) -> bool:
         with self._engine.connect() as connection:
-            return connection.execute(
-                select(self._heads.c.key_hash).where(
-                    self._heads.c.key_hash == self._key_hash(key)
-                )
-            ).first() is not None
+            return (
+                connection.execute(
+                    select(self._heads.c.key_hash).where(
+                        self._heads.c.key_hash == self._key_hash(key)
+                    )
+                ).first()
+                is not None
+            )
 
     def count(self, key: str) -> int:
         with self._engine.connect() as connection:
@@ -136,9 +140,7 @@ class MessagesSQLStorage:
                 .values(length=self._heads.c.length + len(payloads))
             )
             end = connection.execute(
-                select(self._heads.c.length).where(
-                    self._heads.c.key_hash == key_hash
-                )
+                select(self._heads.c.length).where(self._heads.c.key_hash == key_hash)
             ).scalar_one()
             first = end - len(payloads)
             connection.execute(
@@ -303,16 +305,26 @@ class KnowledgeSQLStorage:
         values = {"name_hash": name_hash, "payload": payload}
         dialect = self._engine.dialect.name
         if dialect == "sqlite":
-            statement = sqlite_insert(table).values(**values).on_conflict_do_update(
-                index_elements=[table.c.name_hash], set_={"payload": payload}
+            statement = (
+                sqlite_insert(table)
+                .values(**values)
+                .on_conflict_do_update(
+                    index_elements=[table.c.name_hash], set_={"payload": payload}
+                )
             )
         elif dialect == "postgresql":
-            statement = postgresql_insert(table).values(**values).on_conflict_do_update(
-                index_elements=[table.c.name_hash], set_={"payload": payload}
+            statement = (
+                postgresql_insert(table)
+                .values(**values)
+                .on_conflict_do_update(
+                    index_elements=[table.c.name_hash], set_={"payload": payload}
+                )
             )
         elif dialect in {"mysql", "mariadb"}:
-            statement = mysql_insert(table).values(**values).on_duplicate_key_update(
-                payload=payload
+            statement = (
+                mysql_insert(table)
+                .values(**values)
+                .on_duplicate_key_update(payload=payload)
             )
         else:
             statement = None

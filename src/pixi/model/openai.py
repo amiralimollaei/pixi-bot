@@ -47,21 +47,33 @@ class ChatCompletionChunk:
                 tool_calls = []
                 for call in delta["tool_calls"]:
                     function = call.get("function") or {}
-                    tool_calls.append(ToolCall(
-                        id=call.get("id"), index=call.get("index"),
-                        function=Function(name=function.get("name"), arguments=function.get("arguments")),
-                        type=call.get("type", "function"),
-                    ))
-            choices.append(Choice(
-                delta=ChoiceDelta(
-                    content=delta.get("content"), tool_calls=tool_calls,
-                    reasoning_content=delta.get("reasoning_content"),
-                ),
-                finish_reason=item.get("finish_reason"),
-            ))
+                    tool_calls.append(
+                        ToolCall(
+                            id=call.get("id"),
+                            index=call.get("index"),
+                            function=Function(
+                                name=function.get("name"),
+                                arguments=function.get("arguments"),
+                            ),
+                            type=call.get("type", "function"),
+                        )
+                    )
+            choices.append(
+                Choice(
+                    delta=ChoiceDelta(
+                        content=delta.get("content"),
+                        tool_calls=tool_calls,
+                        reasoning_content=delta.get("reasoning_content"),
+                    ),
+                    finish_reason=item.get("finish_reason"),
+                )
+            )
         return cls(
-            id=data.get("id", ""), object=data.get("object", "chat.completion.chunk"),
-            created=data.get("created", 0), model=data.get("model", ""), choices=choices,
+            id=data.get("id", ""),
+            object=data.get("object", "chat.completion.chunk"),
+            created=data.get("created", 0),
+            model=data.get("model", ""),
+            choices=choices,
         )
 
 
@@ -76,7 +88,12 @@ class EmbeddingResponse:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EmbeddingResponse":
-        return cls([EmbeddingData(embedding=item.get("embedding", [])) for item in data.get("data", [])])
+        return cls(
+            [
+                EmbeddingData(embedding=item.get("embedding", []))
+                for item in data.get("data", [])
+            ]
+        )
 
 
 @dataclass(frozen=True)

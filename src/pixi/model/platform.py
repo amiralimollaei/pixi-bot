@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from .enums import ChatType
+from pixi.model.enums import ChatType
 
 
 @dataclass(frozen=True)

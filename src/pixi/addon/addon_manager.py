@@ -3,7 +3,7 @@ import importlib.util
 import logging
 import os
 
-from ..storage.paths import PixiPaths
+from pixi.storage.paths import PixiPaths
 
 
 class AddonManager:
@@ -33,7 +33,11 @@ class AddonManager:
 
     def load_addon_file(self, name: str, path: str, search_locations=None):
         logging.info(f"Loading addon: {name} from {path}")
-        spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=[search_locations] if search_locations else [])
+        spec = importlib.util.spec_from_file_location(
+            name,
+            path,
+            submodule_search_locations=[search_locations] if search_locations else [],
+        )
         if spec and spec.loader:
             module = importlib.util.module_from_spec(spec)
             try:
@@ -42,11 +46,15 @@ class AddonManager:
                     module.register(self.bot, logging.getLogger(name))
                     self.addons[name] = module
                 else:
-                    logging.warning(f"Addon '{name}' does not have a valid register function.")
+                    logging.warning(
+                        f"Addon '{name}' does not have a valid register function."
+                    )
             except Exception as e:
                 logging.exception(f"Failed to load addon '{name}'")
         else:
-            logging.error(f"Could not load addon '{name}': Invalid module specification.")
+            logging.error(
+                f"Could not load addon '{name}': Invalid module specification."
+            )
 
     def get_addon(self, name):
         return self.addons.get(name)

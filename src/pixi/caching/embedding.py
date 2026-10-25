@@ -3,16 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 
-from ..interfaces.models import EmbeddingModel
-from ..interfaces.caching import CacheStorage
-from . import CacheSystem, StoredCacheSystem, InMemoryCache
+from pixi.caching import CacheSystem, InMemoryCache, StoredCacheSystem
+from pixi.interfaces.caching import CacheStorage
+from pixi.interfaces.models import EmbeddingModel
 
 
 class EmbeddingCache(StoredCacheSystem, CacheSystem[str]):
     """Persist text embeddings in a namespace specific to the embedding model."""
 
     def __init__(self, storage: CacheStorage, *, embedding_model: EmbeddingModel):
-        identity = json.dumps(embedding_model.cache_identity, ensure_ascii=False).encode("utf-8")
+        identity = json.dumps(
+            embedding_model.cache_identity, ensure_ascii=False
+        ).encode("utf-8")
         namespace = hashlib.sha256(identity).hexdigest()
         super().__init__(storage, namespace=f"embeddings/{namespace}")
         self.embedding_model = embedding_model

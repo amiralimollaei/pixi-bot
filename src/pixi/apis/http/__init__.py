@@ -17,14 +17,28 @@ class HTTPClient(Protocol):
 
     async def __aenter__(self) -> "HTTPClient": ...
 
-    async def __aexit__(self, exc_type: type[BaseException] | None,
-                        exc: BaseException | None, tb: TracebackType | None): ...
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ): ...
 
-    def get(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict]
-            = None, params: Optional[dict] = None) -> "ClientResponse": ...
+    def get(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> "ClientResponse": ...
 
-    def post(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict]
-             = None, params: Optional[dict] = None) -> "ClientResponse": ...
+    def post(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> "ClientResponse": ...
 
 
 class ClientResponse(Protocol):
@@ -36,8 +50,12 @@ class ClientResponse(Protocol):
 
     async def __aenter__(self) -> "ClientResponse": ...
 
-    async def __aexit__(self, exc_type: type[BaseException] | None,
-                        exc: BaseException | None, tb: TracebackType | None): ...
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ): ...
 
     @property
     def status(self) -> int: ...
@@ -59,19 +77,25 @@ def build_url(base_url: str, endpoint: str) -> str:
 def get_http_client_provider() -> type[HTTPClient]:
     try:
         import httpx
+
         provider_name = "httpx"
     except ImportError:
         try:
             import aiohttp
+
             provider_name = "aiohttp"
         except ImportError:
-            raise ImportError("Neither httpx nor aiohttp is installed. Please install one of them.")
+            raise ImportError(
+                "Neither httpx nor aiohttp is installed. Please install one of them."
+            )
 
     if provider_name == "httpx":
-        from .httpxprovider import HTTPXProvider
+        from pixi.apis.http.httpxprovider import HTTPXProvider
+
         return HTTPXProvider
     elif provider_name == "aiohttp":
-        from .aiohttpprovider import AIOHTTPProvider
+        from pixi.apis.http.aiohttpprovider import AIOHTTPProvider
+
         return AIOHTTPProvider
     else:
         raise ValueError(f"Unknown provider name: {provider_name}")

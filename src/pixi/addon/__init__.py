@@ -1,1 +1,1 @@
-from .addon_manager import AddonManager
+from pixi.addon.addon_manager import AddonManager

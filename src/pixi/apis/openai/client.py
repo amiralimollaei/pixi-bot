@@ -2,9 +2,13 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from ...async_utils import AsyncStream
-from ...model.openai import ChatCompletionChunk, EmbeddingResponse, ModelList
-from .transport import create_embeddings, list_models, stream_chat_completions
+from pixi.apis.openai.transport import (
+    create_embeddings,
+    list_models,
+    stream_chat_completions,
+)
+from pixi.async_utils import AsyncStream
+from pixi.model.openai import ChatCompletionChunk, EmbeddingResponse, ModelList
 
 
 class ChatCompletions:
@@ -14,9 +18,13 @@ class ChatCompletions:
     async def create(self, **kwargs: Any) -> AsyncStream[ChatCompletionChunk]:
         if not kwargs.get("stream", False):
             raise NotImplementedError("Non-streaming chat completions not implemented")
-        return AsyncStream(stream_chat_completions(
-            base_url=self._client.base_url, api_key=self._client.api_key, payload=kwargs,
-        ))
+        return AsyncStream(
+            stream_chat_completions(
+                base_url=self._client.base_url,
+                api_key=self._client.api_key,
+                payload=kwargs,
+            )
+        )
 
 
 class Chat:
@@ -30,7 +38,9 @@ class Embeddings:
 
     async def create(self, **kwargs: Any) -> EmbeddingResponse:
         return await create_embeddings(
-            base_url=self._client.base_url, api_key=self._client.api_key, payload=kwargs,
+            base_url=self._client.base_url,
+            api_key=self._client.api_key,
+            payload=kwargs,
         )
 
 

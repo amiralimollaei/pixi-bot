@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from ..embedding import Embedding
+from pixi.model.embedding import Embedding
 
 
 @dataclass(frozen=True)
@@ -12,7 +12,9 @@ class QueryMatch:
     source: str | None = None
 
     def __hash__(self) -> int:
-        return hash((self.title, self.id, self.num_matches, self.match_score, self.source))
+        return hash(
+            (self.title, self.id, self.num_matches, self.match_score, self.source)
+        )
 
 
 @dataclass(frozen=True)
@@ -27,9 +29,12 @@ class VectorTextPiece:
     reference: DocumentReference
 
     @property
-    def vec(self): return self.data.vec
+    def vec(self):
+        return self.data.vec
+
     @property
-    def text(self): return self.data.text
+    def text(self):
+        return self.data.text
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,7 @@ from xml.etree.ElementTree import Element
 
 from defusedxml.ElementTree import iterparse
 
-from ..model.storage.document import DocumentMeta
+from pixi.model.storage.document import DocumentMeta
 
 
 def _local_name(tag: str) -> str:
@@ -47,7 +47,11 @@ def _page_document(
         if _local_name(revision.tag) != "revision":
             continue
         timestamp = next(
-            (child.text or "" for child in revision if _local_name(child.tag) == "timestamp"),
+            (
+                child.text or ""
+                for child in revision
+                if _local_name(child.tag) == "timestamp"
+            ),
             "",
         )
         if latest is None or timestamp >= latest_timestamp:
@@ -63,17 +67,21 @@ def _page_document(
         if article_prefix
         else f"{path.resolve().as_uri()}#page={identifier}"
     )
-    return DocumentMeta(title=title.text, content=text.text or "", id=identifier, source=source)
+    return DocumentMeta(
+        title=title.text, content=text.text or "", id=identifier, source=source
+    )
 
 
 class MediaWikiImporter:
     def read_documents(self, path: Path) -> Iterator[DocumentMeta]:
         """Read XML, XML.gz, XML.bz2, or XML.xz without retaining completed pages.
-    
+
         Only main-namespace, nonredirect pages are imported. Latest revision text is
         kept as wikitext; deleted or empty latest revisions are not imported.
         """
-        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(path.suffix.lower(), open)
+        opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(
+            path.suffix.lower(), open
+        )
         article_prefix = None
         seen_ids: set[int] = set()
         with opener(path, "rb") as stream:
@@ -96,7 +104,11 @@ class MediaWikiImporter:
                     name = _local_name(element.tag)
                     if name == "siteinfo":
                         base = next(
-                            (child.text for child in element if _local_name(child.tag) == "base"),
+                            (
+                                child.text
+                                for child in element
+                                if _local_name(child.tag) == "base"
+                            ),
                             None,
                         )
                         if base:
@@ -107,7 +119,9 @@ class MediaWikiImporter:
                         document = _page_document(element, path, article_prefix)
                         if document is not None:
                             if document.id in seen_ids:
-                                raise ValueError(f"Duplicate MediaWiki page ID: {document.id}")
+                                raise ValueError(
+                                    f"Duplicate MediaWiki page ID: {document.id}"
+                                )
                             seen_ids.add(document.id)
                             yield document
                     else:

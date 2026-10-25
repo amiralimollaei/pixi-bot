@@ -5,33 +5,33 @@ from email.message import Message
 from pathlib import Path
 from urllib.parse import quote
 
-from ..model.storage.document import DocumentMeta
-from .html import html_to_text
+from pixi.knowledge_import.html import html_to_text
+from pixi.model.storage.document import DocumentMeta
 
 
 class KiwixImporter:
     def read_documents(self, path: Path) -> Iterator[DocumentMeta]:
         """Yield HTML/plain-text articles in archive order, without following redirects.
-    
+
         IDs are the archive's stable directory indexes. Sources are local archive
         file URIs with the entry path as a fragment; no original URL is guessed.
         Text must decode using its declared MIME charset, or UTF-8 by default.
         """
         if not path.is_file():
             raise ValueError(f"Kiwix source must be a local ZIM file: {path}")
-    
+
         try:
-            from libzim import reader
+            from libzim.reader import Archive
         except ImportError as exc:
             raise RuntimeError(
                 "Kiwix import requires libzim; install it with "
                 "pip install 'pixi-bot[kiwix]'."
             ) from exc
-    
+
         source_uri = path.resolve().as_uri()
         entry_id = None
         try:
-            archive = reader.Archive(path)
+            archive = Archive(path)
             modern_namespaces = archive.has_new_namespace_scheme
             # entry_count counts user entries, but IDs index the complete directory.
             # Released libzim 3.x exposes enumeration as _get_entry_by_id.
@@ -51,13 +51,17 @@ class KiwixImporter:
                         continue
                 elif not entry_path.startswith("A/"):
                     continue
-    
+
                 item = entry.get_item()
                 mimetype = item.mimetype
                 media_type = mimetype.split(";", 1)[0].strip().lower()
-                if media_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
+                if media_type not in {
+                    "text/html",
+                    "application/xhtml+xml",
+                    "text/plain",
+                }:
                     continue
-    
+
                 # Inspect MIME metadata before accessing content: images, indexes,
                 # and other binary assets must never be copied into Python bytes.
                 mime = Message()
@@ -75,4 +79,6 @@ class KiwixImporter:
                 )
         except (RuntimeError, OSError, ValueError, LookupError) as exc:
             location = "" if entry_id is None else f" at entry {entry_id}"
-            raise ValueError(f"Cannot read ZIM archive {path}{location}: {exc}") from exc
+            raise ValueError(
+                f"Cannot read ZIM archive {path}{location}: {exc}"
+            ) from exc

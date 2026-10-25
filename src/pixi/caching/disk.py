@@ -1,7 +1,7 @@
 import hashlib
 from pathlib import Path
 
-from . import InMemoryCache
+from pixi.caching import InMemoryCache
 
 
 class CacheDiskStorage:

@@ -8,11 +8,11 @@ class SmartSplitter:
         self.min_size = min(min_size, max_size // 2)
 
         self.separators = [
-            r"\n\n+",         # Paragraphs
-            r"\n",            # Newlines
+            r"\n\n+",  # Paragraphs
+            r"\n",  # Newlines
             r"(?<=[.!?]) +",  # Sentences
-            r"\|",            # Pipes (MediaWiki)
-            r" +",            # Words
+            r"\|",  # Pipes (MediaWiki)
+            r" +",  # Words
         ]
 
     def split(self, text: str) -> list[str]:
@@ -65,7 +65,11 @@ class SmartSplitter:
 
             if safe:
                 # A "Safe" index ensures both resulting chunks are >= min_size
-                indices = [m.end() for m in matches if self.min_size <= m.end() <= len(text) - self.min_size]
+                indices = [
+                    m.end()
+                    for m in matches
+                    if self.min_size <= m.end() <= len(text) - self.min_size
+                ]
             else:
                 # A "Forced" index just avoids the absolute 0 or length
                 indices = [m.end() for m in matches if 0 < m.end() < len(text)]
@@ -94,7 +98,7 @@ class SmartSplitter:
 
     def _rebalance(self, chunks: list[str]) -> list[str]:
         """
-        If the last chunk is too small, merge it with the previous and 
+        If the last chunk is too small, merge it with the previous and
         re-split that combined block at the absolute best middle.
         """
         if len(chunks) < 2:

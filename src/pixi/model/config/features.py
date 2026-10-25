@@ -14,13 +14,20 @@ class PixiFeatures(IntFlag):
     AudioSupport = auto()
 
     @classmethod
-    def all(cls) -> 'PixiFeatures':
-        return cls.ToolCalling | cls.ToolLogging | cls.WikiSearch | cls.GIFSearch | cls.ImageSupport | cls.AudioSupport
+    def all(cls) -> "PixiFeatures":
+        return (
+            cls.ToolCalling
+            | cls.ToolLogging
+            | cls.WikiSearch
+            | cls.GIFSearch
+            | cls.ImageSupport
+            | cls.AudioSupport
+        )
 
     @classmethod
-    def default(cls) -> 'PixiFeatures':
+    def default(cls) -> "PixiFeatures":
         return cls.ToolCalling | cls.ToolLogging | cls.GIFSearch
 
     @classmethod
-    def empty(cls) -> 'PixiFeatures':
+    def empty(cls) -> "PixiFeatures":
         return cls(0)

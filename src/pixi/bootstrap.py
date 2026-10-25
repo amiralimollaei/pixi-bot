@@ -7,34 +7,45 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
-from .model.config import (KnowledgeBaseConfig, IdFilter, LlamaEmbeddingModelConfig,
-                           LlamaLanguageModelConfig, MediaWikiConfig,
-                           OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
-                           OpenAILanguageModelConfig, PixiFeatures)
-from .model.enums import Platform
-from .caching import MediaCacheProvider
-from .caching.disk import CacheDiskStorage
-from .interfaces.caching import CacheStorage
-from .interfaces.knowledge import KnowledgeStorage
-from .interfaces.messages import MessagesStorage
-from .interfaces.platform import PlatformMessage, PlatformProvider
-from .storage.paths import PixiPaths, copy_default_resources
+from pixi.caching import MediaCacheProvider
+from pixi.caching.disk import CacheDiskStorage
+from pixi.interfaces.caching import CacheStorage
+from pixi.interfaces.knowledge import KnowledgeStorage
+from pixi.interfaces.messages import MessagesStorage
+from pixi.interfaces.platform import PlatformMessage, PlatformProvider
+from pixi.model.config import (
+    IdFilter,
+    KnowledgeBaseConfig,
+    LlamaEmbeddingModelConfig,
+    LlamaLanguageModelConfig,
+    MediaWikiConfig,
+    OpenAIAuthConfig,
+    OpenAIEmbeddingModelConfig,
+    OpenAILanguageModelConfig,
+    PixiFeatures,
+)
+from pixi.model.enums import Platform
+from pixi.storage.paths import PixiPaths, copy_default_resources
 
 if TYPE_CHECKING:
-    from .bot.client import PixiClient
+    from pixi.bot.client import PixiClient
 
 
 def create_platform_provider(
-    platform: Platform, *, media_cache: MediaCacheProvider | None = None,
+    platform: Platform,
+    *,
+    media_cache: MediaCacheProvider | None = None,
 ) -> PlatformProvider:
     """Import only the selected platform SDK."""
     try:
         match platform:
             case Platform.DISCORD:
-                from .platform.discord import DiscordProvider
+                from pixi.platform.discord import DiscordProvider
+
                 return DiscordProvider(media_cache=media_cache)
             case Platform.TELEGRAM:
-                from .platform.telegram import TelegramProvider
+                from pixi.platform.telegram import TelegramProvider
+
                 return TelegramProvider(media_cache=media_cache)
             case _:
                 raise RuntimeError(f"PlatformProvider unknown platform {platform}.")
@@ -46,11 +57,17 @@ def create_platform_provider(
 
 async def verify_models(auth: OpenAIAuthConfig, models: dict[str, str]) -> None:
     """Verify the configured OpenAI-compatible backend before platform startup."""
-    from .apis.openai.client import OpenAI
-    from .apis.openai.exceptions import APIConnectionError, APIError, AuthenticationError
+    from pixi.apis.openai.client import OpenAI
+    from pixi.apis.openai.exceptions import (
+        APIConnectionError,
+        APIError,
+        AuthenticationError,
+    )
 
     logger = logging.getLogger(__name__)
-    logger.info("Verifying API connectivity and model availability at %s...", auth.base_url)
+    logger.info(
+        "Verifying API connectivity and model availability at %s...", auth.base_url
+    )
     try:
         session = OpenAI(api_key=auth.api_key, base_url=auth.base_url)
         available_models = {model.id for model in session.models.list()}
@@ -65,9 +82,13 @@ async def verify_models(auth: OpenAIAuthConfig, models: dict[str, str]) -> None:
                     f'{role} model "{model_id}" was not found in the list of available models on the API server.'
                 )
     except APIConnectionError as error:
-        raise RuntimeError(f"Failed to connect to API at {auth.base_url}: {error}") from error
+        raise RuntimeError(
+            f"Failed to connect to API at {auth.base_url}: {error}"
+        ) from error
     except AuthenticationError as error:
-        raise RuntimeError(f"Failed to authenticate to API at {auth.base_url}: {error}") from error
+        raise RuntimeError(
+            f"Failed to authenticate to API at {auth.base_url}: {error}"
+        ) from error
     except APIError as error:
         logger.warning(
             "API responded with an error when listing models (status=%s), model verification "
@@ -82,7 +103,9 @@ def create_bot(
     auth: OpenAIAuthConfig,
     model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
     helper_model: OpenAILanguageModelConfig | LlamaLanguageModelConfig | None = None,
-    embedding_model: OpenAIEmbeddingModelConfig | LlamaEmbeddingModelConfig | None = None,
+    embedding_model: OpenAIEmbeddingModelConfig
+    | LlamaEmbeddingModelConfig
+    | None = None,
     features: PixiFeatures = PixiFeatures.default(),
     knowledge_bases: Sequence[KnowledgeBaseConfig] = (),
     wikis: Sequence[MediaWikiConfig] = (),
@@ -98,18 +121,27 @@ def create_bot(
     copy_default_resources()
 
     # Path-sensitive adapters are imported only after configuring their data root.
-    from .addon import AddonManager
-    from .ai.chatting.persona import AssistantPersona
-    from .ai.rag.client import AsyncRAGClient
-    from .apis.openai.adapter import OpenAIChatModel, OpenAIEmbeddingModel
-    from .inference.chat import LlamaChatModel
-    from .bot.actions import (CancelScheduleAction, NoteAction, ReactAction,
-                              ScheduleAction, SendAction, SendGifAction)
-    from .bot.client import PixiClient
-    from .bot.tools import (FetchChannelHistoryTool, create_knowledge_tools,
-                            create_mediawiki_tools)
-    from .caching import get_embedding_cache, get_media_cache
-    from .storage.messages import MessagesDiskStorage
+    from pixi.addon import AddonManager
+    from pixi.ai.chatting.persona import AssistantPersona
+    from pixi.ai.rag.client import AsyncRAGClient
+    from pixi.apis.openai.adapter import OpenAIChatModel, OpenAIEmbeddingModel
+    from pixi.bot.actions import (
+        CancelScheduleAction,
+        NoteAction,
+        ReactAction,
+        ScheduleAction,
+        SendAction,
+        SendGifAction,
+    )
+    from pixi.bot.client import PixiClient
+    from pixi.bot.tools import (
+        FetchChannelHistoryTool,
+        create_knowledge_tools,
+        create_mediawiki_tools,
+    )
+    from pixi.caching import get_embedding_cache, get_media_cache
+    from pixi.inference.chat import LlamaChatModel
+    from pixi.storage.messages import MessagesDiskStorage
 
     logger = logging.getLogger(__name__)
     if cache_storage is None:
@@ -148,21 +180,21 @@ def create_bot(
     close_embeddings = None
     if embedding_model is not None:
         if isinstance(embedding_model, LlamaEmbeddingModelConfig):
-            from .inference.embeddings import LlamaEmbeddingModel
+            from pixi.inference.embeddings import LlamaEmbeddingModel
 
             embedding_provider = LlamaEmbeddingModel(embedding_model)
             close_embeddings = embedding_provider.aclose
         else:
             embedding_provider = OpenAIEmbeddingModel(auth, embedding_model)
         embedding_cache = get_embedding_cache(
-            storage=cache_storage, embedding_model=embedding_provider,
+            storage=cache_storage,
+            embedding_model=embedding_provider,
         )
 
         def create_rag_client():
             return AsyncRAGClient(cache=embedding_cache, model=embedding_model)
 
         rag_factory = create_rag_client
-
 
     bot = PixiClient(
         platform_provider,
@@ -173,7 +205,8 @@ def create_bot(
         embedding_model=embedding_model,
         rag_factory=rag_factory,
         messages_storage=(
-            messages_storage if messages_storage is not None
+            messages_storage
+            if messages_storage is not None
             else MessagesDiskStorage(PixiPaths.messages())
         ),
         persona=persona,
@@ -202,19 +235,27 @@ def create_bot(
 
     gif_api = None
     if PixiFeatures.GIFSearch in features:
-        from .apis.tenor import AsyncTenorAPI
+        from pixi.apis.tenor import AsyncTenorAPI
 
         try:
             gif_api = AsyncTenorAPI()
         except Exception:
-            logger.warning("gif search api failed to initialize, gif features will not be available.")
-    for action in (ScheduleAction(), CancelScheduleAction(), SendAction(),
-                   SendGifAction(gif_api), NoteAction(), ReactAction()):
+            logger.warning(
+                "gif search api failed to initialize, gif features will not be available."
+            )
+    for action in (
+        ScheduleAction(),
+        CancelScheduleAction(),
+        SendAction(),
+        SendGifAction(gif_api),
+        NoteAction(),
+        ReactAction(),
+    ):
         bot.register_action(action)
 
     if PixiFeatures.ToolCalling in features:
-        from .storage.knowledge import KnowledgeBase
-        from .storage.knowledge_disk import KnowledgeDiskStorage
+        from pixi.storage.knowledge import KnowledgeBase
+        from pixi.storage.knowledge_disk import KnowledgeDiskStorage
 
         if knowledge_storage is None:
             knowledge_storage = KnowledgeDiskStorage(PixiPaths.knowledge())
@@ -225,15 +266,18 @@ def create_bot(
             for tool in create_knowledge_tools(bot, config.name, knowledge_base):
                 bot.register_tool(tool)
         if PixiFeatures.WikiSearch in features:
-            from .apis.wikimedia import AsyncWikimediaAPI
+            from pixi.apis.wikimedia import AsyncWikimediaAPI
 
             for config in wikis:
-                for tool in create_mediawiki_tools(bot, config.name, AsyncWikimediaAPI(config.url)):
+                for tool in create_mediawiki_tools(
+                    bot, config.name, AsyncWikimediaAPI(config.url)
+                ):
                     bot.register_tool(tool)
         if platform == Platform.DISCORD:
             bot.register_tool(FetchChannelHistoryTool())
 
     if platform == Platform.TELEGRAM:
+
         async def start_command(message: PlatformMessage):
             await message.send("Hiiiii, how's it going?")
 

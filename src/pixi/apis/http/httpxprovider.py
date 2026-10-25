@@ -3,7 +3,7 @@ from typing import Any, AsyncIterator, Optional
 
 import httpx
 
-from . import ClientResponse, HTTPClient, build_url
+from pixi.apis.http import ClientResponse, HTTPClient, build_url
 
 
 class HTTPXClientResponse(ClientResponse):
@@ -18,17 +18,26 @@ class HTTPXClientResponse(ClientResponse):
             raise ConnectionError(str(e)) from e
         return self
 
-    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ):
         if self._response:
             await self._response.aclose()
 
     @property
     def status(self) -> int:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         return self._response.status_code
 
     async def json(self) -> dict:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             await self._response.aread()
         except httpx.RequestError as e:
@@ -36,7 +45,9 @@ class HTTPXClientResponse(ClientResponse):
         return self._response.json()
 
     async def text(self) -> str:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             await self._response.aread()
         except httpx.RequestError as e:
@@ -48,7 +59,9 @@ class HTTPXClientResponse(ClientResponse):
         return self._iter_content()
 
     async def _iter_content(self) -> AsyncIterator[bytes]:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             async for chunk in self._response.aiter_bytes():
                 yield chunk
@@ -69,14 +82,35 @@ class HTTPXProvider(HTTPClient):
             )
         return self
 
-    def get(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict] = None, params: Optional[dict] = None) -> ClientResponse:
+    def get(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> ClientResponse:
         return self._request("GET", endpoint, json, headers, params)
 
-    def post(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict] = None, params: Optional[dict] = None) -> ClientResponse:
+    def post(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> ClientResponse:
         return self._request("POST", endpoint, json, headers, params)
 
-    def _request(self, method: str, endpoint: str, json: Optional[dict], headers: Optional[dict], params: Optional[dict]) -> ClientResponse:
-        assert self.client is not None, "HTTPXProvider client is not initialized. Use 'async with' to initialize it."
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        json: Optional[dict],
+        headers: Optional[dict],
+        params: Optional[dict],
+    ) -> ClientResponse:
+        assert self.client is not None, (
+            "HTTPXProvider client is not initialized. Use 'async with' to initialize it."
+        )
         url = httpx.URL(build_url(self.base_url, endpoint))
         if params:
             url = url.copy_merge_params(params)

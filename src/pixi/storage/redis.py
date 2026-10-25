@@ -3,9 +3,9 @@ from collections.abc import Iterator, Sequence
 
 from redis.client import Redis
 
-from ..model.chat import ChatMessageMeta
-from ..model.storage.document import DocumentMeta
-from .knowledge_disk import _deserialize_document, _serialize_documents
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.storage.document import DocumentMeta
+from pixi.storage.knowledge_disk import _deserialize_document, _serialize_documents
 
 
 class MessagesRedisStorage:
@@ -130,8 +130,7 @@ class KnowledgeRedisStorage:
         if payload is None:
             return []
         documents = [
-            _deserialize_document(document)
-            for document in json.loads(payload)
+            _deserialize_document(document) for document in json.loads(payload)
         ]
         return sorted(documents, key=lambda document: document.id)
 

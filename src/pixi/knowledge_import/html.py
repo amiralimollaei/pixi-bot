@@ -1,16 +1,40 @@
 """Small dependency-free HTML-to-text extraction for offline documentation."""
 
-from html.parser import HTMLParser
 import re
+from html.parser import HTMLParser
 
 
 class _TextParser(HTMLParser):
     _hidden = {"script", "style", "nav", "noscript", "template"}
     _blocks = {
-        "address", "article", "blockquote", "br", "dd", "div", "dl", "dt",
-        "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
-        "header", "hr", "li", "main", "ol", "p", "pre", "section", "table",
-        "tr", "ul",
+        "address",
+        "article",
+        "blockquote",
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "figcaption",
+        "figure",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "tr",
+        "ul",
     }
 
     def __init__(self):
@@ -34,7 +58,7 @@ class _TextParser(HTMLParser):
     def handle_endtag(self, tag):
         if self.hidden:
             if tag in self.hidden:
-                del self.hidden[len(self.hidden) - 1 - self.hidden[::-1].index(tag):]
+                del self.hidden[len(self.hidden) - 1 - self.hidden[::-1].index(tag) :]
             return
         if tag == "pre":
             self.pre_depth = max(0, self.pre_depth - 1)

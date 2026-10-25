@@ -2,8 +2,7 @@ import tempfile
 
 import av
 
-from .... import InMemoryCache, MediaCache
-
+from pixi.caching import InMemoryCache, MediaCache
 
 # constants
 
@@ -11,9 +10,11 @@ THUMBNAIL_SIZE = 512
 
 
 class ImageCache(MediaCache):
-
     def compute_cache(self, data_bytes: bytes, **metadata) -> InMemoryCache:
-        with tempfile.NamedTemporaryFile() as tmp_in, tempfile.NamedTemporaryFile(suffix=".jpg") as tmp_out:
+        with (
+            tempfile.NamedTemporaryFile() as tmp_in,
+            tempfile.NamedTemporaryFile(suffix=".jpg") as tmp_out,
+        ):
             tmp_in.write(data_bytes)
             tmp_in.flush()
 
@@ -27,7 +28,9 @@ class ImageCache(MediaCache):
             iw, ih = frame.width, frame.height
             scale = min(THUMBNAIL_SIZE / iw, THUMBNAIL_SIZE / ih, 1.0)  # don't upscale
 
-            frame.reformat(width=int(iw * scale), height=int(ih * scale), format='yuvj420p').save(tmp_out.name)
+            frame.reformat(
+                width=int(iw * scale), height=int(ih * scale), format="yuvj420p"
+            ).save(tmp_out.name)
 
             tmp_out.seek(0)
             image_bytes = tmp_out.read()

@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncGenerator, Protocol
 
-from ..model.chat import ChatMessageMeta
-from ..model.embedding import Embedding
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.embedding import Embedding
 
 if TYPE_CHECKING:
-    from ..caching import InMemoryCache
+    from pixi.caching import InMemoryCache
 
 
 @dataclass(frozen=True)
@@ -39,9 +39,8 @@ class ToolCallDelta:
 class ChatFinished:
     reason: str | None = None
 
+
 ChatEvent = ContentDelta | ReasoningDelta | ToolCallDelta | ChatFinished
-
-
 
 
 class ChatModel(Protocol):
@@ -58,7 +57,10 @@ class EmbeddingCache(Protocol):
     async def compute_cache(self, text: str, **metadata) -> InMemoryCache: ...
 
     async def compute_if_absent(
-        self, text: str | None = None, hash: bytes | None = None, **metadata,
+        self,
+        text: str | None = None,
+        hash: bytes | None = None,
+        **metadata,
     ) -> bytes: ...
 
     def read(self, hash: bytes) -> InMemoryCache | None: ...

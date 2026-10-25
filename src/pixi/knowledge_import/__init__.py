@@ -1,10 +1,9 @@
 """Stateless source importers and the CLI's supported-format registry."""
 
-from ..interfaces.knowledge import KnowledgeImporter
-from .devdocs import DevDocsImporter
-from .kiwix import KiwixImporter
-from .mediawiki import MediaWikiImporter
-
+from pixi.interfaces.knowledge import KnowledgeImporter
+from pixi.knowledge_import.devdocs import DevDocsImporter
+from pixi.knowledge_import.kiwix import KiwixImporter
+from pixi.knowledge_import.mediawiki import MediaWikiImporter
 
 IMPORTERS: dict[str, KnowledgeImporter] = {
     "mediawiki": MediaWikiImporter(),

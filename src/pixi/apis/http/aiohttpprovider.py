@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp.client import _RequestContextManager
 from yarl import URL
 
-from . import ClientResponse, HTTPClient, build_url
+from pixi.apis.http import ClientResponse, HTTPClient, build_url
 
 
 class AIOHTTPClientResponse(ClientResponse):
@@ -20,27 +20,46 @@ class AIOHTTPClientResponse(ClientResponse):
             raise ConnectionError(str(e)) from e
         return self
 
-    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ):
         if self._response is not None:
             await self._response.__aexit__(exc_type, exc, tb)
 
     @property
     def status(self) -> int:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         return self._response.status
 
     async def json(self) -> dict:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             return await self._response.json()
-        except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, TimeoutError) as e:
+        except (
+            aiohttp.ClientConnectionError,
+            aiohttp.ClientPayloadError,
+            TimeoutError,
+        ) as e:
             raise ConnectionError(str(e)) from e
 
     async def text(self) -> str:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             return await self._response.text()
-        except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, TimeoutError) as e:
+        except (
+            aiohttp.ClientConnectionError,
+            aiohttp.ClientPayloadError,
+            TimeoutError,
+        ) as e:
             raise ConnectionError(str(e)) from e
 
     @property
@@ -48,11 +67,17 @@ class AIOHTTPClientResponse(ClientResponse):
         return self._iter_content()
 
     async def _iter_content(self) -> AsyncIterator[bytes]:
-        assert self._response is not None, "Response is not initialized. Use 'async with' to initialize it."
+        assert self._response is not None, (
+            "Response is not initialized. Use 'async with' to initialize it."
+        )
         try:
             async for chunk in self._response.content:
                 yield chunk
-        except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError, TimeoutError) as e:
+        except (
+            aiohttp.ClientConnectionError,
+            aiohttp.ClientPayloadError,
+            TimeoutError,
+        ) as e:
             raise ConnectionError(str(e)) from e
 
 
@@ -66,14 +91,35 @@ class AIOHTTPProvider(HTTPClient):
             self.session = aiohttp.ClientSession()
         return self
 
-    def get(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict] = None, params: Optional[dict] = None) -> ClientResponse:
+    def get(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> ClientResponse:
         return self._request("GET", endpoint, json, headers, params)
 
-    def post(self, endpoint: str, json: Optional[dict] = None, headers: Optional[dict] = None, params: Optional[dict] = None) -> ClientResponse:
+    def post(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        headers: Optional[dict] = None,
+        params: Optional[dict] = None,
+    ) -> ClientResponse:
         return self._request("POST", endpoint, json, headers, params)
 
-    def _request(self, method: str, endpoint: str, json: Optional[dict], headers: Optional[dict], params: Optional[dict]) -> ClientResponse:
-        assert self.session is not None, "AIOHTTPProvider session is not initialized. Use 'async with' to initialize it."
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        json: Optional[dict],
+        headers: Optional[dict],
+        params: Optional[dict],
+    ) -> ClientResponse:
+        assert self.session is not None, (
+            "AIOHTTPProvider session is not initialized. Use 'async with' to initialize it."
+        )
         url = URL(build_url(self.base_url, endpoint))
         if params:
             url = url.update_query(params)

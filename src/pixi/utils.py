@@ -22,7 +22,6 @@ def exists(value, allow_empty_string=False):
     return True
 
 
-
 # modified from https://stackoverflow.com/a/76636817
 def format_time(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:
     """Return time difference as human-readable string"""
@@ -80,7 +79,9 @@ def clean_dict(d: dict):
         elif isinstance(v, Sequence):
             if len(v) == 0:
                 continue
-            if not isinstance(v, str):  # other than strings, we every other sequence is a nested dynamic type
+            if not isinstance(
+                v, str
+            ):  # other than strings, we every other sequence is a nested dynamic type
                 v = [(clean_dict(e) if isinstance(e, dict) else e) for e in v]
         final_dict[k] = v
     return final_dict

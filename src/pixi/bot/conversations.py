@@ -8,19 +8,23 @@ from collections import defaultdict
 from contextlib import aclosing, contextmanager
 from typing import TYPE_CHECKING, Awaitable, Callable
 
-from ..ai.chatting.actions import AsyncActionManager
-from ..ai.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
-                                     ToolContext)
-from ..ai.chatting.client import AsyncChatClient
-from ..ai.chatting.persona import AssistantPersona
-from ..async_utils import AsyncScheduler
-from ..interfaces.messages import MessagesStorage
-from ..model.chat import ChatMessageMeta
-from ..model.enums import ChatRole
+from pixi.ai.chatting.actions import AsyncActionManager
+from pixi.ai.chatting.callbacks import (
+    ActionContext,
+    AsyncAction,
+    AsyncTool,
+    ToolContext,
+)
+from pixi.ai.chatting.client import AsyncChatClient
+from pixi.ai.chatting.persona import AssistantPersona
+from pixi.async_utils import AsyncScheduler
+from pixi.interfaces.messages import MessagesStorage
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.enums import ChatRole
 
 if TYPE_CHECKING:
-    from ..bot.client import PixiClient
-    from ..interfaces.platform import PlatformMessage
+    from pixi.bot.client import PixiClient
+    from pixi.interfaces.platform import PlatformMessage
 
 
 class AsyncChatbotInstance(AsyncChatClient):
@@ -44,7 +48,9 @@ class AsyncChatbotInstance(AsyncChatClient):
             raise ValueError(f'Invalid hash_prefix "{hash_prefix}".')
         self.id = str(uuid)
         self.prefix = hash_prefix
-        super().__init__(storage=store, history_key=f"{hash_prefix}:{self.id}", **client_kwargs)
+        super().__init__(
+            storage=store, history_key=f"{hash_prefix}:{self.id}", **client_kwargs
+        )
         self.logger = logging.getLogger(self.__class__.__name__)
         self.persona = persona
         self.system_prompt_template = system_prompt_template
@@ -58,14 +64,18 @@ class AsyncChatbotInstance(AsyncChatClient):
         self._active_users = 0
 
         if not self.storage.exists(self.history_key):
-            self.add_message(ChatMessageMeta(
-                role=ChatRole.ASSISTANT,
-                content="[NOTE: I accept the guidelines of the system, I use the SEND to respond nicely] [SEND: OK!, Let's begin!]",
-            ))
+            self.add_message(
+                ChatMessageMeta(
+                    role=ChatRole.ASSISTANT,
+                    content="[NOTE: I accept the guidelines of the system, I use the SEND to respond nicely] [SEND: OK!, Let's begin!]",
+                )
+            )
 
         self.scheduler = AsyncScheduler()
         self.action_manager = AsyncActionManager()
-        self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
+        self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(
+            list
+        )
 
         for tool in tools:
             if tool.should_register(self):
@@ -89,21 +99,36 @@ class AsyncChatbotInstance(AsyncChatClient):
         return (
             self._active_users > 0
             or self.scheduler.pending_count > 0
-            or any(not task.done() for tasks in self.channel_active_tasks.values() for task in tasks)
+            or any(
+                not task.done()
+                for tasks in self.channel_active_tasks.values()
+                for task in tasks
+            )
         )
 
-    def schedule(self, id: str, delay: float, callback: Callable[[], Awaitable[None]]) -> bool:
+    def schedule(
+        self, id: str, delay: float, callback: Callable[[], Awaitable[None]]
+    ) -> bool:
         async def run_callback():
             with self.use():
                 await callback()
+
         with self.detached_history():
             return self.scheduler.schedule(id=id, delay=delay, callback=run_callback)
 
-    def schedule_action(self, action: AsyncAction, value: str | None, action_context: ActionContext, id: str, delay: float) -> bool:
+    def schedule_action(
+        self,
+        action: AsyncAction,
+        value: str | None,
+        action_context: ActionContext,
+        id: str,
+        delay: float,
+    ) -> bool:
         async def execute_scheduled():
             if self.action_manager.on_action:
                 self.action_manager.on_action(action.name, value)
             await self.action_manager._invoke_action(action, action_context, value)
+
         return self.schedule(id=id, delay=delay, callback=execute_scheduled)
 
     def cancel_schedule(self, id: str) -> bool:
@@ -115,22 +140,34 @@ class AsyncChatbotInstance(AsyncChatClient):
     def add_action(self, action: AsyncAction):
         self.action_manager.add_action(action)
 
-    def add_message(self, message: ChatMessageMeta | str, default_role: ChatRole = ChatRole.USER) -> ChatMessageMeta:
+    def add_message(
+        self, message: ChatMessageMeta | str, default_role: ChatRole = ChatRole.USER
+    ) -> ChatMessageMeta:
         self.actions_since_last_message = 0
         self.last_used_at = time.monotonic()
         if isinstance(message, str):
             message = ChatMessageMeta(default_role, message)
         if isinstance(message, ChatMessageMeta):
             return super().add_message(message)
-        raise TypeError(f"expected message to be a string or a ChatMessageMeta, but got {type(message)}.")
+        raise TypeError(
+            f"expected message to be a string or a ChatMessageMeta, but got {type(message)}."
+        )
 
     def update_realtime(self, data: dict):
         self.realtime_data.update(data)
 
     def get_realtime_data(self):
-        return json.dumps(self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")), ensure_ascii=False, indent=3)
+        return json.dumps(
+            self.realtime_data | dict(date=time.strftime("%a %d %b %Y, %I:%M%p")),
+            ensure_ascii=False,
+            indent=3,
+        )
 
-    def create_tool_context(self, reference_message: ChatMessageMeta, platform_message: PlatformMessage | None = None) -> ToolContext:
+    def create_tool_context(
+        self,
+        reference_message: ChatMessageMeta,
+        platform_message: PlatformMessage | None = None,
+    ) -> ToolContext:
         return ToolContext(
             reference_message=reference_message,
             parent_instance=self,
@@ -165,13 +202,19 @@ class AsyncChatbotInstance(AsyncChatClient):
                 platform_message=platform_message,
             )
             try:
-                async with aclosing(self.stream_completion(
-                    temporal=False, system_prompt=system_prompt, tool_context=tool_context,
-                )) as completion:
-                    async with aclosing(self.action_manager.consume(
-                        stream=completion,
-                        action_context=action_context,
-                    )) as actions:
+                async with aclosing(
+                    self.stream_completion(
+                        temporal=False,
+                        system_prompt=system_prompt,
+                        tool_context=tool_context,
+                    )
+                ) as completion:
+                    async with aclosing(
+                        self.action_manager.consume(
+                            stream=completion,
+                            action_context=action_context,
+                        )
+                    ) as actions:
                         non_response = "".join([char async for char in actions])
                 return non_response.strip() or None
             finally:
@@ -189,14 +232,20 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         async def stream_call_task():
             try:
-                await self.stream_call(reference_message, platform_message=platform_message)
+                await self.stream_call(
+                    reference_message, platform_message=platform_message
+                )
             except asyncio.CancelledError:
-                self.logger.warning(f"stream_call task was cancelled inside {self.id} in channel {channel_id}")
+                self.logger.warning(
+                    f"stream_call task was cancelled inside {self.id} in channel {channel_id}"
+                )
                 raise
 
         task = asyncio.create_task(stream_call_task())
         self.channel_active_tasks[channel_id].append(task)
-        task.add_done_callback(lambda t: self.channel_active_tasks[channel_id].remove(t))
+        task.add_done_callback(
+            lambda t: self.channel_active_tasks[channel_id].remove(t)
+        )
         return task
 
     async def cancel_channel_active_tasks(self, channel_id: str):
@@ -205,7 +254,9 @@ class AsyncChatbotInstance(AsyncChatClient):
 
     async def aclose(self) -> None:
         """Stop all consumers before their shared dependencies are closed."""
-        tasks = [task for channel in self.channel_active_tasks.values() for task in channel]
+        tasks = [
+            task for channel in self.channel_active_tasks.values() for task in channel
+        ]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, self.scheduler.aclose(), return_exceptions=True)
@@ -259,7 +310,9 @@ class ChatbotInstanceRegistry:
         self.instances[instance.id] = instance
         return instance
 
-    def get(self, identifier: str, or_create: bool = True, **kwargs) -> AsyncChatbotInstance | None:
+    def get(
+        self, identifier: str, or_create: bool = True, **kwargs
+    ) -> AsyncChatbotInstance | None:
         if instance := self.instances.get(identifier):
             instance.last_used_at = time.monotonic()
             return instance
@@ -283,7 +336,9 @@ class ChatbotInstanceRegistry:
 
     async def aclose(self) -> None:
         """Wait for every resident conversation to stop using dependencies."""
-        await asyncio.gather(*(instance.aclose() for instance in tuple(self.instances.values())))
+        await asyncio.gather(
+            *(instance.aclose() for instance in tuple(self.instances.values()))
+        )
 
     def remove(self, identifier: str):
         self.store.delete(f"{self.hash_prefix}:{identifier}")

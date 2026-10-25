@@ -1,7 +1,7 @@
 import logging
 from contextlib import ExitStack
 
-from .storage.paths import PixiPaths
+from pixi.storage.paths import PixiPaths
 
 
 def load_dotenv():
@@ -9,7 +9,9 @@ def load_dotenv():
     try:
         import dotenv
     except ImportError:
-        logging.warning("dotenv is not installed, install it using `pip install dotenv`")
+        logging.warning(
+            "dotenv is not installed, install it using `pip install dotenv`"
+        )
     else:
         dotenv.load_dotenv()
 
@@ -19,24 +21,33 @@ def main():
     import sys
 
     if sys.argv[1:2] == ["import-knowledge"]:
-        from .cli_import import main as import_knowledge
+        from pixi.cli_import import main as import_knowledge
 
         load_dotenv()
         return import_knowledge(sys.argv[2:])
 
-    from .cli_knowledge import add_storage_arguments, open_storage, resolve_storage_options
     import logging
     import math
     import os
 
-
-    from .model.enums.ansi import AnsiColors
-    
-    from .model.enums import Platform
-    from .model.config import (KnowledgeBaseConfig, IdFilter, LlamaEmbeddingModelConfig,
-                               LlamaLanguageModelConfig, MediaWikiConfig,
-                               OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
-                               OpenAILanguageModelConfig, PixiFeatures)
+    from pixi.cli_knowledge import (
+        add_storage_arguments,
+        open_storage,
+        resolve_storage_options,
+    )
+    from pixi.model.config import (
+        IdFilter,
+        KnowledgeBaseConfig,
+        LlamaEmbeddingModelConfig,
+        LlamaLanguageModelConfig,
+        MediaWikiConfig,
+        OpenAIAuthConfig,
+        OpenAIEmbeddingModelConfig,
+        OpenAILanguageModelConfig,
+        PixiFeatures,
+    )
+    from pixi.model.enums import Platform
+    from pixi.model.enums.ansi import AnsiColors
 
     # injecting colors into the default logger
 
@@ -45,17 +56,23 @@ def main():
         logging.INFO: (AnsiColors.WHITE, AnsiColors.WHITE2),
         logging.WARNING: (AnsiColors.YELLOW, AnsiColors.YELLOW2),
         logging.ERROR: (AnsiColors.RED, AnsiColors.RED2),
-        logging.CRITICAL: (AnsiColors.BOLD + AnsiColors.RED, AnsiColors.BOLD + AnsiColors.RED2)
+        logging.CRITICAL: (
+            AnsiColors.BOLD + AnsiColors.RED,
+            AnsiColors.BOLD + AnsiColors.RED2,
+        ),
     }
 
     orig_factory = logging.getLogRecordFactory()
 
     def record_factory(*args, **kwargs):
         record = orig_factory(*args, **kwargs)
-        level_color, message_color = COLORS.get(record.levelno, (AnsiColors.GREY, AnsiColors.WHITE))
+        level_color, message_color = COLORS.get(
+            record.levelno, (AnsiColors.GREY, AnsiColors.WHITE)
+        )
         record.level_color = level_color
         record.message_color = message_color
         return record
+
     logging.setLogRecordFactory(record_factory)
 
     logging.basicConfig(
@@ -78,30 +95,33 @@ def main():
         epilog="Offline imports: pixi-cli import-knowledge --help",
     )
     parser.add_argument(
-        "--platform", "-p",
+        "--platform",
+        "-p",
         type=str,
         choices=[p.name.lower() for p in Platform],
         required=True,
-        help="Platform to run the bot on."
+        help="Platform to run the bot on.",
     )
     parser.add_argument(
-        "--pixi-directory", "-pd",
+        "--pixi-directory",
+        "-pd",
         type=str,
         default=str(PixiPaths.DEFAULT_ROOT),
-        help="The root directory for configuration files, addons, userdata, assets and cache (default: %(default)s)."
+        help="The root directory for configuration files, addons, userdata, assets and cache (default: %(default)s).",
     )
     parser.add_argument(
-        "--log-level", "-l",
+        "--log-level",
+        "-l",
         type=str,
         choices=["debug", "info", "warning", "error", "critical"],
         default="info",
-        help="Set the logging level."
+        help="Set the logging level.",
     )
     parser.add_argument(
         "--instance-idle-timeout",
         type=float,
         default=900.0,
-        help="Unload inactive conversation runtime state after this many seconds (default: 900); history stays in storage."
+        help="Unload inactive conversation runtime state after this many seconds (default: 900); history stays in storage.",
     )
     parser.add_argument(
         "--messages-storage",
@@ -137,22 +157,24 @@ def main():
     )
     add_storage_arguments(parser)
     parser.add_argument(
-        "--api-url", "-a",
+        "--api-url",
+        "-a",
         type=str,
         default="https://api.openai.com/v1",
-        help="OpenAI Compatible API URL to use for the bot"
+        help="OpenAI Compatible API URL to use for the bot",
     )
     parser.add_argument(
         "--auth",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="whether or not to authorize to the API backends"
+        help="whether or not to authorize to the API backends",
     )
 
     # model arguments
     model_selection = parser.add_mutually_exclusive_group(required=True)
     model_selection.add_argument(
-        "--model", "-m",
+        "--model",
+        "-m",
         type=str,
         help="OpenAI-compatible language model to use for the main chatbot",
     )
@@ -161,23 +183,40 @@ def main():
         metavar="REPO[:QUANT]",
         help="Use a local llama.cpp model downloaded from Hugging Face",
     )
-    parser.add_argument("--llama-file", metavar="FILE",
-                        help="Optional GGUF filename; requires --llama-hf")
-    parser.add_argument("--llama-binary", metavar="PATH",
-                        help="Path to llama-server; requires --llama-hf")
-    parser.add_argument("--llama-idle-timeout", type=float, metavar="SECONDS",
-                        help="Stop the local chat server after this idle period; requires --llama-hf")
     parser.add_argument(
-        "--model-max-context", "-ctx", type=int, default=16192,
+        "--llama-file",
+        metavar="FILE",
+        help="Optional GGUF filename; requires --llama-hf",
+    )
+    parser.add_argument(
+        "--llama-binary",
+        metavar="PATH",
+        help="Path to llama-server; requires --llama-hf",
+    )
+    parser.add_argument(
+        "--llama-idle-timeout",
+        type=float,
+        metavar="SECONDS",
+        help="Stop the local chat server after this idle period; requires --llama-hf",
+    )
+    parser.add_argument(
+        "--model-max-context",
+        "-ctx",
+        type=int,
+        default=16192,
         help="Maximum model context size (default: 16192).",
     )
     parser.add_argument(
-        "--helper-model-max-context", "-hctx", type=int, default=16192,
+        "--helper-model-max-context",
+        "-hctx",
+        type=int,
+        default=16192,
         help="Maximum helper model context size (default: 16192).",
     )
     helper_selection = parser.add_mutually_exclusive_group()
     helper_selection.add_argument(
-        "--helper-model", "-hm",
+        "--helper-model",
+        "-hm",
         type=str,
         help="OpenAI-compatible language model to use for agentic tools",
     )
@@ -186,17 +225,28 @@ def main():
         metavar="REPO[:QUANT]",
         help="Use a local llama.cpp model for agentic tools",
     )
-    parser.add_argument("--llama-helper-file", metavar="FILE",
-                        help="Optional helper GGUF filename; requires --llama-helper-hf")
-    parser.add_argument("--llama-helper-binary", metavar="PATH",
-                        help="Path to helper llama-server; requires --llama-helper-hf")
-    parser.add_argument("--llama-helper-idle-timeout", type=float, metavar="SECONDS",
-                        help="Stop the local helper server after this idle period; requires --llama-helper-hf")
+    parser.add_argument(
+        "--llama-helper-file",
+        metavar="FILE",
+        help="Optional helper GGUF filename; requires --llama-helper-hf",
+    )
+    parser.add_argument(
+        "--llama-helper-binary",
+        metavar="PATH",
+        help="Path to helper llama-server; requires --llama-helper-hf",
+    )
+    parser.add_argument(
+        "--llama-helper-idle-timeout",
+        type=float,
+        metavar="SECONDS",
+        help="Stop the local helper server after this idle period; requires --llama-helper-hf",
+    )
 
     # Embedding inference is explicitly either API-backed or local.
     embedding_selection = parser.add_mutually_exclusive_group()
     embedding_selection.add_argument(
-        "--embedding-model", "-em",
+        "--embedding-model",
+        "-em",
         type=str,
         help="OpenAI-compatible API model to use for embedding tools",
     )
@@ -222,25 +272,29 @@ def main():
         help="Stop the local embedding server after this idle period (default: 60)",
     )
     parser.add_argument(
-        "--embedding-model-max-context", "-ectx",
+        "--embedding-model-max-context",
+        "-ectx",
         type=int,
         default=None,
         help="Embedding context tokens (default: 16192 for API; model's native context for llama.cpp)",
     )
     parser.add_argument(
-        "--embedding-model-dimension", "-ed",
+        "--embedding-model-dimension",
+        "-ed",
         type=int,
         default=None,
         help="API embedding dimension (default: 768); local GGUF models use their native dimension",
     )
     parser.add_argument(
-        "--embedding-model-min-size", "-emin",
+        "--embedding-model-min-size",
+        "-emin",
         type=int,
         default=256,
         help="Minimum chunk size to use for embedding tools, Default is '256`.",
     )
     parser.add_argument(
-        "--embedding-model-max-size", "-emax",
+        "--embedding-model-max-size",
+        "-emax",
         type=int,
         default=1024,
         help="Maximum chunk size to use for embedding tools, Default is '1024`.",
@@ -253,37 +307,37 @@ def main():
         "--tool-calling",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.ToolCalling in default_features,
-        help="allows pixi to use built-in and/or plugin tools, tool calling can only be used if the model supports them"
+        help="allows pixi to use built-in and/or plugin tools, tool calling can only be used if the model supports them",
     )
     parser.add_argument(
         "--tool-logging",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.ToolLogging in default_features,
-        help="verbose logging for tool calls (enabled by default when running with logging level DEBUG)"
+        help="verbose logging for tool calls (enabled by default when running with logging level DEBUG)",
     )
     parser.add_argument(
         "--wiki-search",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.WikiSearch in default_features,
-        help="allows pixi to search any mediawiki compatible Wiki"
+        help="allows pixi to search any mediawiki compatible Wiki",
     )
     parser.add_argument(
         "--gif-search",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.GIFSearch in default_features,
-        help="allows pixi to search for gifs online, and send them in chat"
+        help="allows pixi to search for gifs online, and send them in chat",
     )
     parser.add_argument(
         "--image-support",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.ImageSupport in default_features,
-        help="allows pixi to download and process image files"
+        help="allows pixi to download and process image files",
     )
     parser.add_argument(
         "--audio-support",
         action=argparse.BooleanOptionalAction,
         default=PixiFeatures.AudioSupport in default_features,
-        help="allows pixi to download and process audio files"
+        help="allows pixi to download and process audio files",
     )
 
     # environment filter arguments
@@ -291,32 +345,34 @@ def main():
         "--environment-whitelist",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="whether or not the ids passed to environment ids are whitelisted or blacklisted"
+        help="whether or not the ids passed to environment ids are whitelisted or blacklisted",
     )
     parser.add_argument(
         "--environment-ids",
         type=str,
         nargs="+",
         default=None,
-        help="add the id of the environment that the bot is or is not allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
+        help="add the id of the environment that the bot is or is not allowed to respond in (space-separated). If not provided, the bot will respond everywhere.",
     )
 
     # knowledge-base arguments
     parser.add_argument(
-        "--knowledge-bases", "-kb",
+        "--knowledge-bases",
+        "-kb",
         type=str,
         nargs="+",
         default=[],
-        help="Names of knowledge bases to use (space-separated)."
+        help="Names of knowledge bases to use (space-separated).",
     )
 
     # mediawiki wiki arguments
     parser.add_argument(
-        "--mediawiki-wikis", "-mw",
+        "--mediawiki-wikis",
+        "-mw",
         type=str,
         nargs="+",
         default=[],
-        help="add the mediawiki wikis to use (space-separated), it should follow the format of `name=url`, Example: wikipedia=https://www.wikipedia.org/w/"
+        help="add the mediawiki wikis to use (space-separated), it should follow the format of `name=url`, Example: wikipedia=https://www.wikipedia.org/w/",
     )
 
     args = parser.parse_args()
@@ -326,9 +382,13 @@ def main():
         args.messages_storage_url = os.getenv("REDIS_URL")
     if args.messages_storage == "disk":
         if args.messages_storage_url is not None:
-            parser.error("--messages-storage-url requires --messages-storage sql or redis.")
+            parser.error(
+                "--messages-storage-url requires --messages-storage sql or redis."
+            )
     elif not args.messages_storage_url:
-        parser.error("SQL/Redis storage requires --messages-storage-url or DATABASE_URL/REDIS_URL.")
+        parser.error(
+            "SQL/Redis storage requires --messages-storage-url or DATABASE_URL/REDIS_URL."
+        )
     if args.redis_key_prefix is not None and args.messages_storage != "redis":
         parser.error("--redis-key-prefix requires --messages-storage redis.")
     if args.cache_storage == "sql" and args.cache_storage_url is None:
@@ -339,16 +399,28 @@ def main():
         if args.cache_storage_url is not None:
             parser.error("--cache-storage-url requires --cache-storage sql or redis.")
     elif not args.cache_storage_url:
-        parser.error("SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL.")
+        parser.error(
+            "SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL."
+        )
     if args.cache_redis_key_prefix is not None and args.cache_storage != "redis":
         parser.error("--cache-redis-key-prefix requires --cache-storage redis.")
     resolve_storage_options(args, parser)
 
     local_options = (
-        (args.llama_hf, (args.llama_file, args.llama_binary, args.llama_idle_timeout),
-         "--llama-hf"),
-        (args.llama_helper_hf, (args.llama_helper_file, args.llama_helper_binary,
-                                args.llama_helper_idle_timeout), "--llama-helper-hf"),
+        (
+            args.llama_hf,
+            (args.llama_file, args.llama_binary, args.llama_idle_timeout),
+            "--llama-hf",
+        ),
+        (
+            args.llama_helper_hf,
+            (
+                args.llama_helper_file,
+                args.llama_helper_binary,
+                args.llama_helper_idle_timeout,
+            ),
+            "--llama-helper-hf",
+        ),
     )
     for selected_repo, options, selector in local_options:
         if not selected_repo and any(value is not None for value in options):
@@ -367,24 +439,34 @@ def main():
         args.llama_embedding_binary,
         args.llama_embedding_idle_timeout,
     )
-    if not args.llama_embedding_hf and any(value is not None for value in local_options):
+    if not args.llama_embedding_hf and any(
+        value is not None for value in local_options
+    ):
         parser.error("Local embedding options require --llama-embedding-hf.")
     if args.llama_embedding_hf:
         if args.embedding_model_dimension is not None:
-            parser.error("--embedding-model-dimension is API-only; local models use their native dimension.")
-        if args.embedding_model_max_context is not None and args.embedding_model_max_context < 0:
-            parser.error("Local embedding context must be nonnegative (0 uses the model's context).")
-        if args.llama_embedding_idle_timeout is not None and (
-            not math.isfinite(args.llama_embedding_idle_timeout) or args.llama_embedding_idle_timeout <= 0
+            parser.error(
+                "--embedding-model-dimension is API-only; local models use their native dimension."
+            )
+        if (
+            args.embedding_model_max_context is not None
+            and args.embedding_model_max_context < 0
         ):
-            parser.error("--llama-embedding-idle-timeout must be a positive finite number.")
+            parser.error(
+                "Local embedding context must be nonnegative (0 uses the model's context)."
+            )
+        if args.llama_embedding_idle_timeout is not None and (
+            not math.isfinite(args.llama_embedding_idle_timeout)
+            or args.llama_embedding_idle_timeout <= 0
+        ):
+            parser.error(
+                "--llama-embedding-idle-timeout must be a positive finite number."
+            )
 
     # Set logging level
     logging.root.setLevel(args.log_level.upper())
 
-    api_models_selected = bool(
-        args.model or args.helper_model or args.embedding_model
-    )
+    api_models_selected = bool(args.model or args.helper_model or args.embedding_model)
     api_key = "NO_AUTH"
     if args.auth and api_models_selected:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -392,8 +474,7 @@ def main():
             raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
 
     auth = OpenAIAuthConfig(
-        base_url=os.getenv("OPENAI_BASE_URL", args.api_url),
-        api_key=api_key
+        base_url=os.getenv("OPENAI_BASE_URL", args.api_url), api_key=api_key
     )
 
     model = (
@@ -402,10 +483,14 @@ def main():
             hf_file=args.llama_file,
             binary=args.llama_binary or "llama-server",
             max_context=args.model_max_context,
-            idle_timeout=60.0 if args.llama_idle_timeout is None else args.llama_idle_timeout,
+            idle_timeout=60.0
+            if args.llama_idle_timeout is None
+            else args.llama_idle_timeout,
         )
-        if args.llama_hf else
-        OpenAILanguageModelConfig(id=args.model, max_context=args.model_max_context)
+        if args.llama_hf
+        else OpenAILanguageModelConfig(
+            id=args.model, max_context=args.model_max_context
+        )
     )
 
     helper_model = (
@@ -414,11 +499,16 @@ def main():
             hf_file=args.llama_helper_file,
             binary=args.llama_helper_binary or "llama-server",
             max_context=args.helper_model_max_context,
-            idle_timeout=60.0 if args.llama_helper_idle_timeout is None else args.llama_helper_idle_timeout,
+            idle_timeout=60.0
+            if args.llama_helper_idle_timeout is None
+            else args.llama_helper_idle_timeout,
         )
-        if args.llama_helper_hf else
-        OpenAILanguageModelConfig(id=args.helper_model, max_context=args.helper_model_max_context)
-        if args.helper_model else None
+        if args.llama_helper_hf
+        else OpenAILanguageModelConfig(
+            id=args.helper_model, max_context=args.helper_model_max_context
+        )
+        if args.helper_model
+        else None
     )
 
     embedding_model = None
@@ -427,16 +517,24 @@ def main():
             hf_repo=args.llama_embedding_hf,
             hf_file=args.llama_embedding_file,
             binary=args.llama_embedding_binary or "llama-server",
-            max_context=0 if args.embedding_model_max_context is None else args.embedding_model_max_context,
+            max_context=0
+            if args.embedding_model_max_context is None
+            else args.embedding_model_max_context,
             min_chunk_size=args.embedding_model_min_size,
             max_chunk_size=args.embedding_model_max_size,
-            idle_timeout=60.0 if args.llama_embedding_idle_timeout is None else args.llama_embedding_idle_timeout,
+            idle_timeout=60.0
+            if args.llama_embedding_idle_timeout is None
+            else args.llama_embedding_idle_timeout,
         )
     elif args.embedding_model:
         embedding_model = OpenAIEmbeddingModelConfig(
             id=args.embedding_model,
-            max_context=16192 if args.embedding_model_max_context is None else args.embedding_model_max_context,
-            dimension=768 if args.embedding_model_dimension is None else args.embedding_model_dimension,
+            max_context=16192
+            if args.embedding_model_max_context is None
+            else args.embedding_model_max_context,
+            dimension=768
+            if args.embedding_model_dimension is None
+            else args.embedding_model_dimension,
             min_chunk_size=args.embedding_model_min_size,
             max_chunk_size=args.embedding_model_max_size,
         )
@@ -465,10 +563,7 @@ def main():
         wikis.append(MediaWikiConfig(url=url, name=name))
 
     if PixiFeatures.WikiSearch in features and not wikis:
-        wikis = [MediaWikiConfig(
-            url="https://www.wikipedia.org/w/",
-            name="wikipedia"
-        )]
+        wikis = [MediaWikiConfig(url="https://www.wikipedia.org/w/", name="wikipedia")]
 
     environment_filter = IdFilter.allow()
     if args.environment_ids:
@@ -477,27 +572,33 @@ def main():
         else:
             environment_filter = IdFilter.blacklist(args.environment_ids)
 
-    from .bootstrap import create_bot
+    from pixi.bootstrap import create_bot
 
     with ExitStack() as resources:
         messages_storage = None
         if args.messages_storage == "sql":
             assert args.messages_storage_url is not None
             try:
-                from .storage.sql import MessagesSQLStorage
+                from pixi.storage.sql import MessagesSQLStorage
             except ImportError:
-                parser.error("SQL message storage requires pip install 'pixi-bot[sql]'.")
+                parser.error(
+                    "SQL message storage requires pip install 'pixi-bot[sql]'."
+                )
             messages_storage = MessagesSQLStorage(args.messages_storage_url)
             resources.callback(messages_storage.close)
         elif args.messages_storage == "redis":
             assert args.messages_storage_url is not None
             try:
-                from .storage.redis import MessagesRedisStorage
+                from pixi.storage.redis import MessagesRedisStorage
             except ImportError:
-                parser.error("Redis message storage requires pip install 'pixi-bot[redis]'.")
+                parser.error(
+                    "Redis message storage requires pip install 'pixi-bot[redis]'."
+                )
             messages_storage = MessagesRedisStorage(
                 args.messages_storage_url,
-                key_prefix=args.redis_key_prefix if args.redis_key_prefix is not None else "pixi:messages:",
+                key_prefix=args.redis_key_prefix
+                if args.redis_key_prefix is not None
+                else "pixi:messages:",
             )
             resources.callback(messages_storage.close)
 
@@ -505,7 +606,7 @@ def main():
         if args.cache_storage == "sql":
             assert args.cache_storage_url is not None
             try:
-                from .caching.sql import CacheSQLStorage
+                from pixi.caching.sql import CacheSQLStorage
             except ImportError:
                 parser.error("SQL caching requires pip install 'pixi-bot[sql]'.")
             cache_storage = CacheSQLStorage(args.cache_storage_url)
@@ -513,13 +614,14 @@ def main():
         elif args.cache_storage == "redis":
             assert args.cache_storage_url is not None
             try:
-                from .caching.redis import CacheRedisStorage
+                from pixi.caching.redis import CacheRedisStorage
             except ImportError:
                 parser.error("Redis caching requires pip install 'pixi-bot[redis]'.")
             cache_storage = CacheRedisStorage(
                 args.cache_storage_url,
                 key_prefix=(
-                    args.cache_redis_key_prefix if args.cache_redis_key_prefix is not None
+                    args.cache_redis_key_prefix
+                    if args.cache_redis_key_prefix is not None
                     else "pixi:cache:"
                 ),
             )

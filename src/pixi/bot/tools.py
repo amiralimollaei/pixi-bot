@@ -5,14 +5,14 @@ import json
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
-from ..ai.agents import RetrievalAgent
-from ..ai.chatting.callbacks import AsyncTool, ToolContext
+from pixi.ai.agents import RetrievalAgent
+from pixi.ai.chatting.callbacks import AsyncTool, ToolContext
 
 if TYPE_CHECKING:
-    from .conversations import AsyncChatbotInstance
-    from ..apis.wikimedia import AsyncWikimediaAPI
-    from ..storage.knowledge import KnowledgeBase
-    from .client import PixiClient
+    from pixi.apis.wikimedia import AsyncWikimediaAPI
+    from pixi.bot.client import PixiClient
+    from pixi.bot.conversations import AsyncChatbotInstance
+    from pixi.storage.knowledge import KnowledgeBase
 
 
 def create_knowledge_tools(
@@ -81,9 +81,12 @@ def create_knowledge_tools(
 
             if client.embedding_model:
                 rag = client.create_rag_client()
-                entries = await asyncio.gather(*[
-                    knowledge_base.get_document(int(entry_id.strip())) for entry_id in ids.split(",")
-                ])
+                entries = await asyncio.gather(
+                    *[
+                        knowledge_base.get_document(int(entry_id.strip()))
+                        for entry_id in ids.split(",")
+                    ]
+                )
                 for entry in entries:
                     await rag.add_document(entry.content, entry.title, entry.id)
                 query_embed = await rag.embed(query)
@@ -95,9 +98,12 @@ def create_knowledge_tools(
             else:
                 agent = client.create_agent_instance(
                     agent_cls=RetrievalAgent,
-                    context=await asyncio.gather(*[
-                        cls.get_document_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
-                    ]),
+                    context=await asyncio.gather(
+                        *[
+                            cls.get_document_as_str(int(entry_id.strip()))
+                            for entry_id in ids.split(",")
+                        ]
+                    ),
                 )
                 return await agent.execute_query(query)
 
@@ -133,7 +139,10 @@ def create_mediawiki_tools(
 
         @classmethod
         async def call(cls, context: ToolContext, *, keyword: str):
-            return [asdict(search_result) for search_result in await wiki_api.search(keyword)]
+            return [
+                asdict(search_result)
+                for search_result in await wiki_api.search(keyword)
+            ]
 
     class QueryWikiContentTool:
         name = f"query_wiki_content_{wiki_name}"
@@ -172,9 +181,9 @@ def create_mediawiki_tools(
             if not _titles:
                 return "no result: no page specified"
 
-            page_context = await asyncio.gather(*[
-                cls.fetch_wiki_page(title) for title in _titles
-            ])
+            page_context = await asyncio.gather(
+                *[cls.fetch_wiki_page(title) for title in _titles]
+            )
 
             if client.embedding_model:
                 rag = client.create_rag_client()
@@ -223,4 +232,8 @@ class FetchChannelHistoryTool:
     async def call(cls, context: ToolContext, *, channel_id: str, n: int):
         assert context.parent_instance is not None
         assert context.parent_instance.bot is not None
-        return await context.parent_instance.bot.platform_provider.fetch_channel_history(int(channel_id), n=n)
+        return (
+            await context.parent_instance.bot.platform_provider.fetch_channel_history(
+                int(channel_id), n=n
+            )
+        )

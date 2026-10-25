@@ -4,25 +4,62 @@ Architecture, Python integration contracts, extension points, and regression che
 are documented here. For installation, CLI usage, storage configuration, and
 deployment, see the [README](README.md).
 
+- [Development](#development)
 - [Architecture](#architecture)
 - [Custom Actions and Tools](#custom-actions-and-tools)
 - [Knowledge Importers](#knowledge-importers)
+
+## Development
+
+Install the development environment (including Ruff, Pyright, and pre-commit) and
+enable the Git hooks:
+
+```sh
+uv sync --all-extras
+uv run pre-commit install
+```
+
+Format Python files and organize imports:
+
+```sh
+uv run ruff check --fix
+uv run ruff format
+```
+
+Check formatting without changing files:
+
+```sh
+uv run ruff check
+uv run ruff format --check
+```
+
+Ruff sorts imports into standard-library, third-party, and local groups and
+requires absolute imports rooted at `pixi`. Preserve optional dependency imports
+at their existing execution boundaries.
+
+The pre-commit hooks run Ruff's import checks, Ruff's formatter, and Pyright.
+Pyright checks the entire `src` and `examples` trees, with all optional
+dependencies installed. Run all hooks manually with:
+
+```sh
+uv run pre-commit run --all-files
+```
 
 ## Architecture
 
 Pixi keeps feature-oriented packages with explicit ports between application
 behavior and external systems:
 
-| Module | Responsibility |
-|---|---|
-| `pixi.cli` | Arguments, dotenv settings, and logging |
-| `pixi.bootstrap` | Production composition: selects adapters, loads resources, registers built-ins and addons |
-| `pixi.bot` | Message handling, conversation lifecycle, and scheduled actions |
-| `pixi.ai.chatting` | Provider-independent completion, tool execution, and inline action processing |
-| `pixi.ai.rag` | Chunking and retrieval using injected embedding and cache services |
-| `pixi.model` | Portable message, platform metadata, and embedding values |
-| `pixi.interfaces` | Platform, model-stream, embedding-cache, message-storage, knowledge-storage, and knowledge-importer contracts |
-| `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters |
+| Module                                                       | Responsibility                                                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `pixi.cli`                                                   | Arguments, dotenv settings, and logging                                                                       |
+| `pixi.bootstrap`                                             | Production composition: selects adapters, loads resources, registers built-ins and addons                     |
+| `pixi.bot`                                                   | Message handling, conversation lifecycle, and scheduled actions                                               |
+| `pixi.ai.chatting`                                           | Provider-independent completion, tool execution, and inline action processing                                 |
+| `pixi.ai.rag`                                                | Chunking and retrieval using injected embedding and cache services                                            |
+| `pixi.model`                                                 | Portable message, platform metadata, and embedding values                                                     |
+| `pixi.interfaces`                                            | Platform, model-stream, embedding-cache, message-storage, knowledge-storage, and knowledge-importer contracts |
+| `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters                                                                             |
 
 Application code consumes ports; adapters implement them. Concrete adapter
 selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
@@ -33,6 +70,10 @@ resources. Neither the chat client nor the RAG client constructs an API client.
 Telegram commands are excluded from the ordinary chat handler, so slash commands
 registered by bootstrap or addons work regardless of registration order. Unknown
 commands and commands addressed to other bots do not trigger chat inference.
+
+Discord command authorization accepts direct messages and guild administrators,
+for both message and interaction events. Video captions are sent as message text
+alongside the attachment.
 
 Model streams use portable `ContentDelta`, `ReasoningDelta`, `ToolCallDelta`, and
 `ChatFinished` events. Streams must support `aclose()` so cancellation releases
@@ -57,13 +98,13 @@ of the stream.
 and a `history_key`; storage is the source of truth, not a resident history list.
 Its synchronous storage contract is:
 
-| Operation | Behavior |
-|---|---|
-| `exists(key)` / `count(key)` | Inspect a history without reading its messages; missing histories have count zero |
-| `append(key, messages)` | Atomically append only new messages; an empty batch creates an existing empty history |
-| `iter_messages(key, start=0, stop=None, reverse=False)` | Lazily read the absolute half-open range `[start, stop)` using bounded pages |
-| `truncate(key, length)` | Remove a tail without rewriting the retained messages or growing the history |
-| `delete(key)` | Remove a history; deleting an absent key is a no-op |
+| Operation                                               | Behavior                                                                              |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `exists(key)` / `count(key)`                            | Inspect a history without reading its messages; missing histories have count zero     |
+| `append(key, messages)`                                 | Atomically append only new messages; an empty batch creates an existing empty history |
+| `iter_messages(key, start=0, stop=None, reverse=False)` | Lazily read the absolute half-open range `[start, stop)` using bounded pages          |
+| `truncate(key, length)`                                 | Remove a tail without rewriting the retained messages or growing the history          |
+| `delete(key)`                                           | Remove a history; deleting an absent key is a no-op                                   |
 
 The client fetches a recent context within its approximate model-context budget
 for each inference request and releases it afterward. Rearrangement operates on
@@ -196,7 +237,6 @@ server; they use unique namespaces and delete only their own keys:
 PIXI_TEST_REDIS_URL=redis://localhost:6379/15 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
 
-
 ## Custom Actions and Tools
 
 `PixiClient.register_action(action)` and `register_tool(tool)` accept instances
@@ -288,4 +328,3 @@ before saving, since malformed input can fail during iteration.
 To add a format, implement the protocol and register an instance in
 `pixi.knowledge_import.IMPORTERS`. That typed registry supplies both CLI format
 choices and importer selection; no CLI format-switch branch is required.
-

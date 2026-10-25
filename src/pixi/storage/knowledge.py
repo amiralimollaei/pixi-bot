@@ -1,18 +1,22 @@
 import re
 
-from ..interfaces.knowledge import KnowledgeStorage
-from ..model.search.document import QueryMatch
-from ..model.storage.document import DocumentMeta
+from pixi.interfaces.knowledge import KnowledgeStorage
+from pixi.model.search.document import QueryMatch
+from pixi.model.storage.document import DocumentMeta
 
 
 class DocumentCollection:
     def __init__(self, data: dict[int, DocumentMeta] | None = None):
         if data:
-            assert isinstance(data, dict), f"expected data to be of type `dict` but got `{data}`"
+            assert isinstance(data, dict), (
+                f"expected data to be of type `dict` but got `{data}`"
+            )
             for e in data.values():
                 if isinstance(e, DocumentMeta):
                     continue
-                raise TypeError(f"expected all elements to be DocumentMeta instances, but got `{type(e)}`")
+                raise TypeError(
+                    f"expected all elements to be DocumentMeta instances, but got `{type(e)}`"
+                )
         self.data = data or dict()
 
     def add_document(self, title: str, text: str, source: str | None = None):
@@ -21,10 +25,7 @@ class DocumentCollection:
             return
 
         entry = DocumentMeta(
-            title=title,
-            content=text,
-            id=max(self.data, default=-1) + 1,
-            source=source
+            title=title, content=text, id=max(self.data, default=-1) + 1, source=source
         )
 
         self.data.update({entry.id: entry})
@@ -68,13 +69,15 @@ class DocumentCollection:
             if num_matches == 0:
                 continue
 
-            all_matches.add(QueryMatch(
-                title=entry.title,
-                id=entry.id,
-                source=entry.source,
-                num_matches=num_matches,
-                match_score=(num_matches/len(content_parts)) * 100,
-            ))
+            all_matches.add(
+                QueryMatch(
+                    title=entry.title,
+                    id=entry.id,
+                    source=entry.source,
+                    num_matches=num_matches,
+                    match_score=(num_matches / len(content_parts)) * 100,
+                )
+            )
 
         # Break relevance ties by document ID so reloads preserve search ordering.
         return sorted(all_matches, key=lambda m: (-m.num_matches, m.id))[:best_n]
@@ -104,7 +107,9 @@ class KnowledgeBase:
     @classmethod
     def from_storage(cls, name: str, storage: KnowledgeStorage):
         documents = storage.load(name)
-        collection = DocumentCollection({document.id: document for document in documents})
+        collection = DocumentCollection(
+            {document.id: document for document in documents}
+        )
         return cls(name, storage=storage, documents=collection)
 
     def clear(self) -> None:

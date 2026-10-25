@@ -4,11 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
-from ...model.chat import ChatMessageMeta, ToolCallMeta
+from pixi.model.chat import ChatMessageMeta, ToolCallMeta
 
 if TYPE_CHECKING:
-    from ...bot.conversations import AsyncChatbotInstance
-    from ...interfaces.platform import PlatformMessage
+    from pixi.bot.conversations import AsyncChatbotInstance
+    from pixi.interfaces.platform import PlatformMessage
 
 
 @dataclass
@@ -23,7 +23,7 @@ class PartialToolCallMeta:
             name=self.name,
             index=self.index,
             id=self.id,
-            arguments=json.loads(self.arguments) if self.arguments else {}
+            arguments=json.loads(self.arguments) if self.arguments else {},
         )
 
 

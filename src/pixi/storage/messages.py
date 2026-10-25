@@ -5,7 +5,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from ..model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessageMeta
 
 
 class MessagesDiskStorage:
@@ -37,39 +37,57 @@ class MessagesDiskStorage:
 
     def exists(self, key: str) -> bool:
         with self._connect() as connection:
-            return connection.execute(
-                "SELECT 1 FROM histories WHERE key_hash = ?", (self._key_hash(key),),
-            ).fetchone() is not None
+            return (
+                connection.execute(
+                    "SELECT 1 FROM histories WHERE key_hash = ?",
+                    (self._key_hash(key),),
+                ).fetchone()
+                is not None
+            )
 
     def count(self, key: str) -> int:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT length FROM histories WHERE key_hash = ?", (self._key_hash(key),),
+                "SELECT length FROM histories WHERE key_hash = ?",
+                (self._key_hash(key),),
             ).fetchone()
         return row[0] if row is not None else 0
 
     def append(self, key: str, messages: Sequence[ChatMessageMeta]) -> None:
-        payloads = [json.dumps(message.to_dict(), ensure_ascii=False) for message in messages]
+        payloads = [
+            json.dumps(message.to_dict(), ensure_ascii=False) for message in messages
+        ]
         key_hash = self._key_hash(key)
         with self._connect() as connection:
             connection.execute(
-                "INSERT OR IGNORE INTO histories (key_hash, length) VALUES (?, 0)", (key_hash,),
+                "INSERT OR IGNORE INTO histories (key_hash, length) VALUES (?, 0)",
+                (key_hash,),
             )
             if not payloads:
                 return
             connection.execute(
-                "UPDATE histories SET length = length + ? WHERE key_hash = ?", (len(payloads), key_hash),
+                "UPDATE histories SET length = length + ? WHERE key_hash = ?",
+                (len(payloads), key_hash),
             )
             end = connection.execute(
-                "SELECT length FROM histories WHERE key_hash = ?", (key_hash,),
+                "SELECT length FROM histories WHERE key_hash = ?",
+                (key_hash,),
             ).fetchone()[0]
             connection.executemany(
                 "INSERT INTO messages (key_hash, position, payload) VALUES (?, ?, ?)",
-                ((key_hash, position, payload) for position, payload in enumerate(payloads, end - len(payloads))),
+                (
+                    (key_hash, position, payload)
+                    for position, payload in enumerate(payloads, end - len(payloads))
+                ),
             )
 
     def iter_messages(
-        self, key: str, *, start: int = 0, stop: int | None = None, reverse: bool = False,
+        self,
+        key: str,
+        *,
+        start: int = 0,
+        stop: int | None = None,
+        reverse: bool = False,
     ) -> Iterator[ChatMessageMeta]:
         if start < 0 or (stop is not None and stop < 0):
             raise ValueError("History bounds must be nonnegative.")
@@ -98,10 +116,12 @@ class MessagesDiskStorage:
         key_hash = self._key_hash(key)
         with self._connect() as connection:
             connection.execute(
-                "UPDATE histories SET length = MIN(length, ?) WHERE key_hash = ?", (length, key_hash),
+                "UPDATE histories SET length = MIN(length, ?) WHERE key_hash = ?",
+                (length, key_hash),
             )
             connection.execute(
-                "DELETE FROM messages WHERE key_hash = ? AND position >= ?", (key_hash, length),
+                "DELETE FROM messages WHERE key_hash = ? AND position >= ?",
+                (key_hash, length),
             )
 
     def delete(self, key: str) -> None:

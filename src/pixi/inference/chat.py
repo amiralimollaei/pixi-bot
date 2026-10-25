@@ -1,18 +1,20 @@
 from typing import AsyncGenerator
 
-from ..apis.openai.adapter import OpenAIChatModel
-from ..apis.openai.messages import MediaReader
-from ..interfaces.models import ChatEvent, ToolDefinition
-from ..model.chat import ChatMessageMeta
-from ..model.config.llama import LlamaLanguageModelConfig
-from ..model.config.openai import OpenAIAuthConfig
-from .server import LlamaServer
+from pixi.apis.openai.adapter import OpenAIChatModel
+from pixi.apis.openai.messages import MediaReader
+from pixi.inference.server import LlamaServer
+from pixi.interfaces.models import ChatEvent, ToolDefinition
+from pixi.model.chat import ChatMessageMeta
+from pixi.model.config.llama import LlamaLanguageModelConfig
+from pixi.model.config.openai import OpenAIAuthConfig
 
 
 class LlamaChatModel(LlamaServer[OpenAIChatModel]):
     """Lazily manages a native llama-server for OpenAI-compatible chat."""
 
-    def __init__(self, config: LlamaLanguageModelConfig, media_cache: MediaReader | None = None):
+    def __init__(
+        self, config: LlamaLanguageModelConfig, media_cache: MediaReader | None = None
+    ):
         super().__init__(config)
         self.model = config
         self.media_cache = media_cache
@@ -36,5 +38,7 @@ class LlamaChatModel(LlamaServer[OpenAIChatModel]):
         return ("--jinja",)
 
     def _create_client(self, port: int) -> OpenAIChatModel:
-        auth = OpenAIAuthConfig(base_url=f"http://127.0.0.1:{port}/v1", api_key="NO_AUTH")
+        auth = OpenAIAuthConfig(
+            base_url=f"http://127.0.0.1:{port}/v1", api_key="NO_AUTH"
+        )
         return OpenAIChatModel(auth, self.model, media_cache=self.media_cache)

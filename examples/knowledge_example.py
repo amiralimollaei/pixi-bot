@@ -1,7 +1,7 @@
 import asyncio
 from glob import glob
 
-from pixi.storage.knowledge import KnowledgeBase, DocumentCollection
+from pixi.storage.knowledge import DocumentCollection, KnowledgeBase
 from pixi.storage.knowledge_disk import KnowledgeDiskStorage
 from pixi.storage.paths import PixiPaths
 
@@ -14,9 +14,7 @@ async def main():
     for file in glob("path/to/files/**/*.md"):
         content = open(file, "r", encoding="utf-8").read()
         documents.add_document(
-            title=f"EntryTitle ({file})",
-            text=content,
-            source="EntrySource"
+            title=f"EntryTitle ({file})", text=content, source="EntrySource"
         )
     KnowledgeBase("ExampleKnowledge", storage=storage, documents=documents).save()
 
@@ -25,6 +23,7 @@ async def main():
     matches = await knowledge_base.search("quasi-connectivity")
     for match in matches:
         print(match)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

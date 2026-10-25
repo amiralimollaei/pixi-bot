@@ -23,7 +23,7 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 - openai
 - zstandard
 - discord-py (optional, for discord platform)
-- python-telegram-bot  (optional, for telegram platform)
+- python-telegram-bot (optional, for telegram platform)
 - ffmpeg (on `PATH`, for default media caching)
 - av (legacy fallback for when ffmpeg is not available)
 - llama-server with native Hugging Face/HTTPS download support (optional, for `--llama-hf`, `--llama-helper-hf`, or `--llama-embedding-hf`)
@@ -33,11 +33,11 @@ A small, hackable and powerful AI chatbot implementation with tool calling and i
 
 There are many extra optional dependecy groups that you may need to install based on your own needs, for simplicity, this guide shows you how to install all modules at once.
 
-| extra dependecy group | packages | description | status |
-|---|---|---|:---:|
-| media | av | installs the optional PyAV compatibility backend; default caching uses the system FFmpeg executable | optional |
-| discord | discord-py | installs discord.py and enables discord bot functionality | optional\* |
-| telegram | python-telegram-bot | installs python-telegram-bot and enables telegram bot functionality | optional\* |
+| extra dependecy group | packages            | description                                                                                         |   status   |
+| --------------------- | ------------------- | --------------------------------------------------------------------------------------------------- | :--------: |
+| media                 | av                  | installs the optional PyAV compatibility backend; default caching uses the system FFmpeg executable |  optional  |
+| discord               | discord-py          | installs discord.py and enables discord bot functionality                                           | optional\* |
+| telegram              | python-telegram-bot | installs python-telegram-bot and enables telegram bot functionality                                 | optional\* |
 
 > \[\*\] you have to install at least one of these dependecy groups for the bot to function
 
@@ -99,11 +99,11 @@ pixi-cli -p [platform] [options]
 
 Run `pixi-cli --help` for all platform, feature, storage, and model options.
 
-| Role | API selection | Native llama.cpp selection |
-|---|---|---|
-| Main chat (required) | `--model MODEL` | `--llama-hf REPO[:QUANT]` |
-| Helper chat (optional) | `--helper-model MODEL` | `--llama-helper-hf REPO[:QUANT]` |
-| Embeddings (optional) | `--embedding-model MODEL` | `--llama-embedding-hf REPO[:QUANT]` |
+| Role                   | API selection             | Native llama.cpp selection          |
+| ---------------------- | ------------------------- | ----------------------------------- |
+| Main chat (required)   | `--model MODEL`           | `--llama-hf REPO[:QUANT]`           |
+| Helper chat (optional) | `--helper-model MODEL`    | `--llama-helper-hf REPO[:QUANT]`    |
+| Embeddings (optional)  | `--embedding-model MODEL` | `--llama-embedding-hf REPO[:QUANT]` |
 
 Selections within each role are mutually exclusive. Native inference never acts
 as an API fallback. Main, helper, and embedding servers are loaded lazily and
@@ -146,11 +146,11 @@ API authentication is still required when any selected model uses the API.
 
 Select a backend with `--messages-storage`:
 
-| Backend | Connection configuration | Optional install extra |
-|---|---|---|
-| `disk` (default) | `userdata/messages/` under `--pixi-directory` | None |
-| `sql` | `--messages-storage-url URL`, otherwise `DATABASE_URL` | `sql` |
-| `redis` | `--messages-storage-url URL`, otherwise `REDIS_URL` | `redis` |
+| Backend          | Connection configuration                               | Optional install extra |
+| ---------------- | ------------------------------------------------------ | ---------------------- |
+| `disk` (default) | `userdata/messages/` under `--pixi-directory`          | None                   |
+| `sql`            | `--messages-storage-url URL`, otherwise `DATABASE_URL` | `sql`                  |
+| `redis`          | `--messages-storage-url URL`, otherwise `REDIS_URL`    | `redis`                |
 
 An explicit URL takes precedence over the selected backend's environment
 variable. Disk storage ignores database environment variables and rejects a URL.
@@ -179,11 +179,11 @@ Select knowledge persistence independently with
 `--knowledge-storage {disk,sql,redis}` and select the knowledge bases to use with
 `--knowledge-bases NAME [NAME ...]`. Knowledge tools require tool calling to be enabled.
 
-| Backend | Connection configuration | Optional install extra |
-|---|---|---|
-| `disk` (default) | `datasets/<name>/*.zst` under `--pixi-directory` | None |
-| `sql` | `--knowledge-storage-url URL`, otherwise `DATABASE_URL` | `sql` |
-| `redis` | `--knowledge-storage-url URL`, otherwise `REDIS_URL` | `redis` |
+| Backend          | Connection configuration                                | Optional install extra |
+| ---------------- | ------------------------------------------------------- | ---------------------- |
+| `disk` (default) | `datasets/<name>/*.zst` under `--pixi-directory`        | None                   |
+| `sql`            | `--knowledge-storage-url URL`, otherwise `DATABASE_URL` | `sql`                  |
+| `redis`          | `--knowledge-storage-url URL`, otherwise `REDIS_URL`    | `redis`                |
 
 Explicit URLs take precedence over environment variables. Disk ignores database
 environment variables and rejects an explicit URL. `--knowledge-redis-key-prefix`
@@ -215,11 +215,11 @@ pip install 'pixi-bot[kiwix]'
 pixi-cli import-knowledge offline-wiki ./wikipedia.zim --format kiwix
 ```
 
-| Format | Accepted local source | Imported content |
-|---|---|---|
-| `mediawiki` | MediaWiki XML export, plain or compressed with gzip, bzip2, or xz | Latest revision of nonredirect main-namespace pages; original page IDs and raw wikitext are retained |
-| `devdocs` | `db.json`, or a directory containing it; optional sibling `index.json` and `meta.json` | One document per page, with titles from the index when available; HTML converted to text |
-| `kiwix` | Kiwix/OpenZIM `.zim` archive | HTML and plain-text articles; redirects, metadata, and binary assets excluded |
+| Format      | Accepted local source                                                                  | Imported content                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `mediawiki` | MediaWiki XML export, plain or compressed with gzip, bzip2, or xz                      | Latest revision of nonredirect main-namespace pages; original page IDs and raw wikitext are retained |
+| `devdocs`   | `db.json`, or a directory containing it; optional sibling `index.json` and `meta.json` | One document per page, with titles from the index when available; HTML converted to text             |
+| `kiwix`     | Kiwix/OpenZIM `.zim` archive                                                           | HTML and plain-text articles; redirects, metadata, and binary assets excluded                        |
 
 Download sources first; URLs are not fetched by this command. Extract DevDocs
 download bundles before importing. HTML extraction excludes scripts, styles, and
@@ -253,7 +253,6 @@ Run `pixi-cli import-knowledge --help` for all import options.
 
 For the Python importer contract and instructions on adding a format, see
 [Knowledge Importers](CONTRIBUTING.md#knowledge-importers).
-
 
 ### Railway
 
