@@ -10,6 +10,7 @@ from defusedxml.common import DefusedXmlException
 
 from .cli_knowledge import add_storage_arguments, open_storage, resolve_storage_options
 from .knowledge_import import IMPORTERS
+from .storage.paths import PixiPaths
 
 
 def main(argv: list[str]) -> None:
@@ -24,8 +25,8 @@ def main(argv: list[str]) -> None:
         help="Importer used to read the local source.",
     )
     parser.add_argument(
-        "--pixi-directory", "-pd", default="~/.pixi/",
-        help="Pixi data root (default: ~/.pixi/).",
+        "--pixi-directory", "-pd", default=str(PixiPaths.DEFAULT_ROOT),
+        help="Pixi data root (default: %(default)s).",
     )
     parser.add_argument(
         "--replace", action="store_true",

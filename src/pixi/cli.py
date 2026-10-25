@@ -1,6 +1,8 @@
 import logging
 from contextlib import ExitStack
 
+from .storage.paths import PixiPaths
+
 
 def load_dotenv():
     """Load optional environment-file settings at the executable boundary."""
@@ -85,8 +87,8 @@ def main():
     parser.add_argument(
         "--pixi-directory", "-pd",
         type=str,
-        default="~/.pixi/",
-        help="The root directory for configuration files, addons, userdata, assets and cache, defaults to \"~/.pixi/\""
+        default=str(PixiPaths.DEFAULT_ROOT),
+        help="The root directory for configuration files, addons, userdata, assets and cache (default: %(default)s)."
     )
     parser.add_argument(
         "--log-level", "-l",
@@ -105,7 +107,7 @@ def main():
         "--messages-storage",
         choices=("disk", "sql", "redis"),
         default="disk",
-        help="Message-history backend (default: disk under userdata/messages).",
+        help="Message-history backend (default: disk under the configured data root).",
     )
     parser.add_argument(
         "--messages-storage-url",

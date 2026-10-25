@@ -110,6 +110,15 @@ Persona and prompts intentionally remain files under `resources/`. Edit
 changes. Startup copies only missing default resources and never overwrites
 customized files; these resources are not moved into a database.
 
+`pixi.storage.paths.PixiPaths` owns the default root (`DEFAULT_ROOT`) and all
+application paths. Both CLIs and `create_bot` use that root by default.
+`set_root(...)` changes the root used by subsequent accessor calls; paths are not
+cached at import time. Use `messages()` for message history rather than appending
+to `userdata()`, and `knowledge()` for the existing `datasets/` directory.
+Use `persona()`, `system_prompt()`, and `examples()` for default resource files.
+Accessors return `pathlib.Path`; open resources with `.open(encoding="utf-8")`
+instead of the removed `get_resource_path` and `open_resource` helpers.
+
 Agents receive storage and a history key when constructed:
 
 ```python

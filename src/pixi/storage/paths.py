@@ -1,18 +1,12 @@
 import os
 from pathlib import Path
-from typing import IO
-
-
-def get_resource_path(filename) -> str:
-    return os.path.join(PixiPaths.resources(), filename)
-
-
-def open_resource(filename: str, mode: str) -> IO:
-    return open(os.path.join(PixiPaths.resources(), filename), mode=mode, encoding="utf-8")
 
 
 class PixiPaths:
-    _root = Path("~/.pixi")
+    """Default application paths, resolved against the currently configured root."""
+
+    DEFAULT_ROOT = Path("~/.pixi")
+    _root = DEFAULT_ROOT
 
     # ---- configuration ----
     @classmethod
@@ -38,15 +32,31 @@ class PixiPaths:
         return cls.root() / "resources"
 
     @classmethod
+    def persona(cls) -> Path:
+        return cls.resources() / "persona.json"
+
+    @classmethod
+    def system_prompt(cls) -> Path:
+        return cls.resources() / "system.md"
+
+    @classmethod
+    def examples(cls) -> Path:
+        return cls.resources() / "examples.txt"
+
+    @classmethod
     def userdata(cls) -> Path:
         return cls.root() / "userdata"
+
+    @classmethod
+    def messages(cls) -> Path:
+        return cls.userdata() / "messages"
 
     @classmethod
     def cache(cls) -> Path:
         return cls.root() / "cache"
 
 
-# if the PixiPaths.RESOURCES folder doesn't exist, we should copy all our default assets in there when the module is imported
+# if the PixiPaths.resources() folder doesn't exist, we should copy all our default assets in there when the module is imported
 if __package__ is not None:
     import importlib.resources
     import shutil

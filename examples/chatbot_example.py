@@ -8,7 +8,7 @@ from pixi.bot.conversations import AsyncChatbotInstance
 from pixi.cli import load_dotenv
 from pixi.model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
 from pixi.storage.messages import MessagesDiskStorage
-from pixi.storage.paths import PixiPaths, copy_default_resources, open_resource
+from pixi.storage.paths import PixiPaths, copy_default_resources
 
 
 class ConsoleSendAction:
@@ -51,11 +51,11 @@ async def main():
         base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         api_key=os.environ["OPENAI_API_KEY"],
     )
-    with open_resource("persona.json", "r") as resource:
+    with PixiPaths.persona().open(encoding="utf-8") as resource:
         persona = AssistantPersona.from_dict(json.load(resource))
-    with open_resource("system.md", "r") as resource:
+    with PixiPaths.system_prompt().open(encoding="utf-8") as resource:
         system_prompt_template = resource.read()
-    with open_resource("examples.txt", "r") as resource:
+    with PixiPaths.examples().open(encoding="utf-8") as resource:
         examples = resource.read()
 
     instance = AsyncChatbotInstance(
@@ -63,7 +63,7 @@ async def main():
         "example",
         chat_model=OpenAIChatModel(auth, model),
         model=model,
-        store=MessagesDiskStorage(PixiPaths.userdata() / "messages"),
+        store=MessagesDiskStorage(PixiPaths.messages()),
         persona=persona,
         system_prompt_template=system_prompt_template,
         examples=examples,

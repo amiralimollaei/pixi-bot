@@ -18,6 +18,7 @@ from .interfaces.caching import CacheStorage
 from .interfaces.knowledge import KnowledgeStorage
 from .interfaces.messages import MessagesStorage
 from .interfaces.platform import PlatformMessage, PlatformProvider
+from .storage.paths import PixiPaths, copy_default_resources
 
 if TYPE_CHECKING:
     from .bot.client import PixiClient
@@ -87,14 +88,12 @@ def create_bot(
     wikis: Sequence[MediaWikiConfig] = (),
     environment_filter: IdFilter | None = None,
     instance_idle_timeout: float = 900.0,
-    directory: str | Path = "~/.pixi/",
+    directory: str | Path = PixiPaths.DEFAULT_ROOT,
     messages_storage: MessagesStorage | None = None,
     cache_storage: CacheStorage | None = None,
     knowledge_storage: KnowledgeStorage | None = None,
 ) -> PixiClient:
     """Build the bot; callers own the lifecycle of injected storage backends."""
-    from .storage.paths import PixiPaths, copy_default_resources, open_resource
-
     PixiPaths.set_root(directory)
     copy_default_resources()
 
@@ -123,11 +122,11 @@ def create_bot(
             logger.warning("%s Disabling image/audio support.", error)
             features &= ~(PixiFeatures.ImageSupport | PixiFeatures.AudioSupport)
 
-    with open_resource("persona.json", "r") as resource:
+    with PixiPaths.persona().open(encoding="utf-8") as resource:
         persona = AssistantPersona.from_dict(json.load(resource))
-    with open_resource("system.md", "r") as resource:
+    with PixiPaths.system_prompt().open(encoding="utf-8") as resource:
         system_prompt_template = resource.read()
-    with open_resource("examples.txt", "r") as resource:
+    with PixiPaths.examples().open(encoding="utf-8") as resource:
         examples = resource.read()
 
     platform_provider = create_platform_provider(platform, media_cache=media_cache)
@@ -175,7 +174,7 @@ def create_bot(
         rag_factory=rag_factory,
         messages_storage=(
             messages_storage if messages_storage is not None
-            else MessagesDiskStorage(PixiPaths.userdata() / "messages")
+            else MessagesDiskStorage(PixiPaths.messages())
         ),
         persona=persona,
         system_prompt_template=system_prompt_template,

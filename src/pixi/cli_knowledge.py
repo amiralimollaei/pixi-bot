@@ -3,9 +3,9 @@
 from argparse import ArgumentParser, Namespace
 from contextlib import ExitStack
 import os
-from pathlib import Path
 
 from .interfaces.knowledge import KnowledgeStorage
+from .storage.paths import PixiPaths
 
 
 def add_storage_arguments(parser: ArgumentParser) -> None:
@@ -42,7 +42,8 @@ def open_storage(args: Namespace, parser: ArgumentParser, resources: ExitStack) 
     if args.knowledge_storage == "disk":
         from .storage.knowledge_disk import KnowledgeDiskStorage
 
-        return KnowledgeDiskStorage(Path(args.pixi_directory).expanduser() / "datasets")
+        PixiPaths.set_root(args.pixi_directory)
+        return KnowledgeDiskStorage(PixiPaths.knowledge())
     if args.knowledge_storage == "sql":
         try:
             from .storage.sql import KnowledgeSQLStorage
