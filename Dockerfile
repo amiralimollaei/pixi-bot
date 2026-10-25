@@ -4,25 +4,22 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# install UV
+# Install uv for dependency setup and the shared launcher.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Disable development dependencies and install only from pyproject.toml
+# Keep the generic image compatible with both bot platforms.
 ENV UV_NO_DEV=1
 
 WORKDIR /app
 
-# Copy only dependency files first for better caching
+# Cache third-party dependencies independently of the source.
 COPY pyproject.toml ./pyproject.toml
 
-# Create minimal package structure so `uv sync` can find the local package
-RUN mkdir -p src/pixi && touch src/pixi/__init__.py
+RUN uv sync --all-extras --no-install-project
 
-# Sync the project into a new environment, asserting the lockfile is up to date
+# Install the actual package after copying its source.
+COPY . .
 RUN uv sync --all-extras
 
-# Copy the full project (including src/) into the image
-COPY . .
-
-# run the server
+# Start using runtime-injected environment variables.
 CMD ["/bin/bash", "./start.sh"]

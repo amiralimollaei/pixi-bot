@@ -1,0 +1,21 @@
+FROM python:3.13-slim-trixie
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_NO_DEV=1 \
+    PIXI_PLATFORM=discord
+
+WORKDIR /app
+
+# Keep every optional feature except the other platform's SDK and media (since we installed ffmpeg)
+COPY pyproject.toml ./pyproject.toml
+RUN uv sync --extra discord --extra kiwix --extra sql --extra redis --no-install-project
+
+COPY . .
+RUN uv sync --extra discord --extra kiwix --extra sql --extra redis
+
+CMD ["/bin/bash", "./start.sh"]

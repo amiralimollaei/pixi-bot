@@ -4,3 +4,23 @@ services:
     env_file:
       - .env
     container_name: pixi-bot
+
+  telegram:
+    profiles: ["telegram"]
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    env_file:
+      - .env
+    environment:
+      PIXI_PLATFORM: telegram
+
+  discord:
+    profiles: ["discord"]
+    build:
+      context: .
+      dockerfile: Dockerfile.discord
+    env_file:
+      - .env
+    environment:
+      PIXI_PLATFORM: discord

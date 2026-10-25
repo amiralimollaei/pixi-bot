@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+.ruff_cache
+.pytest_cache
+build
+dist
+
+# Local-only lockfiles must not replace the one generated inside the image.
+uv.lock
