@@ -201,6 +201,59 @@ Existing stored knowledge remains readable without migration. Switching backends
 does not automatically transfer it. Restart the bot to apply knowledge-base changes.
 Use SQL or Redis when multiple processes need to update knowledge.
 
+#### Importing knowledge bases
+
+Import local documentation without starting the bot or configuring a model,
+platform token, or API key:
+
+```sh
+pixi-cli import-knowledge wikipedia ./pages-articles.xml.bz2 --format mediawiki
+pixi-cli import-knowledge python ./devdocs/python --format devdocs
+
+# Kiwix support is an optional dependency.
+pip install 'pixi-bot[kiwix]'
+pixi-cli import-knowledge offline-wiki ./wikipedia.zim --format kiwix
+```
+
+| Format | Accepted local source | Imported content |
+|---|---|---|
+| `mediawiki` | MediaWiki XML export, plain or compressed with gzip, bzip2, or xz | Latest revision of nonredirect main-namespace pages; original page IDs and raw wikitext are retained |
+| `devdocs` | `db.json`, or a directory containing it; optional sibling `index.json` and `meta.json` | One document per page, with titles from the index when available; HTML converted to text |
+| `kiwix` | Kiwix/OpenZIM `.zim` archive | HTML and plain-text articles; redirects, metadata, and binary assets excluded |
+
+Download sources first; URLs are not fetched by this command. Extract DevDocs
+download bundles before importing. HTML extraction excludes scripts, styles, and
+navigation while preserving code-block indentation. Documents retain source
+links where available, otherwise local file references.
+MediaWiki XML is parsed with `defusedxml`; DTDs, entity declarations, and external
+entity references are rejected. Normal XML character references remain supported.
+
+Disk imports use `datasets/<name>/` under `--pixi-directory` (default `~/.pixi/`).
+The same storage flags as bot startup select SQL or Redis:
+
+```sh
+pixi-cli import-knowledge python ./devdocs/python --format devdocs \
+  --knowledge-storage sql --knowledge-storage-url sqlite:///knowledge.db
+```
+
+SQL uses `DATABASE_URL` and Redis uses `REDIS_URL` when no explicit URL is given;
+install the corresponding `sql` or `redis` extra. Redis also accepts
+`--knowledge-redis-key-prefix`.
+
+An existing nonempty knowledge base is rejected unless `--replace` is supplied.
+Replacement removes stale documents; this is not a merge. Malformed or empty
+input is rejected before saving, leaving existing knowledge unchanged. Stop
+concurrent writers during imports. **Imported documents must fit in memory**:
+the existing storage API saves whole snapshots, even though XML parsing itself
+releases completed pages. Full Wikipedia dumps can exceed available memory.
+
+Start or restart the bot with the same data directory/backend and
+`--knowledge-bases wikipedia python offline-wiki` to enable the imported bases.
+Run `pixi-cli import-knowledge --help` for all import options.
+
+For the Python importer contract and instructions on adding a format, see
+[Knowledge Importers](CONTRIBUTING.md#knowledge-importers).
+
 
 ### Railway
 
@@ -230,252 +283,10 @@ installed separately, for example `pymysql` for `mysql+pymysql://...`.
 The database must already exist and the account must be able to create tables.
 Redis accepts `redis://`, `rediss://`, and `unix://` URLs.
 
-## Architecture
+## Contributing
 
-Pixi keeps feature-oriented packages with explicit ports between application
-behavior and external systems:
-
-| Module | Responsibility |
-|---|---|
-| `pixi.cli` | Arguments, dotenv settings, and logging |
-| `pixi.bootstrap` | Production composition: selects adapters, loads resources, registers built-ins and addons |
-| `pixi.bot` | Message handling, conversation lifecycle, and scheduled actions |
-| `pixi.ai.chatting` | Provider-independent completion, tool execution, and inline action processing |
-| `pixi.ai.rag` | Chunking and retrieval using injected embedding and cache services |
-| `pixi.model` | Portable message, platform metadata, and embedding values |
-| `pixi.interfaces` | Platform, model-stream, embedding-cache, message-storage, and knowledge-storage contracts |
-| `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters |
-
-Application code consumes ports; adapters implement them. Concrete adapter
-selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
-`create_bot(...)` builds the production application. Construct `PixiClient`
-directly when supplying your own platform, model, message storage, and prompt
-resources. Neither the chat client nor the RAG client constructs an API client.
-
-Telegram commands are excluded from the ordinary chat handler, so slash commands
-registered by bootstrap or addons work regardless of registration order. Unknown
-commands and commands addressed to other bots do not trigger chat inference.
-
-Model streams use portable `ContentDelta`, `ReasoningDelta`, `ToolCallDelta`, and
-`ChatFinished` events. Streams must support `aclose()` so cancellation releases
-their transport. OpenAI request serialization and stream translation live in
-`pixi.apis.openai`; HTTP implementation details do not enter the chat engine.
-
-OpenAI response values and their JSON conversion live in `pixi.model.openai`.
-HTTP requests and SSE framing live in `pixi.apis.openai.transport`; client/resource
-classes live in `pixi.apis.openai.client`, and API errors in
-`pixi.apis.openai.exceptions`. The generic closable `AsyncStream` belongs to
-`pixi.async_utils`. Import these modules explicitly: the OpenAI package initializer
-has no implementation, re-exports, or third-party `openai.*` module registration.
-
-Tool calls execute serially in first-seen order as soon as their streamed arguments
-form complete JSON objects, while the model stream continues. Results are buffered
-until the source stream ends and tool execution finishes, then added to history
-before any continuation request. Calls with omitted arguments execute at the end
-of the stream.
-
-`AsyncChatbotInstance` and its per-bot `ChatbotInstanceRegistry` live in
-`pixi.bot.conversations`. `AsyncChatClient` receives a `MessagesStorage` adapter
-and a `history_key`; storage is the source of truth, not a resident history list.
-Its synchronous storage contract is:
-
-| Operation | Behavior |
-|---|---|
-| `exists(key)` / `count(key)` | Inspect a history without reading its messages; missing histories have count zero |
-| `append(key, messages)` | Atomically append only new messages; an empty batch creates an existing empty history |
-| `iter_messages(key, start=0, stop=None, reverse=False)` | Lazily read the absolute half-open range `[start, stop)` using bounded pages |
-| `truncate(key, length)` | Remove a tail without rewriting the retained messages or growing the history |
-| `delete(key)` | Remove a history; deleting an absent key is a no-op |
-
-The client fetches a recent context within its approximate model-context budget
-for each inference request and releases it afterward. Rearrangement operates on
-that bounded context, not the entire stored history. `iter_messages()`,
-`message_count`, and `last_message` expose history without loading a full snapshot.
-Idle eviction releases conversation runtime state; it neither saves nor reloads
-message histories.
-
-Messages added outside a request are appended immediately. During a request,
-only its new messages are held in a task-local delta, including tool calls and
-results. Successful requests append that delta as one batch. Failed, cancelled,
-or explicitly closed requests discard it; `temporal=True` discards it even on
-success. Temporary requests do not persist their input prompt. Rollback therefore
-does not copy history or truncate messages committed by another concurrent request.
-Nested requests have independent deltas and merge into their parent only on
-success. Scheduled callbacks start detached from the originating request and
-read the current stored history rather than retaining an expired request delta.
-
-`pixi.storage.messages.MessagesDiskStorage(directory)` uses the standard-library
-SQLite implementation and stores individual indexed message rows in
-`directory/messages.sqlite3`; it needs no SQL install extra. Production histories
-live under `userdata/messages/` in the configured data root. `PixiClient` and
-`create_bot` accept `messages_storage=...`; chatbot instances and registries accept
-`store=...` and use keys of the form `{platform_or_prefix}:{identifier}`.
-
-`pixi.storage.sql.MessagesSQLStorage(url)` stores individual JSON message rows in
-`pixi_history_messages`, with atomic append positions tracked by
-`pixi_history_heads`. `pixi.storage.redis.MessagesRedisStorage(url,
-key_prefix="pixi:messages:")` uses Redis lists under `{key_prefix}v2:{key}`.
-Neither backend rewrites the previous messages when appending. Both preserve
-ordering and distinguish missing histories from existing empty histories.
-Call `close()` on SQL/Redis storage when finished. CLI-created backends are closed
-on exit; callers own storage injected into `create_bot` or `PixiClient`.
-
-Only message data is persisted by the message-storage backend, including metadata,
-timestamps, media hashes, tool calls/results, and channel IDs. Note visibility,
-scheduler state, agent context, and other runtime settings are not persisted.
-Note visibility resets after eviction. The former JSON-array snapshots, SQL
-snapshot table, and unversioned Redis keys are left untouched but are not read or
-automatically migrated; this is a message-storage-layout cutover.
-
-Persona and prompts intentionally remain files under `resources/`. Edit
-`persona.json`, `system.md`, or `examples.txt`, then restart the bot to apply the
-changes. Startup copies only missing default resources and never overwrites
-customized files; these resources are not moved into a database.
-
-Agents receive storage and a history key when constructed:
-
-```python
-from pixi.ai.agents import RetrievalAgent
-from pixi.storage.messages import MessagesDiskStorage
-
-storage = MessagesDiskStorage("./histories")
-agent = RetrievalAgent(
-    storage=storage, history_key="agent:research",
-    context=["Current reference material"], chat_model=chat_model, model=model,
-)
-await agent.execute_query("What is relevant?", temporal=False)
-```
-
-Constructing another client with the same adapter and key accesses the same
-history without a load step. Agent queries default to `temporal=True`; use
-`temporal=False` to persist the query and response. Agents created by the bot
-share its storage and receive distinct history keys unless one is supplied.
-The snapshot `save`/`load` and `get_messages`/`set_messages` APIs are removed.
-Storage errors propagate from the backend.
-
-For Python integrations, construct `CacheDiskStorage(directory)` from
-`pixi.caching.disk`, `CacheSQLStorage(url)` from `pixi.caching.sql`, or
-`CacheRedisStorage(url, key_prefix=...)` from `pixi.caching.redis`.
-Pass it to `create_bot(cache_storage=storage)` to use it throughout the bot.
-Individual consumers can use `get_media_cache(storage=storage)` and
-`get_embedding_cache(storage=storage, embedding_model=backend)`.
-Call `close()` on injected SQL/Redis storage when finished; the caller owns
-those connections. CLI-created connections are closed automatically.
-Disk remains the default under the configured root's `cache/` directory.
-Old disk cache layouts are not read or migrated.
-
-Construct `LlamaEmbeddingModel(config)`
-from `pixi.inference.embeddings` for native llama.cpp inference, and call its
-`aclose()` when finished. Production bootstrap registers that method as a bot
-shutdown hook, so stopping the bot reaps its local `llama-server` process.
-
-`LlamaChatModel(LlamaLanguageModelConfig(...))` in `pixi.inference.chat` implements
-the same `ChatModel` streaming protocol as the API adapter, including content,
-reasoning, and tool-call events. It and `LlamaEmbeddingModel` inherit the shared
-`LlamaServer` lifecycle ABC in `pixi.inference.server`: process startup, readiness,
-request serialization, idle shutdown, cancellation-safe cleanup, and explicit
-`aclose()`. Each adapter owns its process; the default helper reuses the main adapter.
-Closing a partial chat stream releases its HTTP connection and reaps the local
-server. Applications that stop consuming a stream early must call its `aclose()`
-(for example, through `contextlib.aclosing`).
-
-SQL/Redis caching still requires FFmpeg or the optional `media` install extra
-for image/audio conversion.
-
-Chat history contains portable `ChatMessageMeta` values from `pixi.model.chat`.
-Live platform messages belong to action/tool contexts, not saved history.
-`context.reference_message` is conversation data;
-`context.platform_message` is the current reply/reaction handle. Scheduled
-actions retain their original execution context. Cancelling a schedule frees
-its ID immediately; cleanup of the cancelled task cannot remove a replacement
-scheduled with the same ID.
-
-Imports use their owning modules: `pixi.ai.chatting.client.AsyncChatClient`,
-`pixi.bot.conversations.AsyncChatbotInstance`, and
-`pixi.interfaces.platform.PlatformProvider`. Package initializers do not retain
-compatibility aliases for the former locations.
-
-Run the storage and cache regression checks (no external API calls or model downloads):
-
-```sh
-PYTHONPATH=src python -m unittest discover -s tests -v
-```
-
-SQL tests run against temporary SQLite databases when the `sql` extra is
-installed. Redis integration tests require the `redis` extra and an existing
-server; they use unique namespaces and delete only their own keys:
-
-```sh
-PIXI_TEST_REDIS_URL=redis://localhost:6379/15 PYTHONPATH=src python -m unittest discover -s tests -v
-```
-
-
-## Custom Actions and Tools
-
-`PixiClient.register_action(action)` and `register_tool(tool)` accept instances
-implementing `AsyncAction` and `AsyncTool` from
-`pixi.ai.chatting.callbacks`.
-
-Actions provide `name`, `field_name`, `description`, `is_visible`,
-`should_register(instance)`, and `async call(context, value)`. The value is a
-string, or `None` when the model omits it. Tools provide `name`, `description`,
-`parameters` (an OpenAI-compatible JSON schema, or `None`),
-`should_register(instance)`, and `async call(context, **arguments)`. Define metadata on the class.
-
-```python
-from pixi.ai.chatting.callbacks import ActionContext, ToolContext
-
-
-class ShoutAction:
-    name = "shout"
-    field_name = "message"
-    description = "Send an uppercase message in the current chat."
-    is_visible = True
-
-    @classmethod
-    def should_register(cls, instance) -> bool:
-        return True
-
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
-        if value and context.platform_message is not None:
-            await context.platform_message.send(value.upper())
-
-
-class CounterTool:
-    name = "increment_counter"
-    description = "Increment a shared counter by the requested amount."
-    parameters = {
-        "type": "object",
-        "properties": {"amount": {"type": "integer"}},
-        "required": ["amount"],
-        "additionalProperties": False,
-    }
-
-    total = 0
-
-    @classmethod
-    def should_register(cls, instance) -> bool:
-        return True
-
-    @classmethod
-    async def call(cls, context: ToolContext, *, amount: int) -> int:
-        cls.total += amount
-        return cls.total
-
-
-# Given an initialized PixiClient:
-client.register_action(ShoutAction())
-client.register_tool(CounterTool())
-```
-
-Client registrations apply to subsequently created chats. Each chat calls
-`should_register(self)` when it is constructed; return `False` to exclude an
-action or tool from that chat. Use instance attributes for per-bot state and
-`context.parent_instance` for chat-specific state; classmethod-based actions and
-tools are also supported. Both contexts expose `reference_message` and an optional
-live `platform_message`. Invisible actions (`is_visible = False`) do not count as a
-visible response. Tool registration is ignored when tool calling is disabled.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, codebase contracts,
+custom actions and tools, knowledge importers, and regression checks.
 
 ## Lisence
 
