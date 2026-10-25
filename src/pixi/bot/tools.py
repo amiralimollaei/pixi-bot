@@ -11,19 +11,19 @@ from ..ai.chatting.callbacks import AsyncTool, ToolContext
 if TYPE_CHECKING:
     from .conversations import AsyncChatbotInstance
     from ..apis.wikimedia import AsyncWikimediaAPI
-    from ..storage.database import DirectoryDatabase
+    from ..storage.knowledge import KnowledgeBase
     from .client import PixiClient
 
 
-def create_database_tools(
+def create_knowledge_tools(
     client: PixiClient,
-    database_name: str,
-    database_api: DirectoryDatabase,
+    knowledge_name: str,
+    knowledge_base: KnowledgeBase,
 ) -> tuple[AsyncTool, AsyncTool]:
-    class SearchDatabaseTool:
-        name = f"search_{database_name}_database"
+    class SearchKnowledgeTool:
+        name = f"search_{knowledge_name}_knowledge"
         description = (
-            f"Searches the {database_name} database based on a keyword and returns the entry metadata. "
+            f"Searches the {knowledge_name} knowledge base by keyword and returns document metadata. "
             "you may use this function multiple times to find the specific information you're looking for."
         )
         parameters = dict(
@@ -31,7 +31,7 @@ def create_database_tools(
             properties=dict(
                 keyword=dict(
                     type="string",
-                    description=f"The search keyword to find matches in the database text from the {database_name} database",
+                    description=f"The keyword to find in documents from the {knowledge_name} knowledge base",
                 ),
             ),
             required=["keyword"],
@@ -44,11 +44,11 @@ def create_database_tools(
 
         @classmethod
         async def call(cls, context: ToolContext, *, keyword: str):
-            return [asdict(match) for match in await database_api.search(keyword)]
+            return [asdict(match) for match in await knowledge_base.search(keyword)]
 
-    class QueryDatabaseTool:
-        name = f"query_{database_name}_database"
-        description = f"fetch and retrieve relevent information from the content of the {database_name} database based on a query."
+    class QueryKnowledgeTool:
+        name = f"query_{knowledge_name}_knowledge"
+        description = f"Retrieve information from the {knowledge_name} knowledge base based on a query."
         parameters = dict(
             type="object",
             properties=dict(
@@ -58,7 +58,7 @@ def create_database_tools(
                 ),
                 ids=dict(
                     type="string",
-                    description=f"Comma-seperated numerical entry ids to fetch and query information from, use `search_{database_name}_database` to optain entry ids based a search term.",
+                    description=f"Comma-separated document IDs to query; use `search_{knowledge_name}_knowledge` to find IDs.",
                 ),
             ),
             required=["query", "ids"],
@@ -70,9 +70,9 @@ def create_database_tools(
             return True
 
         @classmethod
-        async def get_entry_as_str(cls, entry_id: int) -> str:
-            dataset_entry = await database_api.get_entry(entry_id)
-            return json.dumps(asdict(dataset_entry), ensure_ascii=False, indent=3)
+        async def get_document_as_str(cls, entry_id: int) -> str:
+            document = await knowledge_base.get_document(entry_id)
+            return json.dumps(asdict(document), ensure_ascii=False, indent=3)
 
         @classmethod
         async def call(cls, context: ToolContext, *, query: str, ids: str | None):
@@ -82,7 +82,7 @@ def create_database_tools(
             if client.embedding_model:
                 rag = client.create_rag_client()
                 entries = await asyncio.gather(*[
-                    database_api.get_entry(int(entry_id.strip())) for entry_id in ids.split(",")
+                    knowledge_base.get_document(int(entry_id.strip())) for entry_id in ids.split(",")
                 ])
                 for entry in entries:
                     await rag.add_document(entry.content, entry.title, entry.id)
@@ -96,12 +96,12 @@ def create_database_tools(
                 agent = client.create_agent_instance(
                     agent_cls=RetrievalAgent,
                     context=await asyncio.gather(*[
-                        cls.get_entry_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
+                        cls.get_document_as_str(int(entry_id.strip())) for entry_id in ids.split(",")
                     ]),
                 )
                 return await agent.execute_query(query)
 
-    return SearchDatabaseTool(), QueryDatabaseTool()
+    return SearchKnowledgeTool(), QueryKnowledgeTool()
 
 
 def create_mediawiki_tools(

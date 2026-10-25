@@ -6,7 +6,7 @@ import logging
 import time
 from collections import defaultdict
 from contextlib import aclosing, contextmanager
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..ai.chatting.actions import AsyncActionManager
 from ..ai.chatting.callbacks import (ActionContext, AsyncAction, AsyncTool,
@@ -64,7 +64,6 @@ class AsyncChatbotInstance(AsyncChatClient):
             ))
 
         self.scheduler = AsyncScheduler()
-        self.news_task: Any | None = None
         self.action_manager = AsyncActionManager()
         self.channel_active_tasks: defaultdict[str, list[asyncio.Task]] = defaultdict(list)
 
@@ -90,7 +89,6 @@ class AsyncChatbotInstance(AsyncChatClient):
         return (
             self._active_users > 0
             or self.scheduler.pending_count > 0
-            or self.news_task is not None
             or any(not task.done() for tasks in self.channel_active_tasks.values() for task in tasks)
         )
 
@@ -205,29 +203,12 @@ class AsyncChatbotInstance(AsyncChatClient):
         for task in self.channel_active_tasks[channel_id]:
             task.cancel()
 
-    @property
-    def forum_id(self) -> int | None:
-        return int(self.id.split("#")[1]) if self.id.startswith("forum#") else None
-
-    @property
-    def chat_id(self) -> int | None:
-        return int(self.id.split("#")[1]) if self.id.startswith("chat#") else None
-
-    def stop_news_background_task(self):
-        if self.news_task is not None:
-            self.news_task.stop()
-            self.news_task = None
-
     async def aclose(self) -> None:
         """Stop all consumers before their shared dependencies are closed."""
         tasks = [task for channel in self.channel_active_tasks.values() for task in channel]
         for task in tasks:
             task.cancel()
-        cleanup = [self.scheduler.aclose()]
-        if self.news_task is not None:
-            cleanup.append(self.news_task.aclose())
-        await asyncio.gather(*tasks, *cleanup, return_exceptions=True)
-        self.news_task = None
+        await asyncio.gather(*tasks, self.scheduler.aclose(), return_exceptions=True)
 
     def toggle_notes(self):
         self.is_notes_visible = not self.is_notes_visible

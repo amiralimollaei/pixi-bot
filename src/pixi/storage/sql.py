@@ -21,6 +21,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 
 from ..model.chat import ChatMessageMeta
+from ..model.storage.document import DocumentMeta
+from .knowledge_disk import _deserialize_document, _serialize_documents
 
 
 class MessagesSQLStorage:
@@ -241,6 +243,92 @@ class MessagesSQLStorage:
                 return
             connection.execute(
                 self._messages.delete().where(self._messages.c.key_hash == key_hash)
+            )
+
+    def close(self) -> None:
+        self._engine.dispose()
+
+
+class KnowledgeSQLStorage:
+    """Persist each named snapshot in one row so concurrent saves cannot mix documents."""
+
+    def __init__(self, url: str):
+        parsed_url = make_url(url)
+        if parsed_url.drivername in {"postgres", "postgresql"}:
+            parsed_url = parsed_url.set(drivername="postgresql+psycopg")
+        engine = create_engine(parsed_url)
+        try:
+            metadata = MetaData()
+            # Keep the persisted table name stable across terminology changes.
+            snapshots = Table(
+                "pixi_dataset_snapshots",
+                metadata,
+                Column("name_hash", String(64), primary_key=True),
+                Column(
+                    "payload",
+                    Text().with_variant(LONGTEXT(), "mysql", "mariadb"),
+                    nullable=False,
+                ),
+            )
+            metadata.create_all(engine)
+        except BaseException:
+            engine.dispose()
+            raise
+        self._engine = engine
+        self._snapshots = snapshots
+
+    @staticmethod
+    def _name_hash(name: str) -> str:
+        return hashlib.sha256(name.encode("utf-8")).hexdigest()
+
+    def load(self, name: str) -> list[DocumentMeta]:
+        with self._engine.connect() as connection:
+            payload = connection.execute(
+                select(self._snapshots.c.payload).where(
+                    self._snapshots.c.name_hash == self._name_hash(name)
+                )
+            ).scalar_one_or_none()
+        if payload is None:
+            return []
+        return [_deserialize_document(document) for document in json.loads(payload)]
+
+    def save(self, name: str, documents: Sequence[DocumentMeta]) -> None:
+        serialized = _serialize_documents(documents)
+        if not serialized:
+            self.delete(name)
+            return
+        payload = "[" + ",".join(payload for _, payload in serialized) + "]"
+        name_hash = self._name_hash(name)
+        table = self._snapshots
+        values = {"name_hash": name_hash, "payload": payload}
+        dialect = self._engine.dialect.name
+        if dialect == "sqlite":
+            statement = sqlite_insert(table).values(**values).on_conflict_do_update(
+                index_elements=[table.c.name_hash], set_={"payload": payload}
+            )
+        elif dialect == "postgresql":
+            statement = postgresql_insert(table).values(**values).on_conflict_do_update(
+                index_elements=[table.c.name_hash], set_={"payload": payload}
+            )
+        elif dialect in {"mysql", "mariadb"}:
+            statement = mysql_insert(table).values(**values).on_duplicate_key_update(
+                payload=payload
+            )
+        else:
+            statement = None
+        with self._engine.begin() as connection:
+            if statement is not None:
+                connection.execute(statement)
+            else:
+                connection.execute(table.delete().where(table.c.name_hash == name_hash))
+                connection.execute(table.insert().values(**values))
+
+    def delete(self, name: str) -> None:
+        with self._engine.begin() as connection:
+            connection.execute(
+                self._snapshots.delete().where(
+                    self._snapshots.c.name_hash == self._name_hash(name)
+                )
             )
 
     def close(self) -> None:

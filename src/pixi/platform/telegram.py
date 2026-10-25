@@ -12,8 +12,7 @@ from telegram.ext import (Application, CommandHandler, ContextTypes,
 
 from ..caching import MediaCacheProvider
 from ..model.enums import ChatType, Messages, Platform
-from ..model.platform import (ChannelMeta, GuildMeta, PlatformEnvironment,
-                              PlatformMessageAuthor)
+from ..model.platform import PlatformEnvironment, PlatformMessageAuthor
 from ..interfaces.platform import PlatformMessage, PlatformProvider
 
 
@@ -234,8 +233,10 @@ class TelegramProvider(PlatformProvider):
                 else:
                     return function(message)
 
+        # Commands share the default handler group; never let this catch-all
+        # shadow commands registered later by bootstrap or addons.
         self.application.add_handler(MessageHandler(
-            filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL,
+            (filters.TEXT | filters.VIDEO | filters.AUDIO | filters.Document.ALL) & ~filters.COMMAND,
             callback=on_message
         ))
 
@@ -321,25 +322,3 @@ class TelegramProvider(PlatformProvider):
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10):
         raise NotImplementedError(Messages.NOT_IMPLEMENTED % ("fetch_channel_history", self.platform))
-
-    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]:
-        """For Telegram, try to resolve the chat by ID and return it as the only channel."""
-        try:
-            chat = await self.application.bot.get_chat(forum_id)
-            name = chat.title or chat.username or "Group"
-            mention = f"@{chat.username}" if chat.username else None
-            return [ChannelMeta(id=chat.id, name=name, mention=mention)]
-        except Exception:
-            self.logger.exception(f"Failed to fetch chat {forum_id} for forum channels.")
-            return []
-
-    async def send_message(self, chat_id: int, text: str):
-        """Send a text message to a chat by its ID."""
-        try:
-            await self.application.bot.send_message(chat_id=chat_id, text=text)
-        except Exception:
-            self.logger.exception(f"Failed to send message to chat {chat_id}.")
-            raise
-
-    async def get_available_guilds(self) -> list[GuildMeta]:
-        return []

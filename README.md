@@ -109,9 +109,9 @@ Selections within each role are mutually exclusive. Native inference never acts
 as an API fallback. Main, helper, and embedding servers are loaded lazily and
 unloaded after 60 idle seconds by default; the timeout does not run during a request.
 
-On shutdown, active conversation, scheduled, and proactive-news tasks (including
-tool workers) are cancelled and awaited before platform shutdown and native-model
-cleanup. No new chat generations or proactive-news loops start during shutdown.
+On shutdown, active conversation and scheduled tasks (including tool workers)
+are cancelled and awaited before platform shutdown and native-model cleanup.
+No new chat generations start during shutdown.
 
 Native main options are `--llama-file FILE`, `--llama-binary PATH`, and
 `--llama-idle-timeout SECONDS`. Helper options use the `--llama-helper-` prefix;
@@ -173,6 +173,35 @@ Backend selection does not enable media or configure an embedding model;
 the existing `--image-support`, `--audio-support`, and `--embedding-model`
 options still apply.
 
+### Knowledge-base storage
+
+Select knowledge persistence independently with
+`--knowledge-storage {disk,sql,redis}` and select the knowledge bases to use with
+`--knowledge-bases NAME [NAME ...]`. Knowledge tools require tool calling to be enabled.
+
+| Backend | Connection configuration | Optional install extra |
+|---|---|---|
+| `disk` (default) | `datasets/<name>/*.zst` under `--pixi-directory` | None |
+| `sql` | `--knowledge-storage-url URL`, otherwise `DATABASE_URL` | `sql` |
+| `redis` | `--knowledge-storage-url URL`, otherwise `REDIS_URL` | `redis` |
+
+Explicit URLs take precedence over environment variables. Disk ignores database
+environment variables and rejects an explicit URL. `--knowledge-redis-key-prefix`
+sets the Redis namespace (default: `pixi:datasets:`) and requires Redis storage.
+Message histories, caches, and knowledge bases can share a server URL without mixing data.
+
+For example, with `DATABASE_URL` configured:
+
+```sh
+pixi-cli -p telegram --model YOUR_MODEL \
+  --knowledge-bases minecraft --knowledge-storage sql
+```
+
+Existing stored knowledge remains readable without migration. Switching backends
+does not automatically transfer it. Restart the bot to apply knowledge-base changes.
+Use SQL or Redis when multiple processes need to update knowledge.
+
+
 ### Railway
 
 Use Railway's existing SQL/Redis services; Pixi does not provision containers
@@ -210,11 +239,11 @@ behavior and external systems:
 |---|---|
 | `pixi.cli` | Arguments, dotenv settings, and logging |
 | `pixi.bootstrap` | Production composition: selects adapters, loads resources, registers built-ins and addons |
-| `pixi.bot` | Message handling, conversation lifecycle, scheduled actions, and proactive news |
+| `pixi.bot` | Message handling, conversation lifecycle, and scheduled actions |
 | `pixi.ai.chatting` | Provider-independent completion, tool execution, and inline action processing |
 | `pixi.ai.rag` | Chunking and retrieval using injected embedding and cache services |
 | `pixi.model` | Portable message, platform metadata, and embedding values |
-| `pixi.interfaces` | Platform, model-stream, embedding-cache, and message-storage contracts |
+| `pixi.interfaces` | Platform, model-stream, embedding-cache, message-storage, and knowledge-storage contracts |
 | `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters |
 
 Application code consumes ports; adapters implement them. Concrete adapter
@@ -222,6 +251,10 @@ selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
 `create_bot(...)` builds the production application. Construct `PixiClient`
 directly when supplying your own platform, model, message storage, and prompt
 resources. Neither the chat client nor the RAG client constructs an API client.
+
+Telegram commands are excluded from the ordinary chat handler, so slash commands
+registered by bootstrap or addons work regardless of registration order. Unknown
+commands and commands addressed to other bots do not trigger chat inference.
 
 Model streams use portable `ContentDelta`, `ReasoningDelta`, `ToolCallDelta`, and
 `ChatFinished` events. Streams must support `aclose()` so cancellation releases
@@ -287,12 +320,17 @@ ordering and distinguish missing histories from existing empty histories.
 Call `close()` on SQL/Redis storage when finished. CLI-created backends are closed
 on exit; callers own storage injected into `create_bot` or `PixiClient`.
 
-Only message data is persisted, including metadata, timestamps, media hashes,
-tool calls/results, and channel IDs. Persona, prompts, note visibility, scheduler
-state, agent context, and other runtime settings are not stored. Note visibility
-resets after eviction. The former JSON-array snapshots, SQL snapshot table, and
-unversioned Redis keys are left untouched but are not read or automatically
-migrated; this is a storage-layout cutover.
+Only message data is persisted by the message-storage backend, including metadata,
+timestamps, media hashes, tool calls/results, and channel IDs. Note visibility,
+scheduler state, agent context, and other runtime settings are not persisted.
+Note visibility resets after eviction. The former JSON-array snapshots, SQL
+snapshot table, and unversioned Redis keys are left untouched but are not read or
+automatically migrated; this is a message-storage-layout cutover.
+
+Persona and prompts intentionally remain files under `resources/`. Edit
+`persona.json`, `system.md`, or `examples.txt`, then restart the bot to apply the
+changes. Startup copies only missing default resources and never overwrites
+customized files; these resources are not moved into a database.
 
 Agents receive storage and a history key when constructed:
 

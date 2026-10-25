@@ -7,14 +7,15 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
-from .model.config import (DatasetConfig, IdFilter, LlamaEmbeddingModelConfig,
-                           LlamaLanguageModelConfig, MediaWikiConfig, NewsConfig,
+from .model.config import (KnowledgeBaseConfig, IdFilter, LlamaEmbeddingModelConfig,
+                           LlamaLanguageModelConfig, MediaWikiConfig,
                            OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
                            OpenAILanguageModelConfig, PixiFeatures)
 from .model.enums import Platform
 from .caching import MediaCacheProvider
 from .caching.disk import CacheDiskStorage
 from .interfaces.caching import CacheStorage
+from .interfaces.knowledge import KnowledgeStorage
 from .interfaces.messages import MessagesStorage
 from .interfaces.platform import PlatformMessage, PlatformProvider
 
@@ -82,14 +83,14 @@ def create_bot(
     helper_model: OpenAILanguageModelConfig | LlamaLanguageModelConfig | None = None,
     embedding_model: OpenAIEmbeddingModelConfig | LlamaEmbeddingModelConfig | None = None,
     features: PixiFeatures = PixiFeatures.default(),
-    datasets: Sequence[DatasetConfig] = (),
+    knowledge_bases: Sequence[KnowledgeBaseConfig] = (),
     wikis: Sequence[MediaWikiConfig] = (),
     environment_filter: IdFilter | None = None,
-    news_config: NewsConfig | None = None,
     instance_idle_timeout: float = 900.0,
     directory: str | Path = "~/.pixi/",
     messages_storage: MessagesStorage | None = None,
     cache_storage: CacheStorage | None = None,
+    knowledge_storage: KnowledgeStorage | None = None,
 ) -> PixiClient:
     """Build the bot; callers own the lifecycle of injected storage backends."""
     from .storage.paths import PixiPaths, copy_default_resources, open_resource
@@ -106,8 +107,7 @@ def create_bot(
     from .bot.actions import (CancelScheduleAction, NoteAction, ReactAction,
                               ScheduleAction, SendAction, SendGifAction)
     from .bot.client import PixiClient
-    from .bot.news import NewsBackgroundTask
-    from .bot.tools import (FetchChannelHistoryTool, create_database_tools,
+    from .bot.tools import (FetchChannelHistoryTool, create_knowledge_tools,
                             create_mediawiki_tools)
     from .caching import get_embedding_cache, get_media_cache
     from .storage.messages import MessagesDiskStorage
@@ -164,23 +164,6 @@ def create_bot(
 
         rag_factory = create_rag_client
 
-    news_task_factory = None
-    if PixiFeatures.NewsProactive in features and news_config is not None:
-        from .apis.rss import AsyncRSSAPI
-
-        with open_resource("news-system.md", "r") as resource:
-            news_prompt = resource.read()
-
-        def create_news_task(instance):
-            return NewsBackgroundTask(
-                news_config=news_config,
-                platform_provider=platform_provider,
-                instance=instance,
-                feed_api=AsyncRSSAPI(news_config.feed_url),
-                system_prompt_template=news_prompt,
-            )
-
-        news_task_factory = create_news_task
 
     bot = PixiClient(
         platform_provider,
@@ -190,7 +173,6 @@ def create_bot(
         helper_model=helper_model,
         embedding_model=embedding_model,
         rag_factory=rag_factory,
-        news_task_factory=news_task_factory,
         messages_storage=(
             messages_storage if messages_storage is not None
             else MessagesDiskStorage(PixiPaths.userdata() / "messages")
@@ -232,12 +214,16 @@ def create_bot(
         bot.register_action(action)
 
     if PixiFeatures.ToolCalling in features:
-        from .storage.database import DirectoryDatabase
+        from .storage.knowledge import KnowledgeBase
+        from .storage.knowledge_disk import KnowledgeDiskStorage
 
-        for config in datasets:
-            database = DirectoryDatabase.from_directory(config.name)
-            bot.datasets.append(database)
-            for tool in create_database_tools(bot, config.name, database):
+        if knowledge_storage is None:
+            knowledge_storage = KnowledgeDiskStorage(PixiPaths.knowledge())
+
+        for config in knowledge_bases:
+            knowledge_base = KnowledgeBase.from_storage(config.name, knowledge_storage)
+            bot.knowledge_bases.append(knowledge_base)
+            for tool in create_knowledge_tools(bot, config.name, knowledge_base):
                 bot.register_tool(tool)
         if PixiFeatures.WikiSearch in features:
             from .apis.wikimedia import AsyncWikimediaAPI

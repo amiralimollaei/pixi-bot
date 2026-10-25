@@ -2,8 +2,6 @@ from typing import Callable, Protocol
 
 from ..model.enums import ChatType, Platform
 from ..model.platform import (
-    ChannelMeta,
-    GuildMeta,
     PlatformEnvironment,
     PlatformMessageAuthor,
 )
@@ -95,9 +93,3 @@ class PlatformProvider(Protocol):
     async def get_user_avatar(self, user_id: int) -> bytes | None: ...
 
     async def fetch_channel_history(self, channel_id: int, n: int = 10) -> list[dict]: ...
-
-    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]: ...
-
-    async def send_message(self, chat_id: int, text: str) -> None: ...
-
-    async def get_available_guilds(self) -> list[GuildMeta]: ...

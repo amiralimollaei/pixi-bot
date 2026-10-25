@@ -19,7 +19,6 @@ from ..interfaces.messages import MessagesStorage
 from ..interfaces.models import ChatModel
 from ..interfaces.platform import PlatformMessage, PlatformProvider
 from .conversations import AsyncChatbotInstance, ChatbotInstanceRegistry
-from .news import NewsBackgroundTask
 
 # constants
 
@@ -51,7 +50,6 @@ class PixiClient:
         helper_model: OpenAILanguageModelConfig | LlamaLanguageModelConfig | None = None,
         embedding_model: OpenAIEmbeddingModelConfig | LlamaEmbeddingModelConfig | None = None,
         rag_factory: Callable[[], AsyncRAGClient] | None = None,
-        news_task_factory: Callable[[AsyncChatbotInstance], NewsBackgroundTask] | None = None,
         features: PixiFeatures = PixiFeatures.default(),
         environment_filter: IdFilter | None = None,
         instance_idle_timeout: float = 900.0,
@@ -67,7 +65,6 @@ class PixiClient:
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
         self._rag_factory = rag_factory
-        self._news_task_factory = news_task_factory
         self._stopping = False
         self.features = features
         self.instance_idle_timeout = instance_idle_timeout
@@ -75,7 +72,7 @@ class PixiClient:
         self.pre_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
         self.post_startup_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
         self.shutdown_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
-        self.datasets = []
+        self.knowledge_bases = []
         self.messages_storage = messages_storage
         self.conversations = ChatbotInstanceRegistry(
             platform_provider.platform,
@@ -86,19 +83,9 @@ class PixiClient:
             examples=examples,
         )
 
-        if news_task_factory is not None:
-            self.register_post_startup_hook(self._start_news_instances)
-
         self.__register_builtin_slash_commands()
         self.platform_provider.register_on_message_event(self.on_message)
 
-
-    async def _start_news_instances(self):
-        self.logger.info("Starting proactive news for available guilds...")
-        for guild in await self.platform_provider.get_available_guilds():
-            instance_id = f"forum#{guild.id}"
-            self.logger.info(f" - \"{guild.name}\" (members: {guild.member_count})")
-            self.get_chatbot_instance(instance_id)
 
     async def _evict_idle_instances(self):
         while True:
@@ -178,7 +165,6 @@ class PixiClient:
             instance = self.conversations.get(environment_id, or_create=False)
             if instance:
                 instance.cancel_all_schedules()
-                instance.stop_news_background_task()
             self.conversations.remove(environment_id)
             self.logger.info(f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled.")
 
@@ -204,14 +190,6 @@ class PixiClient:
             log_tool_calls=PixiFeatures.ToolLogging in self.features
         )
         assert instance
-        if (
-            self._news_task_factory is not None
-            and instance.forum_id is not None
-            and instance.news_task is None
-            and not self._stopping
-        ):
-            instance.news_task = self._news_task_factory(instance)
-            instance.news_task.start()
         return instance
 
     async def pixi_resp(

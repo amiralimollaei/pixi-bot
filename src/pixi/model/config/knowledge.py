@@ -2,5 +2,5 @@ import dataclasses
 
 
 @dataclasses.dataclass(frozen=True)
-class DatasetConfig:
+class KnowledgeBaseConfig:
     name: str

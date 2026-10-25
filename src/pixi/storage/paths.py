@@ -29,7 +29,8 @@ class PixiPaths:
         return cls.root() / "addons"
 
     @classmethod
-    def datasets(cls) -> Path:
+    def knowledge(cls) -> Path:
+        # Keep the existing data directory; this is an API rename, not a data migration.
         return cls.root() / "datasets"
 
     @classmethod

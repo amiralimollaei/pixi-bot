@@ -17,14 +17,14 @@ class AsyncRAGClient:
         self.cache = cache
         self.model = model
         self.splitter = SmartSplitter(max_size=model.max_chunk_size, min_size=model.min_chunk_size)
-        self.dataset: list[VectorTextPiece] = []
+        self.pieces: list[VectorTextPiece] = []
 
     async def add_document_piece(self, input: str | list[str], reference: DocumentReference):
         embeddings = await self.embed(input)
         if isinstance(embeddings, Embedding):
             embeddings = [embeddings]
         for embedding in embeddings:
-            self.dataset.append(VectorTextPiece(data=embedding, reference=reference))
+            self.pieces.append(VectorTextPiece(data=embedding, reference=reference))
 
     async def add_document(self, text: str, name: str, id: int):
         await self.add_document_piece(self.splitter.split(text), DocumentReference(name=name, id=id))
@@ -57,6 +57,6 @@ class AsyncRAGClient:
     def search(self, query: Embedding, best_n: int = 10) -> list[TextPieceMatch]:
         matches = [
             TextPieceMatch(text=piece.text, similarity_score=self.similarity(query, piece), reference=piece.reference)
-            for piece in self.dataset
+            for piece in self.pieces
         ]
         return sorted(matches, key=lambda match: match.similarity_score, reverse=True)[:best_n]

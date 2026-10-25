@@ -9,8 +9,7 @@ from discord import app_commands
 
 from ..caching import MediaCacheProvider, UnsupportedMediaException
 from ..model.enums import ChatType, Platform
-from ..model.platform import (ChannelMeta, GuildMeta, PlatformEnvironment,
-                              PlatformMessageAuthor)
+from ..model.platform import PlatformEnvironment, PlatformMessageAuthor
 from ..interfaces.platform import PlatformMessage, PlatformProvider
 
 
@@ -396,41 +395,3 @@ class DiscordProvider(PlatformProvider):
             ))
 
         return messages[::-1]
-
-    async def fetch_forum_channels(self, forum_id: int) -> list[ChannelMeta]:
-        """Return all text channels in a guild (forum) by its ID."""
-        guild = await self.bot.fetch_guild(forum_id)
-        if guild is None:
-            return []
-        bot_member = await guild.fetch_member(self.bot.user.id)  # pyright: ignore[reportOptionalMemberAccess]
-        return [
-            ChannelMeta(
-                id=c.id,
-                name=c.name,
-                mention=c.mention
-            ) for c in await guild.fetch_channels() if (c.permissions_for(bot_member).send_messages and c.id != (guild.id + 1))
-        ]
-
-    async def send_message(self, chat_id: int, text: str):
-        """Send a text message to a channel by its ID."""
-        try:
-            channel = await self.bot.fetch_channel(chat_id)
-            if channel is None:
-                raise RuntimeError(f"Channel {chat_id} not found, cannot send message.")
-            if not hasattr(channel, "send"):
-                raise RuntimeError(f"Channel {chat_id} does not support sending messages.")
-            await channel.send(text)  # pyright: ignore[reportAttributeAccessIssue]
-        except Exception:
-            self.logger.exception(f"Failed to send message to channel {chat_id}.")
-            raise
-
-    async def get_available_guilds(self) -> list[GuildMeta]:
-        """Return all guilds the bot is currently a member of."""
-        guild_list = []
-        async for guild in self.bot.fetch_guilds():
-            guild_list.append(GuildMeta(
-                id=guild.id,
-                name=guild.name,
-                member_count=guild.member_count,
-            ))
-        return guild_list

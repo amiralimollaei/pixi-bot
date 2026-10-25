@@ -12,11 +12,10 @@ class PixiFeatures(IntFlag):
     GIFSearch = auto()
     ImageSupport = auto()
     AudioSupport = auto()
-    NewsProactive = auto()
 
     @classmethod
     def all(cls) -> 'PixiFeatures':
-        return cls.ToolCalling | cls.ToolLogging | cls.WikiSearch | cls.GIFSearch | cls.ImageSupport | cls.AudioSupport | cls.NewsProactive
+        return cls.ToolCalling | cls.ToolLogging | cls.WikiSearch | cls.GIFSearch | cls.ImageSupport | cls.AudioSupport
 
     @classmethod
     def default(cls) -> 'PixiFeatures':

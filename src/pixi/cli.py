@@ -22,8 +22,8 @@ def main():
     from .model.enums.ansi import AnsiColors
     
     from .model.enums import Platform
-    from .model.config import (DatasetConfig, IdFilter, LlamaEmbeddingModelConfig,
-                               LlamaLanguageModelConfig, MediaWikiConfig, NewsConfig,
+    from .model.config import (KnowledgeBaseConfig, IdFilter, LlamaEmbeddingModelConfig,
+                               LlamaLanguageModelConfig, MediaWikiConfig,
                                OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
                                OpenAILanguageModelConfig, PixiFeatures)
 
@@ -120,6 +120,22 @@ def main():
         "--cache-redis-key-prefix",
         metavar="PREFIX",
         help="Redis cache namespace (default: pixi:cache:); requires --cache-storage redis.",
+    )
+    parser.add_argument(
+        "--knowledge-storage",
+        choices=("disk", "sql", "redis"),
+        default="disk",
+        help="Knowledge-base backend (default: disk under --pixi-directory).",
+    )
+    parser.add_argument(
+        "--knowledge-storage-url",
+        metavar="URL",
+        help="Knowledge SQLAlchemy or Redis URL; defaults to DATABASE_URL for sql, REDIS_URL for redis.",
+    )
+    parser.add_argument(
+        "--knowledge-redis-key-prefix",
+        metavar="PREFIX",
+        help="Knowledge Redis namespace (default: pixi:datasets:); requires --knowledge-storage redis.",
     )
     parser.add_argument(
         "--api-url", "-a",
@@ -271,26 +287,6 @@ def main():
         help="allows pixi to download and process audio files"
     )
 
-    # proactive news arguments
-    parser.add_argument(
-        "--news-feed-url", "-n",
-        type=str,
-        default=None,
-        help="RSS/Atom feed URL for proactive news feature. Enables the news feature if provided."
-    )
-    parser.add_argument(
-        "--news-interval",
-        type=int,
-        default=3600,
-        help="Seconds between news checks for proactive news feature. Default is 3600 (1 hour)."
-    )
-    parser.add_argument(
-        "--news-probability",
-        type=float,
-        default=0.1,
-        help="Probability of sending a proactive news message each check (0.0 to 1.0). Default is 0.1."
-    )
-
     # environment filter arguments
     parser.add_argument(
         "--environment-whitelist",
@@ -306,13 +302,13 @@ def main():
         help="add the id of the environment that the bot is or is not allowed to respond in (space-separated). If not provided, the bot will respond everywhere."
     )
 
-    # database arguments
+    # knowledge-base arguments
     parser.add_argument(
-        "--database-names", "-db",
+        "--knowledge-bases", "-kb",
         type=str,
         nargs="+",
         default=[],
-        help="add the name of databases to use (space-separated)."
+        help="Names of knowledge bases to use (space-separated)."
     )
 
     # mediawiki wiki arguments
@@ -347,6 +343,17 @@ def main():
         parser.error("SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL.")
     if args.cache_redis_key_prefix is not None and args.cache_storage != "redis":
         parser.error("--cache-redis-key-prefix requires --cache-storage redis.")
+    if args.knowledge_storage == "sql" and args.knowledge_storage_url is None:
+        args.knowledge_storage_url = os.getenv("DATABASE_URL")
+    elif args.knowledge_storage == "redis" and args.knowledge_storage_url is None:
+        args.knowledge_storage_url = os.getenv("REDIS_URL")
+    if args.knowledge_storage == "disk":
+        if args.knowledge_storage_url is not None:
+            parser.error("--knowledge-storage-url requires --knowledge-storage sql or redis.")
+    elif not args.knowledge_storage_url:
+        parser.error("SQL/Redis knowledge storage requires --knowledge-storage-url or DATABASE_URL/REDIS_URL.")
+    if args.knowledge_redis_key_prefix is not None and args.knowledge_storage != "redis":
+        parser.error("--knowledge-redis-key-prefix requires --knowledge-storage redis.")
 
     local_options = (
         (args.llama_hf, (args.llama_file, args.llama_binary, args.llama_idle_timeout),
@@ -458,12 +465,10 @@ def main():
         features |= PixiFeatures.ImageSupport
     if args.audio_support:
         features |= PixiFeatures.AudioSupport
-    if args.news_feed_url:
-        features |= PixiFeatures.NewsProactive
 
-    datasets = []
-    for name in args.database_names:
-        datasets.append(DatasetConfig(name=name))
+    knowledge_bases = []
+    for name in args.knowledge_bases:
+        knowledge_bases.append(KnowledgeBaseConfig(name=name))
 
     wikis = []
     for nameurl in args.mediawiki_wikis:
@@ -482,15 +487,6 @@ def main():
             environment_filter = IdFilter.whitelist(args.environment_ids)
         else:
             environment_filter = IdFilter.blacklist(args.environment_ids)
-
-    news_config = None
-    if args.news_feed_url:
-        news_config = NewsConfig(
-            feed_url=args.news_feed_url,
-            interval_sec=args.news_interval,
-            probability=args.news_probability,
-        )
-
 
     from .bootstrap import create_bot
 
@@ -540,6 +536,30 @@ def main():
             )
             resources.callback(cache_storage.close)
 
+        knowledge_storage = None
+        if args.knowledge_storage == "sql":
+            assert args.knowledge_storage_url is not None
+            try:
+                from .storage.sql import KnowledgeSQLStorage
+            except ImportError:
+                parser.error("SQL knowledge storage requires pip install 'pixi-bot[sql]'.")
+            knowledge_storage = KnowledgeSQLStorage(args.knowledge_storage_url)
+            resources.callback(knowledge_storage.close)
+        elif args.knowledge_storage == "redis":
+            assert args.knowledge_storage_url is not None
+            try:
+                from .storage.redis import KnowledgeRedisStorage
+            except ImportError:
+                parser.error("Redis knowledge storage requires pip install 'pixi-bot[redis]'.")
+            knowledge_storage = KnowledgeRedisStorage(
+                args.knowledge_storage_url,
+                key_prefix=(
+                    args.knowledge_redis_key_prefix if args.knowledge_redis_key_prefix is not None
+                    else "pixi:datasets:"
+                ),
+            )
+            resources.callback(knowledge_storage.close)
+
         return create_bot(
             platform=Platform[args.platform.upper()],
             auth=auth,
@@ -547,12 +567,12 @@ def main():
             helper_model=helper_model,
             embedding_model=embedding_model,
             features=features,
-            datasets=datasets,
+            knowledge_bases=knowledge_bases,
             wikis=wikis,
             environment_filter=environment_filter,
-            news_config=news_config,
             directory=args.pixi_directory,
             instance_idle_timeout=args.instance_idle_timeout,
             messages_storage=messages_storage,
             cache_storage=cache_storage,
+            knowledge_storage=knowledge_storage,
         ).run()
