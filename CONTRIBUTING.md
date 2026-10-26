@@ -105,6 +105,12 @@ Model streams use portable `ContentDelta`, `ReasoningDelta`, `ToolCallDelta`, an
 their transport. OpenAI request serialization and stream translation live in
 `pixi.apis.openai`; HTTP implementation details do not enter the chat engine.
 
+User-message text is optional, with or without media. History serialization omits
+empty text, so adapters must accept `content=None` and render an empty user-text
+field rather than the literal text `"None"`. The user template still supplies its
+label, timestamps when enabled, and any attached metadata. Raw-content requirements
+apply to system, assistant-text, and tool-result messages, not templated user messages.
+
 OpenAI response values and their JSON conversion live in `pixi.model.openai`.
 HTTP requests and SSE framing live in `pixi.apis.openai.transport`; client/resource
 classes live in `pixi.apis.openai.client`, and API errors in

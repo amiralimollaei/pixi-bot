@@ -28,7 +28,8 @@ def _validate_message(meta: ChatMessageMeta) -> None:
         )
     match meta.role:
         case ChatRole.SYSTEM | ChatRole.USER:
-            assert exists(meta.content, True), "Message content is required"
+            if meta.role == ChatRole.SYSTEM:
+                assert exists(meta.content, True), "Message content is required"
             assert not exists(meta.tool_calls), (
                 "Tool calls are only supported on assistant messages"
             )
@@ -57,7 +58,7 @@ def serialize_message(
     _validate_message(meta)
     result: dict[str, Any] = dict(role=str(meta.role).lower())
     if meta.role == ChatRole.USER:
-        content = [f"User: {meta.content}"]
+        content = [f"User: {meta.content or ''}"]
         if timestamps:
             stamp = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(meta.time))
             content.append(
