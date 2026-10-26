@@ -122,10 +122,12 @@ for this server-side bot integration rather than assuming a key grants permissio
 
 ### Docker and Compose
 
-The root `Dockerfile` still installs both platforms and uses `PIXI_PLATFORM` to
-choose one at runtime. `Dockerfile.telegram` and `Dockerfile.discord` install only
-their platform's SDK and set the matching platform by default. All three images
-include FFmpeg and the `media`, `kiwix`, `sql`, and `redis` extras.
+The root `Dockerfile` installs all extras by default and uses `PIXI_PLATFORM` to
+choose a platform at runtime. Set the `PIXI_EXTRAS` build argument to a
+space-separated list of extras to install only what your deployment needs.
+The `telegram` and `discord` Compose services use this same Dockerfile with
+their platform's SDK plus the `kiwix`, `sql`, and `redis` extras. Every image
+includes FFmpeg; the default generic image also includes the `media` extra (PyAV).
 
 For an API-backed bot, put these runtime settings in `.env`:
 
@@ -146,9 +148,9 @@ quote the value instead: `PIXI_EXTRA_ARGS="--messages-storage sql --cache-storag
 Build and run one platform directly:
 
 ```sh
-docker build -f Dockerfile.telegram -t pixi-bot:telegram .
-docker run --rm --env-file .env pixi-bot:telegram
-# For Discord, use Dockerfile.discord and pixi-bot:discord.
+docker build --build-arg "PIXI_EXTRAS=telegram kiwix sql redis" -t pixi-bot:telegram .
+docker run --rm --env-file .env -e PIXI_PLATFORM=telegram pixi-bot:telegram
+# For Discord, replace telegram with discord in the build argument, tag, and platform.
 ```
 
 Or select the platform-specific Compose services:
@@ -167,6 +169,33 @@ Platform-specific services override that variable with their own platform.
 secrets at runtime. `PIXI_EXTRA_ARGS` accepts whitespace-separated CLI arguments,
 not shell expressions or embedded quoting. Explicit command arguments can also
 be passed to `bash ./start.sh`.
+
+#### Custom images
+
+Build a Telegram image without Kiwix, SQL, Discord, or PyAV:
+
+```sh
+docker build --build-arg "PIXI_EXTRAS=telegram redis" -t pixi-bot:personal .
+docker run --rm --env-file .env -e PIXI_PLATFORM=telegram pixi-bot:personal
+```
+
+Use `discord redis` and `PIXI_PLATFORM=discord` for Discord, or include both
+platform extras if you need to select either at runtime. FFmpeg remains installed.
+`PIXI_EXTRAS` controls installed packages at **build time**; changing it requires
+rebuilding. It does not select storage backends at runtime.
+
+For Compose, put `PIXI_EXTRAS="telegram redis"` and `PIXI_PLATFORM=telegram` in
+your local `.env`, along with credentials and storage flags, then run:
+
+```sh
+docker compose up --build pixi
+```
+
+Only the `pixi` service accepts configurable extras from `.env`. The `telegram`
+and `discord` services build the shared Dockerfile with fixed platform-specific
+extras to preserve existing behavior. Profiles are additive, not exclusive: use
+explicit service names rather than `docker compose --profile telegram up` if you
+want only one bot.
 
 ## CLI Usage
 
@@ -335,64 +364,8 @@ For the Python importer contract and instructions on adding a format, see
 
 ## Railway Deployment
 
-Railway auto-detects the root `Dockerfile`, so existing services need no build
-configuration changes. To use a platform-specific image, set this variable in
-the bot service's **Variables** tab:
-
-| Bot image | `RAILWAY_DOCKERFILE_PATH` | Platform setting |
-| --- | --- | --- |
-| Existing generic image | Unset (defaults to `Dockerfile`) | Set `PIXI_PLATFORM=telegram` or `discord` |
-| Telegram only | `Dockerfile.telegram` | Defaults to `telegram`; leave `PIXI_PLATFORM` unset |
-| Discord only | `Dockerfile.discord` | Defaults to `discord`; leave `PIXI_PLATFORM` unset |
-
-Keep the service's root directory at the repository root and leave its custom
-start command unset to use the Dockerfile's `CMD`. Add `PIXI_MODEL`,
-`OPENAI_API_KEY`, and the matching `TELEGRAM_BOT_TOKEN` or `DISCORD_BOT_TOKEN`
-as Railway variables. `PIXI_EMBEDDING_MODEL` and `PIXI_EXTRA_ARGS` are optional;
-no `.env` file is required inside the image.
-
-To run both platforms, create **two Railway services pointing at the same
-repository and branch**, each with its own Dockerfile selection, variables,
-and bot token. These are outbound bot workers; they do not need a public domain
-or HTTP port.
-
-Railway selects one Dockerfile per service; additional Dockerfiles do not make
-it launch additional services automatically. Railway can import a Compose file
-through the project canvas, but it maps entries to Railway services rather than
-running `docker compose` on deployments. The repository's Compose profiles are
-for local use; explicit per-service Dockerfile selection is sufficient on Railway.
-See Railway's [Dockerfile selection](https://docs.railway.com/builds/dockerfiles)
-and [Compose deployment guide](https://docs.railway.com/guides/docker-compose).
-
-### SQL and Redis
-
-Use Railway's existing SQL/Redis services; Pixi does not provision containers
-or require a Compose stack. In the bot service's Railway variables, reference
-the database service's connection URL as `DATABASE_URL` or `REDIS_URL`.
-Use the private URL containing its `*.railway.internal` hostname and internal
-port, not the public TCP proxy. Connection URLs carry authentication and any
-SSL options; no application-specific DNS configuration is needed.
-
-The Docker images already include the `sql` and `redis` extras. For a non-Docker
-installation, install them alongside your platform extra, for example
-`pip install 'pixi-bot[telegram,sql,redis]'`.
-
-For SQL histories and Redis caches, set both URL variables and use:
-
-```sh
-pixi-cli -p telegram --model YOUR_MODEL --messages-storage sql --cache-storage redis
-```
-
-With the Docker launcher, set
-`PIXI_EXTRA_ARGS=--messages-storage sql --cache-storage redis` in Railway instead
-of replacing the start command.
-
-SQL storage accepts SQLAlchemy URLs. SQLite uses `sqlite:////absolute/path.db`;
-plain `postgresql://` and `postgres://` URLs use psycopg 3, included in the `sql`
-extra. Explicit driver URLs are preserved; other databases need their driver
-installed separately, for example `pymysql` for `mysql+pymysql://...`.
-The database must already exist and the account must be able to create tables.
-Redis accepts `redis://`, `rediss://`, and `unix://` URLs.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for deployment setup, Redis-only configuration,
+platform selection, and SQL/Redis connections.
 
 ## Contributing
 
