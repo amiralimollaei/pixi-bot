@@ -274,8 +274,11 @@ download bundles before importing. HTML extraction excludes scripts, styles, and
 navigation while preserving code-block indentation. Documents retain source
 links where available, otherwise local file references.
 DevDocs sources use local `db.json` references: `meta.json` project homepages
-are not documentation bases. MediaWiki sources support short article paths and
-`index.php?title=...` URLs; unrecognized query layouts use local page references.
+are not documentation bases. MediaWiki sources preserve explicit `?title=...`
+article URLs. Path-based main-page URLs and unrecognized query layouts use local
+page references: exports do not identify the article route reliably, especially
+when the main-page title contains slashes or the route has a suffix. MediaWiki log
+entries are skipped without affecting article imports.
 MediaWiki XML is parsed with `defusedxml`; DTDs, entity declarations, and external
 entity references are rejected. Normal XML character references remain supported.
 

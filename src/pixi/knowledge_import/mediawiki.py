@@ -5,7 +5,7 @@ import gzip
 import lzma
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from xml.etree.ElementTree import Element
 
 from defusedxml.ElementTree import iterparse
@@ -28,12 +28,9 @@ def _article_url(base: str, title: str) -> str | None:
             ),
             fragment="",
         ).geturl()
-    if parsed.query:
-        return None
-    return parsed._replace(
-        path=parsed.path.rsplit("/", 1)[0] + "/" + quote(title, safe="/"),
-        fragment="",
-    ).geturl()
+    # A main-page URL does not identify the article route: its title may
+    # contain slashes, and the route may include a suffix such as ".html".
+    return None
 
 
 def _page_document(
@@ -141,7 +138,7 @@ class MediaWikiImporter:
                                 )
                             seen_ids.add(document.id)
                             yield document
-                    else:
+                    elif name != "logitem":
                         raise ValueError(f"Unexpected MediaWiki export element: {name}")
                     element.clear()
                     root.clear()
