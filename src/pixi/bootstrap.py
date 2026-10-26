@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
@@ -29,6 +30,7 @@ from pixi.storage.paths import PixiPaths, copy_default_resources
 
 if TYPE_CHECKING:
     from pixi.bot.client import PixiClient
+    from pixi.interfaces.gifs import GifSearchAPI
 
 
 def create_platform_provider(
@@ -95,6 +97,19 @@ async def verify_models(auth: OpenAIAuthConfig, models: dict[str, str]) -> None:
             "will be skipped. This is expected for some OpenAI-compatible backends.",
             error.code,
         )
+
+
+def create_gif_api() -> GifSearchAPI | None:
+    """Select KLIPY before GIPHY when both API keys are configured."""
+    if api_key := os.getenv("KLIPY_API_KEY", "").strip():
+        from pixi.apis.klipy import AsyncKlipyAPI
+
+        return AsyncKlipyAPI(api_key)
+    if api_key := os.getenv("GIPHY_API_KEY", "").strip():
+        from pixi.apis.giphy import AsyncGiphyAPI
+
+        return AsyncGiphyAPI(api_key)
+    return None
 
 
 def create_bot(
@@ -235,14 +250,9 @@ def create_bot(
 
     gif_api = None
     if PixiFeatures.GIFSearch in features:
-        from pixi.apis.tenor import AsyncTenorAPI
-
-        try:
-            gif_api = AsyncTenorAPI()
-        except Exception:
-            logger.warning(
-                "gif search api failed to initialize, gif features will not be available."
-            )
+        gif_api = create_gif_api()
+        if gif_api is None:
+            logger.warning("Set KLIPY_API_KEY or GIPHY_API_KEY to enable GIF search.")
     for action in (
         ScheduleAction(),
         CancelScheduleAction(),

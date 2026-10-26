@@ -73,6 +73,25 @@ selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
 directly when supplying your own platform, model, message storage, and prompt
 resources. Neither the chat client nor the RAG client constructs an API client.
 
+GIF search uses the `pixi.interfaces.gifs.GifSearchAPI` port: `search(query)`
+always returns an immutable `pixi.model.gifs.GifSearchResult` with a `results`
+tuple of `Gif` objects and provider `attribution`. Each GIF has a non-null media
+`url`, optional `id`, `title`, `description`, and `page_url`, plus a `tags` tuple.
+No usable GIF means an empty tuple, never `None`. The send-GIF action sends the
+first GIF's URL only and sends nothing for empty results.
+`bootstrap.create_gif_api()` selects KLIPY before GIPHY
+from nonblank environment keys. The KLIPY adapter uses its Tenor-compatible v2
+search endpoint; the GIPHY adapter uses its native v1 GIF search endpoint.
+Provider-specific response parsing stays in the adapters.
+
+KLIPY maps `content_description` to `description`, preserves `tags`, and uses
+`itemurl` (or its short `url`) as `page_url`. GIPHY maps `alt_text` to `description`
+and its top-level `url` to `page_url`; its media URL remains
+`images.original.url`. GIPHY alt-text access can depend on API-key capabilities,
+and tags are not guaranteed by its standard GIF schema. Missing text metadata
+stays `None`, and missing tags become `()`; titles are not substituted for missing
+descriptions. Provider attribution remains available in the search result metadata.
+
 Telegram commands are excluded from the ordinary chat handler, so slash commands
 registered by bootstrap or addons work regardless of registration order. Unknown
 commands and commands addressed to other bots do not trigger chat inference.

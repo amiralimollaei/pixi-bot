@@ -9,8 +9,8 @@ from pixi.ai.chatting.callbacks import ActionContext
 from pixi.utils import format_time_later
 
 if TYPE_CHECKING:
-    from pixi.apis.tenor import AsyncTenorAPI
     from pixi.bot.conversations import AsyncChatbotInstance
+    from pixi.interfaces.gifs import GifSearchAPI
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,7 @@ class SendGifAction:
     description = "sends a gif in the current chat, the gif is chosen based on the provided description (description must be in English)"
     is_visible = True
 
-    def __init__(self, gif_api: AsyncTenorAPI | None):
+    def __init__(self, gif_api: GifSearchAPI | None):
         self.gif_api = gif_api
 
     def should_register(self, instance: AsyncChatbotInstance) -> bool:
@@ -154,18 +154,9 @@ class SendGifAction:
             return
         assert self.gif_api is not None, "gif_api is not initialized"
 
-        resp: dict = await self.gif_api.search(value, locale="en_us", limit=1)  # type: ignore
-        results = []
-        for gif_content in resp.get("results", []):
-            results.append(
-                dict(
-                    content_description=gif_content.get("content_description", ""),
-                    content_rating=gif_content.get("content_rating", ""),
-                    url=gif_content.get("media", [{}])[0].get("gif", {}).get("url", ""),
-                )
-            )
-        if results:
-            await message.send(results[0]["url"])
+        result = await self.gif_api.search(value)
+        if result.results:
+            await message.send(result.results[0].url)
 
 
 class NoteAction:

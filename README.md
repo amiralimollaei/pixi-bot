@@ -88,7 +88,32 @@ pixi-cli -p [platform] [options]
 - Create a `.env` file and set `OPENAI_API_KEY` to your API provider's API Key
 - Set `DISCORD_BOT_TOKEN` and/or `TELEGRAM_BOT_TOKEN` environment variables
 - Set `DEEPINFRA_API_KEY` environment variable and `DISCORD_BOT_TOKEN`
-- Optionally set `TENOR_API_KEY` for GIF search features powered by Tenor
+- Optionally set `KLIPY_API_KEY` or `GIPHY_API_KEY` for GIF search (see below).
+
+#### GIF search
+
+Configure either provider in `.env`:
+
+```dotenv
+# KLIPY: https://partner.klipy.com/
+KLIPY_API_KEY=your-klipy-api-key
+# Or GIPHY: https://developers.giphy.com/dashboard/
+# GIPHY_API_KEY=your-giphy-api-key
+```
+
+Pixi uses KLIPY when both keys are nonblank, otherwise whichever provider has a
+key. With neither key, the send-GIF action is unavailable. `--no-gif-search`
+disables it even when a key is configured. Provider errors do not trigger a
+fallback to the other service.
+
+GIF messages include only the media URL. Tenor is no longer supported; replace
+its old key with a key from one of these providers.
+
+Both providers document a 100-call/hour test or beta limit; production access
+requires approval. Review [KLIPY's integration guidelines](https://docs.klipy.com/attribution)
+or [GIPHY's requirements](https://developers.giphy.com/docs/api/) before deployment.
+GIPHY's standard guidelines require client-side search requests; obtain approval
+for this server-side bot integration rather than assuming a key grants permission.
 
 ### Runninig The Bot
 
