@@ -5,7 +5,7 @@ import gzip
 import lzma
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from xml.etree.ElementTree import Element
 
 from defusedxml.ElementTree import iterparse
@@ -17,8 +17,27 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _article_url(base: str, title: str) -> str | None:
+    parsed = urlsplit(base)
+    title = title.replace(" ", "_")
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if any(key == "title" for key, _ in query):
+        return parsed._replace(
+            query=urlencode(
+                [(key, title if key == "title" else value) for key, value in query]
+            ),
+            fragment="",
+        ).geturl()
+    if parsed.query:
+        return None
+    return parsed._replace(
+        path=parsed.path.rsplit("/", 1)[0] + "/" + quote(title, safe="/"),
+        fragment="",
+    ).geturl()
+
+
 def _page_document(
-    page: Element, path: Path, article_prefix: str | None
+    page: Element, path: Path, article_base: str | None
 ) -> DocumentMeta | None:
     fields = {
         _local_name(child.tag): child
@@ -63,10 +82,8 @@ def _page_document(
     if text is None or "deleted" in text.attrib or not (text.text or "").strip():
         return None
     source = (
-        article_prefix + quote(title.text.replace(" ", "_"), safe="/")
-        if article_prefix
-        else f"{path.resolve().as_uri()}#page={identifier}"
-    )
+        _article_url(article_base, title.text) if article_base else None
+    ) or f"{path.resolve().as_uri()}#page={identifier}"
     return DocumentMeta(
         title=title.text, content=text.text or "", id=identifier, source=source
     )
@@ -82,7 +99,7 @@ class MediaWikiImporter:
         opener = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}.get(
             path.suffix.lower(), open
         )
-        article_prefix = None
+        article_base = None
         seen_ids: set[int] = set()
         with opener(path, "rb") as stream:
             events = iterparse(stream, events=("start", "end"), forbid_dtd=True)
@@ -114,9 +131,9 @@ class MediaWikiImporter:
                         if base:
                             parsed = urlsplit(base)
                             if parsed.scheme in {"http", "https"} and parsed.netloc:
-                                article_prefix = base.rsplit("/", 1)[0] + "/"
+                                article_base = base
                     elif name == "page":
-                        document = _page_document(element, path, article_prefix)
+                        document = _page_document(element, path, article_base)
                         if document is not None:
                             if document.id in seen_ids:
                                 raise ValueError(

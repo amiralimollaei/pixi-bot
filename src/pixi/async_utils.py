@@ -40,6 +40,7 @@ class AsyncScheduler:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._tasks: dict[str, asyncio.Task] = {}
+        self._unfinished_tasks: set[asyncio.Task] = set()
 
     async def _run_scheduled(
         self, id: str, delay: float, callback: Callable[[], Awaitable[None]]
@@ -68,6 +69,8 @@ class AsyncScheduler:
             name=f"scheduler-{id}",
         )
         self._tasks[id] = task
+        self._unfinished_tasks.add(task)
+        task.add_done_callback(self._unfinished_tasks.discard)
         return True
 
     def cancel(self, id: str) -> bool:
@@ -92,7 +95,7 @@ class AsyncScheduler:
 
     async def aclose(self) -> None:
         """Cancel scheduled callbacks and wait for their cleanup."""
-        tasks = tuple(self._tasks.values())
+        tasks = tuple(self._unfinished_tasks)
         self.cancel_all()
         await asyncio.gather(*tasks, return_exceptions=True)
 

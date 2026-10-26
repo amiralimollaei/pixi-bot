@@ -3,7 +3,7 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from pixi.knowledge_import.html import html_to_text
 from pixi.model.storage.document import DocumentMeta
@@ -67,7 +67,7 @@ def _read_titles(path: Path) -> dict[str, str]:
     return titles
 
 
-def _read_home(path: Path) -> str | None:
+def _validate_metadata(path: Path) -> None:
     metadata = _read_object(path)
     for key in ("name", "slug", "type", "version", "release"):
         if (
@@ -80,14 +80,12 @@ def _read_home(path: Path) -> str | None:
         if key in metadata and (type(metadata[key]) is not int or metadata[key] < 0):
             raise ValueError(f"DevDocs metadata {key} must be a nonnegative integer")
     if "links" not in metadata:
-        return None
+        return
     links = metadata["links"]
     if not isinstance(links, dict) or any(
         not isinstance(value, str) for value in links.values()
     ):
         raise ValueError("DevDocs metadata links must be an object of URL strings")
-    home = links.get("home")
-    return home if home else None
 
 
 class DevDocsImporter:
@@ -96,6 +94,7 @@ class DevDocsImporter:
 
         IDs are one-based positions in the sorted database paths. Index anchor
         entries supply fallback titles, never extra copies of a database page.
+        Sources remain local: metadata links identify projects, not documentation bases.
         """
         database_path = path / "db.json" if path.is_dir() else path
         if database_path.name != "db.json":
@@ -113,20 +112,16 @@ class DevDocsImporter:
         index_path = database_path.with_name("index.json")
         metadata_path = database_path.with_name("meta.json")
         titles = _read_titles(index_path) if index_path.exists() else {}
-        home = _read_home(metadata_path) if metadata_path.exists() else None
+        if metadata_path.exists():
+            _validate_metadata(metadata_path)
         local_source = database_path.resolve().as_uri()
         for identifier, page_path in enumerate(sorted(pages), start=1):
             content = html_to_text(pages[page_path])
             if not content.strip():
                 continue
-            source = (
-                urljoin(home.rstrip("/") + "/", quote(page_path, safe="/"))
-                if home
-                else f"{local_source}#{quote(page_path, safe='')}"
-            )
             yield DocumentMeta(
                 title=titles.get(page_path, page_path),
                 content=content,
                 id=identifier,
-                source=source,
+                source=f"{local_source}#{quote(page_path, safe='')}",
             )

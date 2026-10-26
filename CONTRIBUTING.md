@@ -45,6 +45,12 @@ dependencies installed. Run all hooks manually with:
 uv run pre-commit run --all-files
 ```
 
+Run the scheduler and knowledge-import regression tests:
+
+```sh
+uv run python -m unittest discover -s tests -v
+```
+
 ## Architecture
 
 Pixi keeps feature-oriented packages with explicit ports between application
@@ -217,6 +223,8 @@ Live platform messages belong to action/tool contexts, not saved history.
 actions retain their original execution context. Cancelling a schedule frees
 its ID immediately; cleanup of the cancelled task cannot remove a replacement
 scheduled with the same ID.
+`AsyncScheduler.aclose()` also waits for cleanup of previously cancelled tasks,
+even after their IDs have been freed or reused.
 
 Imports use their owning modules: `pixi.ai.chatting.client.AsyncChatClient`,
 `pixi.bot.conversations.AsyncChatbotInstance`, and

@@ -111,8 +111,12 @@ TELEGRAM_BOT_TOKEN=your-telegram-token
 # For Discord, use DISCORD_BOT_TOKEN instead.
 # Optional:
 # PIXI_EMBEDDING_MODEL=your-embedding-model
-# PIXI_EXTRA_ARGS="--messages-storage sql --cache-storage redis"
+# PIXI_EXTRA_ARGS=--messages-storage sql --cache-storage redis
 ```
+
+Do not surround `PIXI_EXTRA_ARGS` with quotes in a Docker `--env-file`: Docker
+passes those quotes literally. For a direct local launch that sources `.env`,
+quote the value instead: `PIXI_EXTRA_ARGS="--messages-storage sql --cache-storage redis"`.
 
 Build and run one platform directly:
 
@@ -269,6 +273,9 @@ Download sources first; URLs are not fetched by this command. Extract DevDocs
 download bundles before importing. HTML extraction excludes scripts, styles, and
 navigation while preserving code-block indentation. Documents retain source
 links where available, otherwise local file references.
+DevDocs sources use local `db.json` references: `meta.json` project homepages
+are not documentation bases. MediaWiki sources support short article paths and
+`index.php?title=...` URLs; unrecognized query layouts use local page references.
 MediaWiki XML is parsed with `defusedxml`; DTDs, entity declarations, and external
 entity references are rejected. Normal XML character references remain supported.
 

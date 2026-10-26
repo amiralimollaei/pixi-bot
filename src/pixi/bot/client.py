@@ -302,6 +302,9 @@ class PixiClient:
                 self.logger.exception(
                     f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})"
                 )
+                # stop repeating shit, please
+                if instance.action_manager.is_visible_actions_taken():
+                    return
 
     def is_environment_allowed(self, identifier: str) -> bool:
         """
