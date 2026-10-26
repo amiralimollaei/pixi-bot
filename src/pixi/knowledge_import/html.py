@@ -40,6 +40,7 @@ class _TextParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        self.preformatted_parts: set[int] = set()
         self.hidden: list[str] = []
         self.pre_depth = 0
 
@@ -71,6 +72,8 @@ class _TextParser(HTMLParser):
 
     def handle_data(self, data):
         if not self.hidden:
+            if self.pre_depth:
+                self.preformatted_parts.add(len(self.parts))
             self.parts.append(data if self.pre_depth else re.sub(r"\s+", " ", data))
 
 
@@ -78,4 +81,17 @@ def html_to_text(html: str) -> str:
     parser = _TextParser()
     parser.feed(html)
     parser.close()
-    return "".join(parser.parts).strip()
+    # trim document boundaries without touching whitespace originating in <pre>.
+    for index, part in enumerate(parser.parts):
+        if index in parser.preformatted_parts:
+            break
+        parser.parts[index] = part.lstrip()
+        if parser.parts[index]:
+            break
+    for index in range(len(parser.parts) - 1, -1, -1):
+        if index in parser.preformatted_parts:
+            break
+        parser.parts[index] = parser.parts[index].rstrip()
+        if parser.parts[index]:
+            break
+    return "".join(parser.parts)
