@@ -35,6 +35,13 @@ with its own `PIXI_EXTRAS` and `PIXI_PLATFORM`.
 See Railway's [Dockerfile selection](https://docs.railway.com/builds/dockerfiles)
 and [Compose deployment guide](https://docs.railway.com/guides/docker-compose).
 
+## Logs
+
+Railway already timestamps log entries. Append `--no-log-timestamps` to your
+existing `PIXI_EXTRA_ARGS` value to omit Pixi's timestamp while preserving the
+severity, logger name, and message. Timestamps remain enabled by default;
+`--log-timestamps` explicitly enables them again.
+
 ## Redis-only deployment
 
 1. Create your own project with one bot service from this repository and a Redis

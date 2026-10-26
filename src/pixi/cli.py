@@ -49,47 +49,6 @@ def main():
     from pixi.model.enums import Platform
     from pixi.model.enums.ansi import AnsiColors
 
-    # injecting colors into the default logger
-
-    COLORS = {  # (level_color, message_color)
-        logging.DEBUG: (AnsiColors.BLUE, AnsiColors.BEIGE),
-        logging.INFO: (AnsiColors.WHITE, AnsiColors.WHITE2),
-        logging.WARNING: (AnsiColors.YELLOW, AnsiColors.YELLOW2),
-        logging.ERROR: (AnsiColors.RED, AnsiColors.RED2),
-        logging.CRITICAL: (
-            AnsiColors.BOLD + AnsiColors.RED,
-            AnsiColors.BOLD + AnsiColors.RED2,
-        ),
-    }
-
-    orig_factory = logging.getLogRecordFactory()
-
-    def record_factory(*args, **kwargs):
-        record = orig_factory(*args, **kwargs)
-        level_color, message_color = COLORS.get(
-            record.levelno, (AnsiColors.GREY, AnsiColors.WHITE)
-        )
-        record.level_color = level_color
-        record.message_color = message_color
-        return record
-
-    logging.setLogRecordFactory(record_factory)
-
-    logging.basicConfig(
-        format=f"{AnsiColors.GREY}[{AnsiColors.BLUE}%(asctime)s{AnsiColors.GREY}] {AnsiColors.GREY}[%(level_color)s%(levelname)s / %(name)s{AnsiColors.GREY}] %(message_color)s%(message)s{AnsiColors.END}",
-        level=logging.INFO,
-        force=True,
-    )
-
-    # https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
-    # Get the logger for 'httpx'
-    httpx_logger = logging.getLogger("httpx")
-    # Set the logging level to WARNING to ignore INFO and DEBUG logs
-    httpx_logger.setLevel(logging.WARNING)
-
-    # load environment variables
-    load_dotenv()
-
     parser = argparse.ArgumentParser(
         description="Run the Pixi bot, a multi-platform AI chatbot.",
         epilog="Offline imports: pixi-cli import-knowledge --help",
@@ -116,6 +75,12 @@ def main():
         choices=["debug", "info", "warning", "error", "critical"],
         default="info",
         help="Set the logging level.",
+    )
+    parser.add_argument(
+        "--log-timestamps",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include timestamps in log messages (default: enabled).",
     )
     parser.add_argument(
         "--instance-idle-timeout",
@@ -376,6 +341,55 @@ def main():
     )
 
     args = parser.parse_args()
+
+    COLORS = {  # (level_color, message_color)
+        logging.DEBUG: (AnsiColors.BLUE, AnsiColors.BEIGE),
+        logging.INFO: (AnsiColors.WHITE, AnsiColors.WHITE2),
+        logging.WARNING: (AnsiColors.YELLOW, AnsiColors.YELLOW2),
+        logging.ERROR: (AnsiColors.RED, AnsiColors.RED2),
+        logging.CRITICAL: (
+            AnsiColors.BOLD + AnsiColors.RED,
+            AnsiColors.BOLD + AnsiColors.RED2,
+        ),
+    }
+
+    orig_factory = logging.getLogRecordFactory()
+
+    def record_factory(*args, **kwargs):
+        record = orig_factory(*args, **kwargs)
+        level_color, message_color = COLORS.get(
+            record.levelno, (AnsiColors.GREY, AnsiColors.WHITE)
+        )
+        record.level_color = level_color
+        record.message_color = message_color
+        return record
+
+    logging.setLogRecordFactory(record_factory)
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.addFilter(lambda record: record.levelno < logging.ERROR)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.ERROR)
+
+    log_format = f"{AnsiColors.GREY}[%(level_color)s%(levelname)s / %(name)s{AnsiColors.GREY}] %(message_color)s%(message)s{AnsiColors.END}"
+    if args.log_timestamps:
+        log_format = f"{AnsiColors.GREY}[{AnsiColors.BLUE}%(asctime)s{AnsiColors.GREY}] {log_format}"
+    logging.basicConfig(
+        format=log_format,
+        level=args.log_level.upper(),
+        handlers=[stdout_handler, stderr_handler],
+        force=True,
+    )
+
+    # https://github.com/langchain-ai/langchain/issues/14065#issuecomment-1834571761
+    # Get the logger for 'httpx'
+    httpx_logger = logging.getLogger("httpx")
+    # Set the logging level to WARNING to ignore INFO and DEBUG logs
+    httpx_logger.setLevel(logging.WARNING)
+
+    # Load environment variables before resolving storage URLs and API credentials.
+    load_dotenv()
+
     if args.messages_storage == "sql" and args.messages_storage_url is None:
         args.messages_storage_url = os.getenv("DATABASE_URL")
     elif args.messages_storage == "redis" and args.messages_storage_url is None:
@@ -462,9 +476,6 @@ def main():
             parser.error(
                 "--llama-embedding-idle-timeout must be a positive finite number."
             )
-
-    # Set logging level
-    logging.root.setLevel(args.log_level.upper())
 
     api_models_selected = bool(args.model or args.helper_model or args.embedding_model)
     api_key = "NO_AUTH"

@@ -201,6 +201,9 @@ want only one bot.
 
 Run `pixi-cli --help` for all platform, feature, storage, and model options.
 
+Logs include timestamps by default. Use `--no-log-timestamps` to omit them when
+your log collector adds its own, or `--log-timestamps` to explicitly enable them.
+
 | Role                   | API selection             | Native llama.cpp selection          |
 | ---------------------- | ------------------------- | ----------------------------------- |
 | Main chat (required)   | `--model MODEL`           | `--llama-hf REPO[:QUANT]`           |
