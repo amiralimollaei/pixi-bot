@@ -8,18 +8,13 @@ from collections import defaultdict
 from contextlib import aclosing, contextmanager
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, overload
 
-from pixi.ai.chatting.actions import AsyncActionManager
-from pixi.ai.chatting.callbacks import (
-    ActionContext,
-    AsyncAction,
-    AsyncTool,
-    ToolContext,
-)
+from pixi.ai.chatting.actions import ActionOutcome, AsyncActionManager
+from pixi.ai.chatting.callbacks import AsyncAction, AsyncTool, InvocationContext
 from pixi.ai.chatting.client import AsyncChatClient
 from pixi.ai.chatting.persona import AssistantPersona
 from pixi.async_utils import AsyncScheduler
 from pixi.interfaces.messages import MessagesStorage
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.enums import ChatRole
 
 if TYPE_CHECKING:
@@ -65,7 +60,7 @@ class AsyncChatbotInstance(AsyncChatClient):
 
         if not self.storage.exists(self.history_key):
             self.add_message(
-                ChatMessageMeta(
+                ChatMessage(
                     role=ChatRole.ASSISTANT,
                     content="[NOTE: I accept the guidelines of the system, I use the SEND to respond nicely] [SEND: OK!, Let's begin!]",
                 )
@@ -120,14 +115,12 @@ class AsyncChatbotInstance(AsyncChatClient):
         self,
         action: AsyncAction,
         value: str | None,
-        action_context: ActionContext,
+        action_context: InvocationContext,
         id: str,
         delay: float,
     ) -> bool:
         async def execute_scheduled():
-            if self.action_manager.on_action:
-                self.action_manager.on_action(action.name, value)
-            await self.action_manager._invoke_action(action, action_context, value)
+            await self.action_manager.invoke_action(action, action_context, value)
 
         return self.schedule(id=id, delay=delay, callback=execute_scheduled)
 
@@ -141,16 +134,16 @@ class AsyncChatbotInstance(AsyncChatClient):
         self.action_manager.add_action(action)
 
     def add_message(
-        self, message: ChatMessageMeta | str, default_role: ChatRole = ChatRole.USER
-    ) -> ChatMessageMeta:
+        self, message: ChatMessage | str, default_role: ChatRole = ChatRole.USER
+    ) -> ChatMessage:
         self.actions_since_last_message = 0
         self.last_used_at = time.monotonic()
         if isinstance(message, str):
-            message = ChatMessageMeta(default_role, message)
-        if isinstance(message, ChatMessageMeta):
+            message = ChatMessage(default_role, message)
+        if isinstance(message, ChatMessage):
             return super().add_message(message)
         raise TypeError(
-            f"expected message to be a string or a ChatMessageMeta, but got {type(message)}."
+            f"expected message to be a string or a ChatMessage, but got {type(message)}."
         )
 
     def update_realtime(self, data: dict):
@@ -165,10 +158,10 @@ class AsyncChatbotInstance(AsyncChatClient):
 
     def create_tool_context(
         self,
-        reference_message: ChatMessageMeta,
+        reference_message: ChatMessage,
         platform_message: PlatformMessage | None = None,
-    ) -> ToolContext:
-        return ToolContext(
+    ) -> InvocationContext:
+        return InvocationContext(
             reference_message=reference_message,
             parent_instance=self,
             platform_message=platform_message,
@@ -184,48 +177,42 @@ class AsyncChatbotInstance(AsyncChatClient):
 
     async def stream_call(
         self,
-        reference_message: ChatMessageMeta,
+        reference_message: ChatMessage,
         message: str | None = None,
-        temporal: bool = False,
+        discard_history: bool = False,
         system_prompt: str | None = None,
         platform_message: PlatformMessage | None = None,
+        outcome: ActionOutcome | None = None,
     ):
-        with self.use(), self.history_scope(temporal=temporal):
-            original_visible_actions = self.action_manager.visible_actions_taken
+        if outcome is None:
+            outcome = ActionOutcome()
+        with self.use(), self.history_scope(discard_history=discard_history):
             if message:
                 self.add_message(message)
 
-            tool_context = self.create_tool_context(reference_message, platform_message)
-            action_context = ActionContext(
-                reference_message=reference_message,
-                parent_instance=self,
-                platform_message=platform_message,
-            )
-            try:
+            context = self.create_tool_context(reference_message, platform_message)
+            async with aclosing(
+                self._stream_completion(
+                    system_prompt=system_prompt,
+                    tool_context=context,
+                )
+            ) as completion:
                 async with aclosing(
-                    self.stream_completion(
-                        temporal=False,
-                        system_prompt=system_prompt,
-                        tool_context=tool_context,
+                    self.action_manager.consume(
+                        stream=completion,
+                        action_context=context,
+                        outcome=outcome,
                     )
-                ) as completion:
-                    async with aclosing(
-                        self.action_manager.consume(
-                            stream=completion,
-                            action_context=action_context,
-                        )
-                    ) as actions:
-                        non_response = "".join([char async for char in actions])
-                return non_response.strip() or None
-            finally:
-                if temporal:
-                    self.action_manager.visible_actions_taken = original_visible_actions
+                ) as actions:
+                    non_response = "".join([char async for char in actions])
+            return non_response.strip() or None
 
     async def concurrent_channel_stream_call(
         self,
         channel_id: str,
-        reference_message: ChatMessageMeta,
+        reference_message: ChatMessage,
         platform_message: PlatformMessage | None = None,
+        outcome: ActionOutcome | None = None,
     ):
         assert channel_id, "channel_id is None"
         await self.cancel_channel_active_tasks(channel_id)
@@ -233,7 +220,9 @@ class AsyncChatbotInstance(AsyncChatClient):
         async def stream_call_task():
             try:
                 await self.stream_call(
-                    reference_message, platform_message=platform_message
+                    reference_message,
+                    platform_message=platform_message,
+                    outcome=outcome,
                 )
             except asyncio.CancelledError:
                 self.logger.warning(

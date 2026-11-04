@@ -17,7 +17,7 @@ from pixi.knowledge_import import IMPORTERS
 from pixi.storage.paths import PixiPaths
 
 
-def main(argv: list[str]) -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pixi-cli import-knowledge",
         description="Import a local documentation dump into a named knowledge base.",
@@ -44,6 +44,11 @@ def main(argv: list[str]) -> None:
         help="Replace an existing snapshot, removing documents absent from this import.",
     )
     add_storage_arguments(parser)
+    return parser
+
+
+def main(argv: list[str]) -> None:
+    parser = build_parser()
     args = parser.parse_args(argv)
     resolve_storage_options(args, parser)
     if (

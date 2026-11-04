@@ -4,7 +4,7 @@ from pixi.apis.openai.adapter import OpenAIChatModel
 from pixi.apis.openai.messages import MediaReader
 from pixi.inference.server import LlamaServer
 from pixi.interfaces.models import ChatEvent, ToolDefinition
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.config.llama import LlamaLanguageModelConfig
 from pixi.model.config.openai import OpenAIAuthConfig
 
@@ -21,7 +21,7 @@ class LlamaChatModel(LlamaServer[OpenAIChatModel]):
 
     async def stream(
         self,
-        messages: list[ChatMessageMeta],
+        messages: list[ChatMessage],
         *,
         tools: list[ToolDefinition],
         timestamps: bool = True,

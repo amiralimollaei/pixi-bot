@@ -1,8 +1,9 @@
 # Contributing to Pixi
 
-Architecture, Python integration contracts, extension points, and regression checks
-are documented here. For installation, CLI usage, storage configuration, and
-deployment, see the [README](README.md).
+Pixi is a Python application that connects a language model to Discord or Telegram.
+This guide explains how its modules fit together, how to run development tools,
+and how to extend the bot. For installation, credentials, and a first chat, start
+with the [README](README.md). For hosting on Railway, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 - [Development](#development)
 - [Architecture](#architecture)
@@ -11,10 +12,12 @@ deployment, see the [README](README.md).
 
 ## Development
 
-Install the development environment (including Ruff, Pyright, and pre-commit) and
-enable the Git hooks:
+Clone the repository and enter its directory, then install the development
+environment, including Ruff, Pyright, and pre-commit, and enable the Git hooks:
 
 ```sh
+git clone https://github.com/amiralimollaei/pixi-bot.git
+cd pixi-bot
 uv sync --all-extras
 uv run pre-commit install
 ```
@@ -34,8 +37,8 @@ uv run ruff format --check
 ```
 
 Ruff sorts imports into standard-library, third-party, and local groups and
-requires absolute imports rooted at `pixi`. Preserve optional dependency imports
-at their existing execution boundaries.
+requires absolute imports rooted at `pixi`. Import optional dependencies only
+when selecting or using their integration, so unrelated features can run without them.
 
 The pre-commit hooks run Ruff's import checks, Ruff's formatter, and Pyright.
 Pyright checks the entire `src` and `examples` trees, with all optional
@@ -53,8 +56,15 @@ uv run python -m unittest discover -s tests -v
 
 ## Architecture
 
-Pixi keeps feature-oriented packages with explicit ports between application
-behavior and external systems:
+The bot receives a platform message, loads the conversation's history, requests
+a model response, and executes any actions or tools requested by the model.
+An **action** is an inline instruction such as `[SEND: Hello]`; a **tool** is a
+structured model request, such as a documentation search, whose result is sent
+back to the model.
+
+Python protocols in `pixi.interfaces` describe the behavior expected from
+platforms, models, and storage. Concrete implementations, called **adapters**,
+connect those protocols to external libraries and services:
 
 | Module                                                       | Responsibility                                                                                                |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -67,11 +77,18 @@ behavior and external systems:
 | `pixi.interfaces`                                            | Platform, model-stream, embedding-cache, message-storage, knowledge-storage, and knowledge-importer contracts |
 | `pixi.platform`, `pixi.apis`, `pixi.storage`, `pixi.caching` | Concrete external-system adapters                                                                             |
 
-Application code consumes ports; adapters implement them. Concrete adapter
-selection belongs in `bootstrap.py`, not in conversation or retrieval logic.
-`create_bot(...)` builds the production application. Construct `PixiClient`
-directly when supplying your own platform, model, message storage, and prompt
-resources. Neither the chat client nor the RAG client constructs an API client.
+Application code uses these protocols; adapters implement them.
+`pixi.bootstrap.create_bot(...)` selects adapters, loads prompt resources, and
+registers built-in actions, tools, and addons. To supply your own implementations,
+construct `PixiClient` with a platform provider, model provider, message storage,
+and prompt resources.
+
+CLI startup separates parser construction, logging, configuration validation and
+resolution, resource construction, and execution. `pixi.cli_storage` shares URL
+resolution and lifetime management for message, cache, and knowledge backends;
+offline knowledge imports run without starting the bot.
+
+### Platform and model adapters
 
 GIF search uses the `pixi.interfaces.gifs.GifSearchAPI` port: `search(query)`
 always returns an immutable `pixi.model.gifs.GifSearchResult` with a `results`
@@ -86,11 +103,11 @@ Provider-specific response parsing stays in the adapters.
 
 KLIPY maps `content_description` to `description`, preserves `tags`, and uses
 `itemurl` (or its short `url`) as `page_url`. GIPHY maps `alt_text` to `description`
-and its top-level `url` to `page_url`; its media URL remains
+and its top-level `url` to `page_url`; its media URL comes from
 `images.original.url`. GIPHY alt-text access can depend on API-key capabilities,
 and tags are not guaranteed by its standard GIF schema. Missing text metadata
-stays `None`, and missing tags become `()`; titles are not substituted for missing
-descriptions. Provider attribution remains available in the search result metadata.
+is `None`, and missing tags become `()`; titles are not substituted for missing
+descriptions. Provider attribution is available in the search result metadata.
 
 Telegram commands are excluded from the ordinary chat handler, so slash commands
 registered by bootstrap or addons work regardless of registration order. Unknown
@@ -107,22 +124,24 @@ their transport. OpenAI request serialization and stream translation live in
 
 User-message text is optional, with or without media. History serialization omits
 empty text, so adapters must accept `content=None` and render an empty user-text
-field rather than the literal text `"None"`. The user template still supplies its
+field rather than the literal text `"None"`. The user template supplies its
 label, timestamps when enabled, and any attached metadata. Raw-content requirements
 apply to system, assistant-text, and tool-result messages, not templated user messages.
 
-OpenAI response values and their JSON conversion live in `pixi.model.openai`.
-HTTP requests and SSE framing live in `pixi.apis.openai.transport`; client/resource
-classes live in `pixi.apis.openai.client`, and API errors in
-`pixi.apis.openai.exceptions`. The generic closable `AsyncStream` belongs to
-`pixi.async_utils`. Import these modules explicitly: the OpenAI package initializer
-has no implementation, re-exports, or third-party `openai.*` module registration.
+OpenAI HTTP requests and SSE decoding live in `pixi.apis.openai.transport`.
+The transport yields portable chat events directly, returns embedding vectors,
+and exposes async `list_models()` for startup verification. Model adapters build
+wire payloads.
+API errors live in `pixi.apis.openai.exceptions`; the package initializer has no
+implementation or re-exports.
 
 Tool calls execute serially in first-seen order as soon as their streamed arguments
 form complete JSON objects, while the model stream continues. Results are buffered
 until the source stream ends and tool execution finishes, then added to history
 before any continuation request. Calls with omitted arguments execute at the end
 of the stream.
+
+### Conversation history
 
 `AsyncChatbotInstance` and its per-bot `ChatbotInstanceRegistry` live in
 `pixi.bot.conversations`. `AsyncChatClient` receives a `MessagesStorage` adapter
@@ -147,12 +166,18 @@ message histories.
 Messages added outside a request are appended immediately. During a request,
 only its new messages are held in a task-local delta, including tool calls and
 results. Successful requests append that delta as one batch. Failed, cancelled,
-or explicitly closed requests discard it; `temporal=True` discards it even on
+or explicitly closed requests discard it; `discard_history=True` discards it even on
 success. Temporary requests do not persist their input prompt. Rollback therefore
 does not copy history or truncate messages committed by another concurrent request.
 Nested requests have independent deltas and merge into their parent only on
 success. Scheduled callbacks start detached from the originating request and
 read the current stored history rather than retaining an expired request delta.
+
+Each public turn entry point (`stream_ask`, `stream_completion`, or chatbot
+`stream_call`) owns one history scope and closes its private streaming helpers.
+Nested turns have independent deltas. The streaming pipeline passes text one
+character at a time; parsers recognize `<think>...</think>` regions and inline
+action instructions.
 
 `pixi.storage.messages.MessagesDiskStorage(directory)` uses the standard-library
 SQLite implementation and stores individual indexed message rows in
@@ -173,44 +198,66 @@ on exit; callers own storage injected into `create_bot` or `PixiClient`.
 Only message data is persisted by the message-storage backend, including metadata,
 timestamps, media hashes, tool calls/results, and channel IDs. Note visibility,
 scheduler state, agent context, and other runtime settings are not persisted.
-Note visibility resets after eviction. The former JSON-array snapshots, SQL
-snapshot table, and unversioned Redis keys are left untouched but are not read or
-automatically migrated; this is a message-storage-layout cutover.
+Note visibility resets after an idle conversation instance is unloaded.
 
-Persona and prompts intentionally remain files under `resources/`. Edit
-`persona.json`, `system.md`, or `examples.txt`, then restart the bot to apply the
-changes. Startup copies only missing default resources and never overwrites
-customized files; these resources are not moved into a database.
+Persona and prompts are files under `resources/`. Edit `persona.json`,
+`system.md`, or `examples.txt`, then restart the bot to apply the changes.
+Startup copies missing default resources and does not overwrite customized files.
 
 `pixi.storage.paths.PixiPaths` owns the default root (`DEFAULT_ROOT`) and all
 application paths. Both CLIs and `create_bot` use that root by default.
 `set_root(...)` changes the root used by subsequent accessor calls; paths are not
-cached at import time. Use `messages()` for message history rather than appending
-to `userdata()`, and `knowledge()` for the existing `datasets/` directory.
+cached at import time. `messages()` returns the message-history directory,
+`userdata()` its parent, and `knowledge()` the `datasets/` directory.
 Use `persona()`, `system_prompt()`, and `examples()` for default resource files.
-Accessors return `pathlib.Path`; open resources with `.open(encoding="utf-8")`
-instead of the removed `get_resource_path` and `open_resource` helpers.
+Accessors return `pathlib.Path`; open resources with `.open(encoding="utf-8")`.
 
-Agents receive storage and a history key when constructed:
+### Agents, models, and caches
+
+An agent uses a chat client for a specific task. `RetrievalAgent` receives
+reference text and asks a helper model to extract information relevant to a query.
+
+This example constructs an API-backed retrieval agent and saves its conversation
+under `./histories`. Set `OPENAI_API_KEY` in your environment or `.env`, and
+replace `YOUR_MODEL` with a model ID supplied by your API provider.
 
 ```python
+import asyncio
+import os
+
 from pixi.ai.agents import RetrievalAgent
+from pixi.apis.openai.adapter import OpenAIChatModel
+from pixi.cli import load_dotenv
+from pixi.model.config import OpenAIAuthConfig, OpenAILanguageModelConfig
 from pixi.storage.messages import MessagesDiskStorage
 
-storage = MessagesDiskStorage("./histories")
-agent = RetrievalAgent(
-    storage=storage, history_key="agent:research",
-    context=["Current reference material"], language_model_inference=provider, model=model,
-)
-await agent.execute_query("What is relevant?", temporal=False)
+
+async def main():
+    load_dotenv()
+    auth = OpenAIAuthConfig(
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        api_key=os.environ["OPENAI_API_KEY"],
+    )
+    model = OpenAILanguageModelConfig(id="YOUR_MODEL", max_context=8192)
+    agent = RetrievalAgent(
+        storage=MessagesDiskStorage("./histories"),
+        history_key="agent:research",
+        context=["Apples are fruit that grow on trees."],
+        language_model_inference=OpenAIChatModel(auth, model),
+        model=model,
+    )
+    answer = await agent.execute_query("Where do apples grow?", discard_history=False)
+    print(answer)
+
+
+asyncio.run(main())
 ```
 
-Constructing another client with the same adapter and key accesses the same
-history without a load step. Agent queries default to `temporal=True`; use
-`temporal=False` to persist the query and response. Agents created by the bot
-share its storage and receive distinct history keys unless one is supplied.
-The snapshot `save`/`load` and `get_messages`/`set_messages` APIs are removed.
-Storage errors propagate from the backend.
+Clients with the same storage adapter and history key access the same
+conversation. Agent queries default to `discard_history=True`, so the input and
+response are not saved; use `discard_history=False` to save them. Agents created
+by the bot share its storage and receive distinct history keys unless one is
+supplied. Storage errors propagate from the backend.
 
 For Python integrations, construct `CacheDiskStorage(directory)` from
 `pixi.caching.disk`, `CacheSQLStorage(url)` from `pixi.caching.sql`, or
@@ -221,8 +268,12 @@ Individual consumers can use `get_media_cache(storage=storage)` and
 Embedding backends implement the `EmbeddingModelInferenceProvder` protocol.
 Call `close()` on injected SQL/Redis storage when finished; the caller owns
 those connections. CLI-created connections are closed automatically.
-Disk remains the default under the configured root's `cache/` directory.
-Old disk cache layouts are not read or migrated.
+Disk caching uses the configured root's `cache/` directory by default.
+
+Media conversion is synchronous; embedding computation is asynchronous.
+Both bind storage operations to a namespace, which keeps their cache entries
+separate. `MediaCachePair` provides image/audio operations for the FFmpeg and
+PyAV providers. Each provider loads only its own codec dependencies.
 
 Construct `LlamaEmbeddingModel(config)`
 from `pixi.inference.embeddings` for native llama.cpp inference, and call its
@@ -243,11 +294,15 @@ Closing a partial chat stream releases its HTTP connection and reaps the local
 server. Applications that stop consuming a stream early must call its `aclose()`
 (for example, through `contextlib.aclosing`).
 
-SQL/Redis caching still requires FFmpeg or the optional `media` install extra
-for image/audio conversion.
+SQL and Redis store converted media; image/audio processing also needs FFmpeg or
+the optional `media` install extra.
 
-Chat history contains portable `ChatMessageMeta` values from `pixi.model.chat`.
-Live platform messages belong to action/tool contexts, not saved history.
+### Messages and invocation contexts
+
+Chat history contains portable `ChatMessage` values and `ToolCall` records from
+`pixi.model.chat`. A message's `timestamp` field records its creation time as
+Unix seconds. Its serialized dictionary uses the key `time`.
+Live platform messages belong to invocation contexts, not saved history.
 `context.reference_message` is conversation data;
 `context.platform_message` is the current reply/reaction handle. Scheduled
 actions retain their original execution context. Cancelling a schedule frees
@@ -256,10 +311,10 @@ scheduled with the same ID.
 `AsyncScheduler.aclose()` also waits for cleanup of previously cancelled tasks,
 even after their IDs have been freed or reused.
 
-Imports use their owning modules: `pixi.ai.chatting.client.AsyncChatClient`,
+Import classes from their defining modules, such as
+`pixi.ai.chatting.client.AsyncChatClient`,
 `pixi.bot.conversations.AsyncChatbotInstance`, and
-`pixi.interfaces.platform.PlatformProvider`. Package initializers do not retain
-compatibility aliases for the former locations.
+`pixi.interfaces.platform.PlatformProvider`.
 
 Run the storage and cache regression checks (no external API calls or model downloads):
 
@@ -281,14 +336,23 @@ PIXI_TEST_REDIS_URL=redis://localhost:6379/15 PYTHONPATH=src python -m unittest 
 implementing `AsyncAction` and `AsyncTool` from
 `pixi.ai.chatting.callbacks`.
 
+Register extensions on an initialized `PixiClient` to make them available to
+conversations. The example below defines an action that sends uppercase text and
+a tool that maintains a counter. It assumes `client` is the bot instance created
+by your application.
+
+
 Actions provide `name`, `field_name`, `description`, `is_visible`,
 `should_register(instance)`, and `async call(context, value)`. The value is a
 string, or `None` when the model omits it. Tools provide `name`, `description`,
 `parameters` (an OpenAI-compatible JSON schema, or `None`),
-`should_register(instance)`, and `async call(context, **arguments)`. Define metadata on the class.
+`should_register(instance)`, and `async call(context, **arguments)`. Use ordinary
+instance methods, class attributes for constant metadata, and constructor
+arguments for dependencies. Built-in knowledge/wiki tools are module-level
+classes constructed with their client and storage/API dependencies.
 
 ```python
-from pixi.ai.chatting.callbacks import ActionContext, ToolContext
+from pixi.ai.chatting.callbacks import InvocationContext
 
 
 class ShoutAction:
@@ -297,12 +361,10 @@ class ShoutAction:
     description = "Send an uppercase message in the current chat."
     is_visible = True
 
-    @classmethod
-    def should_register(cls, instance) -> bool:
+    def should_register(self, instance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         if value and context.platform_message is not None:
             await context.platform_message.send(value.upper())
 
@@ -317,16 +379,15 @@ class CounterTool:
         "additionalProperties": False,
     }
 
-    total = 0
+    def __init__(self):
+        self.total = 0
 
-    @classmethod
-    def should_register(cls, instance) -> bool:
+    def should_register(self, instance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ToolContext, *, amount: int) -> int:
-        cls.total += amount
-        return cls.total
+    async def call(self, context: InvocationContext, *, amount: int) -> int:
+        self.total += amount
+        return self.total
 
 
 # Given an initialized PixiClient:
@@ -337,10 +398,14 @@ client.register_tool(CounterTool())
 Client registrations apply to subsequently created chats. Each chat calls
 `should_register(self)` when it is constructed; return `False` to exclude an
 action or tool from that chat. Use instance attributes for per-bot state and
-`context.parent_instance` for chat-specific state; classmethod-based actions and
-tools are also supported. Both contexts expose `reference_message` and an optional
-live `platform_message`. Invisible actions (`is_visible = False`) do not count as a
-visible response. Tool registration is ignored when tool calling is disabled.
+`context.parent_instance` for chat-specific state. Both receive the same frozen
+`InvocationContext`, exposing `reference_message` and an optional live
+`platform_message`. Each action consumption receives its own `ActionOutcome`;
+`has_visible_actions` records whether a visible action completed, including when
+a later stream failure prevents history commit. Scheduled actions use public
+`invoke_action()` without mutating another turn's outcome. Invisible actions
+(`is_visible = False`) do not count as a visible response. Tool registration is
+ignored when tool calling is disabled.
 
 ## Knowledge Importers
 

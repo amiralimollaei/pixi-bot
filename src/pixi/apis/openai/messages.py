@@ -6,51 +6,47 @@ import time
 from typing import Any, Protocol
 
 from pixi.caching import InMemoryCache
-from pixi.model.chat import ChatMessageMeta, ToolCallMeta
+from pixi.model.chat import ChatMessage, ToolCall
 from pixi.model.enums import ChatRole
-from pixi.utils import clean_dict, exists, format_time_ago
+from pixi.utils import clean_dict, format_time_ago
 
 
 class MediaReader(Protocol):
     def load_cache(self, hash: bytes) -> InMemoryCache | None: ...
 
 
-def _validate_message(meta: ChatMessageMeta) -> None:
+def _validate_message(meta: ChatMessage) -> None:
     if meta.role != ChatRole.USER:
-        assert not exists(meta.metadata), "Metadata is only supported on user messages"
-        assert not exists(meta.image_hashes), (
-            "Images are only supported on user messages"
-        )
-        assert not exists(meta.audio_hashes), "Audio is only supported on user messages"
+        assert not meta.metadata, "Metadata is only supported on user messages"
+        assert not meta.image_hashes, "Images are only supported on user messages"
+        assert not meta.audio_hashes, "Audio is only supported on user messages"
     if meta.role != ChatRole.TOOL:
-        assert not exists(meta.tool_call_id), (
-            "tool_call_id is only supported on tool results"
-        )
+        assert not meta.tool_call_id, "tool_call_id is only supported on tool results"
     match meta.role:
         case ChatRole.SYSTEM | ChatRole.USER:
             if meta.role == ChatRole.SYSTEM:
-                assert exists(meta.content, True), "Message content is required"
-            assert not exists(meta.tool_calls), (
+                assert meta.content is not None, "Message content is required"
+            assert not meta.tool_calls, (
                 "Tool calls are only supported on assistant messages"
             )
         case ChatRole.ASSISTANT:
-            if exists(meta.tool_calls):
+            if meta.tool_calls:
                 assert meta.content is None, (
                     "Tool-call messages cannot also have text content"
                 )
-                assert all(
-                    isinstance(call, ToolCallMeta) for call in meta.tool_calls
-                ), "Invalid tool call"
+                assert all(isinstance(call, ToolCall) for call in meta.tool_calls), (
+                    "Invalid tool call"
+                )
             else:
-                assert exists(meta.content, True), "Assistant content is required"
+                assert meta.content is not None, "Assistant content is required"
         case ChatRole.TOOL:
-            assert exists(meta.content, True), "Tool result content is required"
+            assert meta.content is not None, "Tool result content is required"
         case _:
             raise ValueError(f"Invalid role {meta.role!r}.")
 
 
 def serialize_message(
-    meta: ChatMessageMeta,
+    meta: ChatMessage,
     *,
     timestamps: bool = True,
     media_cache: MediaReader | None = None,
@@ -60,9 +56,11 @@ def serialize_message(
     if meta.role == ChatRole.USER:
         content = [f"User: {meta.content or ''}"]
         if timestamps:
-            stamp = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime(meta.time))
+            stamp = time.strftime(
+                "%Y-%m-%d %H:%M:%S %Z", time.localtime(meta.timestamp)
+            )
             content.append(
-                f"Sent At: {stamp} ({format_time_ago(time.time() - meta.time)})"
+                f"Sent At: {stamp} ({format_time_ago(time.time() - meta.timestamp)})"
             )
         if meta.metadata is not None:
             content.extend(

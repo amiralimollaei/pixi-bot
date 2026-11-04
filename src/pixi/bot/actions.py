@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pixi.ai.chatting.callbacks import ActionContext
+from pixi.ai.chatting.callbacks import InvocationContext
 from pixi.utils import format_time_later
 
 if TYPE_CHECKING:
@@ -28,25 +28,23 @@ class ScheduleAction:
     is_visible = True
     logger = logging.getLogger("ScheduleAction")
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         if not value:
             return
         if context.reference_message is None:
-            cls.logger.error("reference_message is None")
+            self.logger.error("reference_message is None")
             return
         if context.parent_instance is None:
-            cls.logger.error("parent_instance is None")
+            self.logger.error("parent_instance is None")
             return
 
         try:
             schedule_data = ScheduleData(**json.loads(value))
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            cls.logger.exception(f"Invalid schedule JSON: {e}")
+            self.logger.exception(f"Invalid schedule JSON: {e}")
             return
 
         if (
@@ -55,7 +53,7 @@ class ScheduleAction:
             or schedule_data.delay is None
             or not schedule_data.id
         ):
-            cls.logger.error(
+            self.logger.error(
                 "Schedule JSON must include 'action', 'value', 'delay', and 'id' fields."
             )
             return
@@ -64,14 +62,14 @@ class ScheduleAction:
             not isinstance(schedule_data.delay, (int, float))
             or schedule_data.delay <= 0
         ):
-            cls.logger.error("'delay' must be a positive number.")
+            self.logger.error("'delay' must be a positive number.")
             return
 
         action = context.parent_instance.action_manager.actions.get(
             schedule_data.action.strip().lower()
         )
         if action is None:
-            cls.logger.error(
+            self.logger.error(
                 f'Cannot schedule unknown action "{schedule_data.action}".'
             )
             return
@@ -83,11 +81,11 @@ class ScheduleAction:
             id=schedule_data.id,
             delay=schedule_data.delay,
         ):
-            cls.logger.info(
+            self.logger.info(
                 f"scheduled action for {format_time_later(schedule_data.delay)}: {value}"
             )
         else:
-            cls.logger.info(f"schedule action failed: {value}")
+            self.logger.info(f"schedule action failed: {value}")
 
 
 class CancelScheduleAction:
@@ -97,26 +95,24 @@ class CancelScheduleAction:
     is_visible = True
     logger = logging.getLogger("CancelScheduleAction")
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         if not value or context.reference_message is None:
             return
 
         schedule_id = value.strip()
         if not schedule_id:
-            cls.logger.error("Model did not provide a schedule id to cancel.")
+            self.logger.error("Model did not provide a schedule id to cancel.")
             return
 
         if context.parent_instance and context.parent_instance.cancel_schedule(
             schedule_id
         ):
-            cls.logger.info(f"Cancelled the schedule with id '{schedule_id}'.")
+            self.logger.info(f"Cancelled the schedule with id '{schedule_id}'.")
         else:
-            cls.logger.info(f"No schedule found with id '{schedule_id}'.")
+            self.logger.info(f"No schedule found with id '{schedule_id}'.")
 
 
 class SendAction:
@@ -125,12 +121,10 @@ class SendAction:
     description = "sends a message in the current chat"
     is_visible = True
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         if not value or context.platform_message is None:
             return
         await context.platform_message.send(value)
@@ -148,7 +142,7 @@ class SendGifAction:
     def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return self.gif_api is not None
 
-    async def call(self, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         message = context.platform_message
         if not value or message is None:
             return
@@ -165,12 +159,10 @@ class NoteAction:
     description = "annotates your thoughts, the user will not see these, it is completey private and only available to you, you must do this before each message, thoughts should be at least 50 words"
     is_visible = False
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         message = context.platform_message
         if not value or message is None:
             return
@@ -186,12 +178,10 @@ class ReactAction:
     is_visible = True
     logger = logging.getLogger("ReactAction")
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None:
+    async def call(self, context: InvocationContext, value: str | None) -> None:
         if not value or context.platform_message is None:
             return
         message = context.platform_message
@@ -199,6 +189,6 @@ class ReactAction:
         try:
             await message.add_reaction(value)
         except Exception:
-            cls.logger.exception(
+            self.logger.exception(
                 f"Failed to add reaction {value} to message {message.id}"
             )

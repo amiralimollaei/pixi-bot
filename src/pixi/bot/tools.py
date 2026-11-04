@@ -6,7 +6,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from pixi.ai.agents import RetrievalAgent
-from pixi.ai.chatting.callbacks import AsyncTool, ToolContext
+from pixi.ai.chatting.callbacks import InvocationContext
 
 if TYPE_CHECKING:
     from pixi.apis.wikimedia import AsyncWikimediaAPI
@@ -15,18 +15,15 @@ if TYPE_CHECKING:
     from pixi.storage.knowledge import KnowledgeBase
 
 
-def create_knowledge_tools(
-    client: PixiClient,
-    knowledge_name: str,
-    knowledge_base: KnowledgeBase,
-) -> tuple[AsyncTool, AsyncTool]:
-    class SearchKnowledgeTool:
-        name = f"search_{knowledge_name}_knowledge"
-        description = (
+class SearchKnowledgeTool:
+    def __init__(self, knowledge_name: str, knowledge_base: KnowledgeBase):
+        self.knowledge_base = knowledge_base
+        self.name = f"search_{knowledge_name}_knowledge"
+        self.description = (
             f"Searches the {knowledge_name} knowledge base by keyword and returns document metadata. "
             "you may use this function multiple times to find the specific information you're looking for."
         )
-        parameters = dict(
+        self.parameters = dict(
             type="object",
             properties=dict(
                 keyword=dict(
@@ -38,18 +35,22 @@ def create_knowledge_tools(
             additionalProperties=False,
         )
 
-        @classmethod
-        def should_register(cls, instance: AsyncChatbotInstance) -> bool:
-            return True
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
+        return True
 
-        @classmethod
-        async def call(cls, context: ToolContext, *, keyword: str):
-            return [asdict(match) for match in await knowledge_base.search(keyword)]
+    async def call(self, context: InvocationContext, *, keyword: str):
+        return [asdict(match) for match in await self.knowledge_base.search(keyword)]
 
-    class QueryKnowledgeTool:
-        name = f"query_{knowledge_name}_knowledge"
-        description = f"Retrieve information from the {knowledge_name} knowledge base based on a query."
-        parameters = dict(
+
+class QueryKnowledgeTool:
+    def __init__(
+        self, client: PixiClient, knowledge_name: str, knowledge_base: KnowledgeBase
+    ):
+        self.client = client
+        self.knowledge_base = knowledge_base
+        self.name = f"query_{knowledge_name}_knowledge"
+        self.description = f"Retrieve information from the {knowledge_name} knowledge base based on a query."
+        self.parameters = dict(
             type="object",
             properties=dict(
                 query=dict(
@@ -65,63 +66,55 @@ def create_knowledge_tools(
             additionalProperties=False,
         )
 
-        @classmethod
-        def should_register(cls, instance: AsyncChatbotInstance) -> bool:
-            return True
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
+        return True
 
-        @classmethod
-        async def get_document_as_str(cls, entry_id: int) -> str:
-            document = await knowledge_base.get_document(entry_id)
-            return json.dumps(asdict(document), ensure_ascii=False, indent=3)
+    async def get_document_as_str(self, entry_id: int) -> str:
+        document = await self.knowledge_base.get_document(entry_id)
+        return json.dumps(asdict(document), ensure_ascii=False, indent=3)
 
-        @classmethod
-        async def call(cls, context: ToolContext, *, query: str, ids: str | None):
-            if ids is None:
-                return "no result: no id specified"
+    async def call(self, context: InvocationContext, *, query: str, ids: str | None):
+        if ids is None:
+            return "no result: no id specified"
 
-            if client.embedding_model:
-                rag = client.create_rag_client()
-                entries = await asyncio.gather(
+        if self.client.embedding_model:
+            rag = self.client.create_rag_client()
+            entries = await asyncio.gather(
+                *[
+                    self.knowledge_base.get_document(int(entry_id.strip()))
+                    for entry_id in ids.split(",")
+                ]
+            )
+            for entry in entries:
+                await rag.add_document(entry.content, entry.title, entry.id)
+            query_embed = await rag.embed(query)
+            matches = [
+                asdict(doc_match)
+                for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
+            ]
+            return matches
+        else:
+            agent = self.client.create_agent_instance(
+                agent_cls=RetrievalAgent,
+                context=await asyncio.gather(
                     *[
-                        knowledge_base.get_document(int(entry_id.strip()))
+                        self.get_document_as_str(int(entry_id.strip()))
                         for entry_id in ids.split(",")
                     ]
-                )
-                for entry in entries:
-                    await rag.add_document(entry.content, entry.title, entry.id)
-                query_embed = await rag.embed(query)
-                matches = [
-                    asdict(doc_match)
-                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
-                ]
-                return matches
-            else:
-                agent = client.create_agent_instance(
-                    agent_cls=RetrievalAgent,
-                    context=await asyncio.gather(
-                        *[
-                            cls.get_document_as_str(int(entry_id.strip()))
-                            for entry_id in ids.split(",")
-                        ]
-                    ),
-                )
-                return await agent.execute_query(query)
-
-    return SearchKnowledgeTool(), QueryKnowledgeTool()
+                ),
+            )
+            return await agent.execute_query(query)
 
 
-def create_mediawiki_tools(
-    client: PixiClient,
-    wiki_name: str,
-    wiki_api: AsyncWikimediaAPI,
-) -> tuple[AsyncTool, AsyncTool]:
-    class SearchWikiTool:
-        name = f"search_wiki_{wiki_name}"
-        description = (
+class SearchWikiTool:
+    def __init__(self, wiki_name: str, wiki_api: AsyncWikimediaAPI):
+        self.wiki_api = wiki_api
+        self.name = f"search_wiki_{wiki_name}"
+        self.description = (
             f"Searches the {wiki_name} wiki based on a keyword. returns the page URL and Title, "
             "and optionally the description of the page. you may use this function multiple times to find the specific page you're looking for."
         )
-        parameters = dict(
+        self.parameters = dict(
             type="object",
             properties=dict(
                 keyword=dict(
@@ -133,21 +126,24 @@ def create_mediawiki_tools(
             additionalProperties=False,
         )
 
-        @classmethod
-        def should_register(cls, instance: AsyncChatbotInstance) -> bool:
-            return True
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
+        return True
 
-        @classmethod
-        async def call(cls, context: ToolContext, *, keyword: str):
-            return [
-                asdict(search_result)
-                for search_result in await wiki_api.search(keyword)
-            ]
+    async def call(self, context: InvocationContext, *, keyword: str):
+        return [
+            asdict(search_result)
+            for search_result in await self.wiki_api.search(keyword)
+        ]
 
-    class QueryWikiContentTool:
-        name = f"query_wiki_content_{wiki_name}"
-        description = "fetch wiki content and retrieve relevent information from them based on a query."
-        parameters = dict(
+
+class QueryWikiContentTool:
+    description = "fetch wiki content and retrieve relevent information from them based on a query."
+
+    def __init__(self, client: PixiClient, wiki_name: str, wiki_api: AsyncWikimediaAPI):
+        self.client = client
+        self.wiki_api = wiki_api
+        self.name = f"query_wiki_content_{wiki_name}"
+        self.parameters = dict(
             type="object",
             properties=dict(
                 query=dict(
@@ -163,46 +159,41 @@ def create_mediawiki_tools(
             additionalProperties=False,
         )
 
-        @classmethod
-        def should_register(cls, instance: AsyncChatbotInstance) -> bool:
-            return True
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
+        return True
 
-        @classmethod
-        async def fetch_wiki_page(cls, title: str) -> tuple[str, str]:
-            page_content, title = await wiki_api.get_plaintext(title.strip())
-            return page_content, title
+    async def fetch_wiki_page(self, title: str) -> tuple[str, str]:
+        page_content, title = await self.wiki_api.get_plaintext(title.strip())
+        return page_content, title
 
-        @classmethod
-        async def call(cls, context: ToolContext, *, titles: str, query: str):
-            if not titles:
-                return "no result: no page specified"
+    async def call(self, context: InvocationContext, *, titles: str, query: str):
+        if not titles:
+            return "no result: no page specified"
 
-            _titles = [t for t in titles.split("|") if t]
-            if not _titles:
-                return "no result: no page specified"
+        _titles = [t for t in titles.split("|") if t]
+        if not _titles:
+            return "no result: no page specified"
 
-            page_context = await asyncio.gather(
-                *[cls.fetch_wiki_page(title) for title in _titles]
+        page_context = await asyncio.gather(
+            *[self.fetch_wiki_page(title) for title in _titles]
+        )
+
+        if self.client.embedding_model:
+            rag = self.client.create_rag_client()
+            for i, (page, title) in enumerate(page_context):
+                await rag.add_document(page, title, i)
+            query_embed = await rag.embed(query)
+            matches = [
+                asdict(doc_match)
+                for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
+            ]
+            return matches
+        else:
+            agent = self.client.create_agent_instance(
+                agent_cls=RetrievalAgent,
+                context=[page for page, title in page_context],
             )
-
-            if client.embedding_model:
-                rag = client.create_rag_client()
-                for i, (page, title) in enumerate(page_context):
-                    await rag.add_document(page, title, i)
-                query_embed = await rag.embed(query)
-                matches = [
-                    asdict(doc_match)
-                    for doc_match in rag.search(query_embed)  # pyright: ignore[reportArgumentType]
-                ]
-                return matches
-            else:
-                agent = client.create_agent_instance(
-                    agent_cls=RetrievalAgent,
-                    context=[page for page, title in page_context],
-                )
-                return await agent.execute_query(query)
-
-    return SearchWikiTool(), QueryWikiContentTool()
+            return await agent.execute_query(query)
 
 
 class FetchChannelHistoryTool:
@@ -224,12 +215,10 @@ class FetchChannelHistoryTool:
         additionalProperties=False,
     )
 
-    @classmethod
-    def should_register(cls, instance: AsyncChatbotInstance) -> bool:
+    def should_register(self, instance: AsyncChatbotInstance) -> bool:
         return True
 
-    @classmethod
-    async def call(cls, context: ToolContext, *, channel_id: str, n: int):
+    async def call(self, context: InvocationContext, *, channel_id: str, n: int):
         assert context.parent_instance is not None
         assert context.parent_instance.bot is not None
         return (

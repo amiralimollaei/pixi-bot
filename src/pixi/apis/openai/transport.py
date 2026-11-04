@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncGenerator
 
 from pixi.apis.http import get_http_client_provider
 from pixi.apis.openai.exceptions import (
@@ -8,7 +8,13 @@ from pixi.apis.openai.exceptions import (
     APIError,
     AuthenticationError,
 )
-from pixi.model.openai import ChatCompletionChunk, EmbeddingResponse, ModelList
+from pixi.interfaces.models import (
+    ChatEvent,
+    ChatFinished,
+    ContentDelta,
+    ReasoningDelta,
+    ToolCallDelta,
+)
 
 HTTPClient = get_http_client_provider()
 
@@ -29,7 +35,7 @@ async def stream_chat_completions(
     base_url: str,
     api_key: str,
     payload: dict[str, Any],
-) -> AsyncIterator[ChatCompletionChunk]:
+) -> AsyncGenerator[ChatEvent, None]:
     headers = _build_headers(api_key)
     try:
         async with HTTPClient(base_url.rstrip("/")) as session:
@@ -51,8 +57,27 @@ async def stream_chat_completions(
                             return
                         try:
                             event = json.loads(data)
-                            if event.get("choices"):
-                                yield ChatCompletionChunk.from_dict(event)
+                            choices = event.get("choices")
+                            if not choices:
+                                continue
+                            choice = choices[0]
+                            delta = choice.get("delta", {})
+                            if delta.get("content"):
+                                yield ContentDelta(delta["content"])
+                            if delta.get("reasoning_content"):
+                                yield ReasoningDelta(delta["reasoning_content"])
+                            for call in delta.get("tool_calls", []):
+                                index = call.get("index")
+                                assert index is not None, "Tool call index is missing"
+                                function = call.get("function") or {}
+                                yield ToolCallDelta(
+                                    index=index,
+                                    id=call.get("id"),
+                                    name=function.get("name"),
+                                    arguments=function.get("arguments"),
+                                )
+                            if choice.get("finish_reason"):
+                                yield ChatFinished(choice["finish_reason"])
                         except json.JSONDecodeError:
                             logging.debug("Failed to parse SSE data: %s", data)
     except ConnectionError as error:
@@ -63,7 +88,7 @@ async def create_embeddings(
     base_url: str,
     api_key: str,
     payload: dict[str, Any],
-) -> EmbeddingResponse:
+) -> list[list[float]]:
     try:
         async with HTTPClient(base_url) as session:
             async with session.post(
@@ -71,14 +96,16 @@ async def create_embeddings(
             ) as response:
                 if response.status != 200:
                     _handle_response_error(response.status, await response.text())
-                return EmbeddingResponse.from_dict(await response.json())
+                data = await response.json()
+                return [item.get("embedding", []) for item in data.get("data", [])]
     except ConnectionError as error:
         raise APIConnectionError(f"Connection error: {error}") from error
 
 
-async def list_models(base_url: str, api_key: str) -> ModelList:
+async def list_models(base_url: str, api_key: str) -> list[str]:
     async with HTTPClient(base_url) as session:
         async with session.get("/models", headers=_build_headers(api_key)) as response:
             if response.status != 200:
                 _handle_response_error(response.status, await response.text())
-            return ModelList.from_dict(await response.json())
+            data = await response.json()
+            return [item.get("id", "") for item in data.get("data", [])]

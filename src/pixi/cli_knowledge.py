@@ -1,9 +1,9 @@
 """Knowledge storage options shared by bot startup and offline imports."""
 
-import os
 from argparse import ArgumentParser, Namespace
 from contextlib import ExitStack
 
+from pixi.cli_storage import resolve_storage_url
 from pixi.interfaces.knowledge import KnowledgeStorage
 from pixi.storage.paths import PixiPaths
 
@@ -28,25 +28,16 @@ def add_storage_arguments(parser: ArgumentParser) -> None:
 
 
 def resolve_storage_options(args: Namespace, parser: ArgumentParser) -> None:
-    if args.knowledge_storage_url is None:
-        if args.knowledge_storage == "sql":
-            args.knowledge_storage_url = os.getenv("DATABASE_URL")
-        elif args.knowledge_storage == "redis":
-            args.knowledge_storage_url = os.getenv("REDIS_URL")
-    if args.knowledge_storage == "disk":
-        if args.knowledge_storage_url is not None:
-            parser.error(
-                "--knowledge-storage-url requires --knowledge-storage sql or redis."
-            )
-    elif not args.knowledge_storage_url:
-        parser.error(
-            "SQL/Redis knowledge storage requires --knowledge-storage-url or DATABASE_URL/REDIS_URL."
-        )
-    if (
-        args.knowledge_redis_key_prefix is not None
-        and args.knowledge_storage != "redis"
-    ):
-        parser.error("--knowledge-redis-key-prefix requires --knowledge-storage redis.")
+    args.knowledge_storage_url = resolve_storage_url(
+        args.knowledge_storage,
+        args.knowledge_storage_url,
+        args.knowledge_redis_key_prefix,
+        parser,
+        storage_option="--knowledge-storage",
+        url_option="--knowledge-storage-url",
+        prefix_option="--knowledge-redis-key-prefix",
+        missing_message="SQL/Redis knowledge storage requires --knowledge-storage-url or DATABASE_URL/REDIS_URL.",
+    )
 
 
 def open_storage(

@@ -1,18 +1,25 @@
 # Railway Deployment
 
-Railway auto-detects the root `Dockerfile`. Select dependencies with `PIXI_EXTRAS`
-and choose the runtime platform with `PIXI_PLATFORM` in the bot service's
-**Variables** tab:
+Pixi is a bot process that connects to Discord or Telegram and requests responses
+from a language model. This guide deploys it on [Railway](https://railway.com/)
+using an OpenAI-compatible model API. You need a Railway account, a copy of this
+repository, a platform bot token, and your model provider's API credentials.
+See the [README](README.md#getting-started) for creating a bot account and choosing
+a model.
+
+## Deploy a bot service
+
+Create a Railway service from this repository. Railway detects the root
+`Dockerfile` and builds the bot image. In the service's **Variables** tab,
+`PIXI_EXTRAS` selects the optional Python dependencies installed during the build;
+`PIXI_PLATFORM` selects the platform when the container starts:
 
 | Bot image | `PIXI_EXTRAS` | `PIXI_PLATFORM` |
 | --- | --- | --- |
-| Existing generic image | Unset (installs all extras) | `telegram` or `discord` |
+| Both platform SDKs and all optional integrations | Unset (installs all extras) | `telegram` or `discord` |
 | Telegram only | `telegram kiwix sql redis` | `telegram` |
 | Discord only | `discord kiwix sql redis` | `discord` |
 
-The separate platform Dockerfiles have been removed since version 1.5.0. If your
-service previously selected one, unset `RAILWAY_DOCKERFILE_PATH` and set both
-variables above instead.
 For a Redis-only image, use `telegram redis` or `discord redis` as described in
 [Redis-only deployment](#redis-only-deployment).
 
@@ -27,7 +34,7 @@ repository and branch**, each with its own extras, platform setting, variables,
 and bot token. These are outbound bot workers; they do not need a public domain
 or HTTP port.
 
-The shared Dockerfile does not launch additional services automatically. Railway
+The Dockerfile builds one bot container; databases are separate services. Railway
 can import a Compose file through the project canvas, but it maps entries to
 Railway services rather than running `docker compose` on deployments. The
 repository's Compose profiles are for local use; configure each Railway service
@@ -37,10 +44,10 @@ and [Compose deployment guide](https://docs.railway.com/guides/docker-compose).
 
 ## Logs
 
-Railway already timestamps log entries. Append `--no-log-timestamps` to your
-existing `PIXI_EXTRA_ARGS` value to omit Pixi's timestamp while preserving the
-severity, logger name, and message. Timestamps remain enabled by default;
-`--log-timestamps` explicitly enables them again.
+Railway timestamps log entries. To omit Pixi's own timestamp, add
+`--no-log-timestamps` to `PIXI_EXTRA_ARGS`, alongside any other CLI arguments.
+Severity, logger name, and message are included regardless of this setting.
+Pixi timestamps are enabled by default; `--log-timestamps` enables them explicitly.
 
 ## Redis-only deployment
 
@@ -62,8 +69,8 @@ severity, logger name, and message. Timestamps remain enabled by default;
 
    For Discord, change both platform values and use `DISCORD_BOT_TOKEN` instead.
    Set `OPENAI_BASE_URL` too if your API provider uses a custom endpoint.
-   Railway passes declared Dockerfile `ARG` variables into the build, so
-   `PIXI_EXTRAS` applies without changing the shared default.
+   Railway passes `PIXI_EXTRAS` to the Dockerfile as a build argument, selecting
+   the dependencies installed in the image.
 3. Leave the start command unset to use the image's `start.sh`. Run one bot
    replica as a worker; it does not serve an HTTP health endpoint. Rebuild and
    redeploy after changing `PIXI_EXTRAS`.
@@ -73,16 +80,19 @@ deployment cannot compete with an existing bot or write its data. If sharing a
 Redis database, set distinct `--redis-key-prefix`, `--cache-redis-key-prefix`,
 and `--knowledge-redis-key-prefix` values in `PIXI_EXTRA_ARGS`.
 
-Redis persists the selected message, cache, and knowledge data, not customized
-resource files, addons, or all runtime state. Persist the Pixi directory
-separately if you customize those files. Keep secrets in Railway variables,
-not in build arguments or committed configuration.
+Redis stores message history, caches, and knowledge bases when you select it for
+those backends. Persona files, prompts, and addons live under `~/.pixi/` by
+default, or the path selected by `--pixi-directory`. Mount a persistent volume
+at that directory to keep customized files across deployments. Schedules and
+other in-memory conversation settings are not persisted.
+Keep secrets in Railway variables, not build arguments or committed configuration.
 
 ## SQL and Redis
 
-Use Railway's existing SQL/Redis services; Pixi does not provision containers
-or require a Compose stack. In the bot service's Railway variables, reference
-the database service's connection URL as `DATABASE_URL` or `REDIS_URL`.
+Add a PostgreSQL or Redis service to your Railway project if you want external
+storage. Pixi connects to the service; it does not provision a database.
+In the bot service's variables, reference the database service's connection URL
+as `DATABASE_URL` or `REDIS_URL`.
 Use the private URL containing its `*.railway.internal` hostname and internal
 port, not the public TCP proxy. Connection URLs carry authentication and any
 SSL options; no application-specific DNS configuration is needed.

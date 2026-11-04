@@ -6,7 +6,7 @@ import struct
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Awaitable, Optional, Protocol, Self, TypeVar
+from typing import TYPE_CHECKING, Optional, Protocol, Self
 
 from pixi.interfaces.caching import CacheStorage
 
@@ -92,37 +92,6 @@ class InMemoryCache:
         return f"data:{mime_type};base64,{self.to_base64()}"
 
 
-CacheInput = TypeVar("CacheInput", bytes, str, contravariant=True)
-
-
-class CacheSystem(Protocol[CacheInput]):
-    """Compute and persist cache values from a source value."""
-
-    @staticmethod
-    def compute_hash(source: CacheInput, /) -> bytes: ...
-
-    def compute_cache(
-        self,
-        source: CacheInput,
-        /,
-        **metadata,
-    ) -> InMemoryCache | Awaitable[InMemoryCache]: ...
-
-    def compute_if_absent(
-        self,
-        source: CacheInput | None = None,
-        /,
-        hash: bytes | None = None,
-        **metadata,
-    ) -> bytes | Awaitable[bytes]: ...
-
-    def write(self, cache: InMemoryCache, hash: bytes) -> None: ...
-
-    def exists(self, hash: bytes) -> bool: ...
-
-    def read(self, hash: bytes) -> InMemoryCache | None: ...
-
-
 class StoredCacheSystem:
     """Bind cache computation to a namespace in an injected storage backend."""
 
@@ -145,7 +114,7 @@ class StoredCacheSystem:
         return self.storage.read(hash, namespace=self.namespace)
 
 
-class MediaCache(StoredCacheSystem, CacheSystem[bytes], ABC):
+class MediaCache(StoredCacheSystem, ABC):
     """Media conversion layered on the common cache storage contract."""
 
     @abstractmethod
@@ -188,6 +157,33 @@ class MediaCacheProvider(Protocol):
     ) -> bytes: ...
 
     def load_cache(self, hash: bytes) -> InMemoryCache | None: ...
+
+
+class MediaCachePair:
+    """Expose image and audio conversions through one media provider."""
+
+    def __init__(self, image_cache: MediaCache, audio_cache: MediaCache):
+        self.image_cache = image_cache
+        self.audio_cache = audio_cache
+
+    def cache_image(
+        self,
+        data_bytes: bytes | None = None,
+        hash_value: bytes | None = None,
+        **metadata,
+    ) -> bytes:
+        return self.image_cache.compute_if_absent(data_bytes, hash_value, **metadata)
+
+    def cache_audio(
+        self,
+        data_bytes: bytes | None = None,
+        hash_value: bytes | None = None,
+        **metadata,
+    ) -> bytes:
+        return self.audio_cache.compute_if_absent(data_bytes, hash_value, **metadata)
+
+    def load_cache(self, hash: bytes) -> InMemoryCache | None:
+        return self.image_cache.read(hash)
 
 
 def get_media_cache(*, storage: CacheStorage | None = None) -> MediaCacheProvider:

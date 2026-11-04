@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 
-from pixi.caching import CacheSystem, InMemoryCache, StoredCacheSystem
+from pixi.caching import InMemoryCache, StoredCacheSystem
 from pixi.interfaces.caching import CacheStorage
 from pixi.interfaces.models import EmbeddingModelInferenceProvder
 
 
-class EmbeddingCache(StoredCacheSystem, CacheSystem[str]):
+class EmbeddingCache(StoredCacheSystem):
     """Persist text embeddings in a namespace specific to the embedding model."""
 
     def __init__(

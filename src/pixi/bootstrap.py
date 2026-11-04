@@ -60,20 +60,19 @@ def create_platform_provider(
 
 async def verify_models(auth: OpenAIAuthConfig, models: dict[str, str]) -> None:
     """Verify the configured OpenAI-compatible backend before platform startup."""
-    from pixi.apis.openai.client import OpenAI
     from pixi.apis.openai.exceptions import (
         APIConnectionError,
         APIError,
         AuthenticationError,
     )
+    from pixi.apis.openai.transport import list_models
 
     logger = logging.getLogger(__name__)
     logger.info(
         "Verifying API connectivity and model availability at %s...", auth.base_url
     )
     try:
-        session = OpenAI(api_key=auth.api_key, base_url=auth.base_url)
-        available_models = {model.id for model in session.models.list()}
+        available_models = set(await list_models(auth.base_url, auth.api_key))
         if not available_models:
             raise RuntimeError("No model available on the API server.")
         logger.info("Found %s model(s) available:", len(available_models))
@@ -152,8 +151,10 @@ def create_bot(
     from pixi.bot.client import PixiClient
     from pixi.bot.tools import (
         FetchChannelHistoryTool,
-        create_knowledge_tools,
-        create_mediawiki_tools,
+        QueryKnowledgeTool,
+        QueryWikiContentTool,
+        SearchKnowledgeTool,
+        SearchWikiTool,
     )
     from pixi.caching import get_embedding_cache, get_media_cache
     from pixi.inference.chat import LlamaChatModel
@@ -278,16 +279,15 @@ def create_bot(
         for config in knowledge_bases:
             knowledge_base = KnowledgeBase.from_storage(config.name, knowledge_storage)
             bot.knowledge_bases.append(knowledge_base)
-            for tool in create_knowledge_tools(bot, config.name, knowledge_base):
-                bot.register_tool(tool)
+            bot.register_tool(SearchKnowledgeTool(config.name, knowledge_base))
+            bot.register_tool(QueryKnowledgeTool(bot, config.name, knowledge_base))
         if PixiFeatures.WikiSearch in features:
             from pixi.apis.wikimedia import AsyncWikimediaAPI
 
             for config in wikis:
-                for tool in create_mediawiki_tools(
-                    bot, config.name, AsyncWikimediaAPI(config.url)
-                ):
-                    bot.register_tool(tool)
+                wiki_api = AsyncWikimediaAPI(config.url)
+                bot.register_tool(SearchWikiTool(config.name, wiki_api))
+                bot.register_tool(QueryWikiContentTool(bot, config.name, wiki_api))
         if platform == Platform.DISCORD:
             bot.register_tool(FetchChannelHistoryTool())
 

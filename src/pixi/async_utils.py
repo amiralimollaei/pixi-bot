@@ -1,37 +1,7 @@
 import asyncio
 import logging
 from types import CoroutineType
-from typing import AsyncIterator, Awaitable, Callable, Generic, TypeVar
-
-T = TypeVar("T")
-
-
-class AsyncStream(AsyncIterator[T], Generic[T]):
-    def __init__(self, iterator: AsyncIterator[T]):
-        self._iterator = iterator
-        self._aiter = None
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.aclose()
-        return False
-
-    def __aiter__(self):
-        self._aiter = None
-        return self
-
-    async def __anext__(self) -> T:
-        if self._aiter is None:
-            self._aiter = self._iterator.__aiter__()
-        return await self._aiter.__anext__()
-
-    async def aclose(self):
-        iterator = self._aiter or self._iterator
-        close = getattr(iterator, "aclose", None)
-        if close is not None:
-            await close()
+from typing import Awaitable, Callable
 
 
 class AsyncScheduler:

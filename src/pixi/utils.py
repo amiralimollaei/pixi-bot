@@ -1,26 +1,5 @@
 from typing import Sequence
 
-# helpers
-
-
-def exists(value, allow_empty_string=False):
-    if value is None:
-        return False
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, (int, float)):
-        return value != 0
-
-    if isinstance(value, str):
-        return value != "" or (value == "" and allow_empty_string)
-
-    if isinstance(value, (list, tuple, dict)):
-        return len(value) != 0
-
-    return True
-
 
 # modified from https://stackoverflow.com/a/76636817
 def format_time(delta: float, min_count: int = 3, max_lenght: int = 2) -> str:

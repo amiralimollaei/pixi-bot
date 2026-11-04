@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncGenerator, Protocol
 
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.embedding import Embedding
 
 if TYPE_CHECKING:
@@ -46,7 +46,7 @@ ChatEvent = ContentDelta | ReasoningDelta | ToolCallDelta | ChatFinished
 class LanguageModelInferenceProvider(Protocol):
     def stream(
         self,
-        messages: list[ChatMessageMeta],
+        messages: list[ChatMessage],
         *,
         tools: list[ToolDefinition],
         timestamps: bool = True,

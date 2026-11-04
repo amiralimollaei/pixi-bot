@@ -16,38 +16,12 @@ def load_dotenv():
         dotenv.load_dotenv()
 
 
-def main():
+def build_parser():
     import argparse
-    import sys
 
-    if sys.argv[1:2] == ["import-knowledge"]:
-        from pixi.cli_import import main as import_knowledge
-
-        load_dotenv()
-        return import_knowledge(sys.argv[2:])
-
-    import logging
-    import math
-    import os
-
-    from pixi.cli_knowledge import (
-        add_storage_arguments,
-        open_storage,
-        resolve_storage_options,
-    )
-    from pixi.model.config import (
-        IdFilter,
-        KnowledgeBaseConfig,
-        LlamaEmbeddingModelConfig,
-        LlamaLanguageModelConfig,
-        MediaWikiConfig,
-        OpenAIAuthConfig,
-        OpenAIEmbeddingModelConfig,
-        OpenAILanguageModelConfig,
-        PixiFeatures,
-    )
+    from pixi.cli_knowledge import add_storage_arguments
+    from pixi.model.config import PixiFeatures
     from pixi.model.enums import Platform
-    from pixi.model.enums.ansi import AnsiColors
 
     parser = argparse.ArgumentParser(
         description="Run the Pixi bot, a multi-platform AI chatbot.",
@@ -340,7 +314,13 @@ def main():
         help="add the mediawiki wikis to use (space-separated), it should follow the format of `name=url`, Example: wikipedia=https://www.wikipedia.org/w/",
     )
 
-    args = parser.parse_args()
+    return parser
+
+
+def configure_logging(args):
+    import sys
+
+    from pixi.model.enums.ansi import AnsiColors
 
     COLORS = {  # (level_color, message_color)
         logging.DEBUG: (AnsiColors.BLUE, AnsiColors.BEIGE),
@@ -387,37 +367,33 @@ def main():
     # Set the logging level to WARNING to ignore INFO and DEBUG logs
     httpx_logger.setLevel(logging.WARNING)
 
-    # Load environment variables before resolving storage URLs and API credentials.
-    load_dotenv()
 
-    if args.messages_storage == "sql" and args.messages_storage_url is None:
-        args.messages_storage_url = os.getenv("DATABASE_URL")
-    elif args.messages_storage == "redis" and args.messages_storage_url is None:
-        args.messages_storage_url = os.getenv("REDIS_URL")
-    if args.messages_storage == "disk":
-        if args.messages_storage_url is not None:
-            parser.error(
-                "--messages-storage-url requires --messages-storage sql or redis."
-            )
-    elif not args.messages_storage_url:
-        parser.error(
-            "SQL/Redis storage requires --messages-storage-url or DATABASE_URL/REDIS_URL."
-        )
-    if args.redis_key_prefix is not None and args.messages_storage != "redis":
-        parser.error("--redis-key-prefix requires --messages-storage redis.")
-    if args.cache_storage == "sql" and args.cache_storage_url is None:
-        args.cache_storage_url = os.getenv("DATABASE_URL")
-    elif args.cache_storage == "redis" and args.cache_storage_url is None:
-        args.cache_storage_url = os.getenv("REDIS_URL")
-    if args.cache_storage == "disk":
-        if args.cache_storage_url is not None:
-            parser.error("--cache-storage-url requires --cache-storage sql or redis.")
-    elif not args.cache_storage_url:
-        parser.error(
-            "SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL."
-        )
-    if args.cache_redis_key_prefix is not None and args.cache_storage != "redis":
-        parser.error("--cache-redis-key-prefix requires --cache-storage redis.")
+def validate_configuration(args, parser):
+    import math
+
+    from pixi.cli_knowledge import resolve_storage_options
+    from pixi.cli_storage import resolve_storage_url
+
+    args.messages_storage_url = resolve_storage_url(
+        args.messages_storage,
+        args.messages_storage_url,
+        args.redis_key_prefix,
+        parser,
+        storage_option="--messages-storage",
+        url_option="--messages-storage-url",
+        prefix_option="--redis-key-prefix",
+        missing_message="SQL/Redis storage requires --messages-storage-url or DATABASE_URL/REDIS_URL.",
+    )
+    args.cache_storage_url = resolve_storage_url(
+        args.cache_storage,
+        args.cache_storage_url,
+        args.cache_redis_key_prefix,
+        parser,
+        storage_option="--cache-storage",
+        url_option="--cache-storage-url",
+        prefix_option="--cache-redis-key-prefix",
+        missing_message="SQL/Redis caching requires --cache-storage-url or DATABASE_URL/REDIS_URL.",
+    )
     resolve_storage_options(args, parser)
 
     local_options = (
@@ -476,6 +452,23 @@ def main():
             parser.error(
                 "--llama-embedding-idle-timeout must be a positive finite number."
             )
+
+
+def resolve_configuration(args):
+    import os
+
+    from pixi.model.config import (
+        IdFilter,
+        KnowledgeBaseConfig,
+        LlamaEmbeddingModelConfig,
+        LlamaLanguageModelConfig,
+        MediaWikiConfig,
+        OpenAIAuthConfig,
+        OpenAIEmbeddingModelConfig,
+        OpenAILanguageModelConfig,
+        PixiFeatures,
+    )
+    from pixi.model.enums import Platform
 
     api_models_selected = bool(args.model or args.helper_model or args.embedding_model)
     api_key = "NO_AUTH"
@@ -583,76 +576,50 @@ def main():
         else:
             environment_filter = IdFilter.blacklist(args.environment_ids)
 
+    return {
+        "platform": Platform[args.platform.upper()],
+        "auth": auth,
+        "model": model,
+        "helper_model": helper_model,
+        "embedding_model": embedding_model,
+        "features": features,
+        "knowledge_bases": knowledge_bases,
+        "wikis": wikis,
+        "environment_filter": environment_filter,
+        "directory": args.pixi_directory,
+        "instance_idle_timeout": args.instance_idle_timeout,
+    }
+
+
+def open_resources(args, parser, resources):
+    from pixi.cli_knowledge import open_storage
+    from pixi.cli_storage import open_cache_storage, open_messages_storage
+
+    return {
+        "messages_storage": open_messages_storage(args, parser, resources),
+        "cache_storage": open_cache_storage(args, parser, resources),
+        "knowledge_storage": open_storage(args, parser, resources),
+    }
+
+
+def main():
+    import sys
+
+    if sys.argv[1:2] == ["import-knowledge"]:
+        from pixi.cli_import import main as import_knowledge
+
+        load_dotenv()
+        return import_knowledge(sys.argv[2:])
+
+    parser = build_parser()
+    args = parser.parse_args()
+    configure_logging(args)
+    load_dotenv()
+    validate_configuration(args, parser)
+    config = resolve_configuration(args)
+
     from pixi.bootstrap import create_bot
 
     with ExitStack() as resources:
-        messages_storage = None
-        if args.messages_storage == "sql":
-            assert args.messages_storage_url is not None
-            try:
-                from pixi.storage.sql import MessagesSQLStorage
-            except ImportError:
-                parser.error(
-                    "SQL message storage requires pip install 'pixi-bot[sql]'."
-                )
-            messages_storage = MessagesSQLStorage(args.messages_storage_url)
-            resources.callback(messages_storage.close)
-        elif args.messages_storage == "redis":
-            assert args.messages_storage_url is not None
-            try:
-                from pixi.storage.redis import MessagesRedisStorage
-            except ImportError:
-                parser.error(
-                    "Redis message storage requires pip install 'pixi-bot[redis]'."
-                )
-            messages_storage = MessagesRedisStorage(
-                args.messages_storage_url,
-                key_prefix=args.redis_key_prefix
-                if args.redis_key_prefix is not None
-                else "pixi:messages:",
-            )
-            resources.callback(messages_storage.close)
-
-        cache_storage = None
-        if args.cache_storage == "sql":
-            assert args.cache_storage_url is not None
-            try:
-                from pixi.caching.sql import CacheSQLStorage
-            except ImportError:
-                parser.error("SQL caching requires pip install 'pixi-bot[sql]'.")
-            cache_storage = CacheSQLStorage(args.cache_storage_url)
-            resources.callback(cache_storage.close)
-        elif args.cache_storage == "redis":
-            assert args.cache_storage_url is not None
-            try:
-                from pixi.caching.redis import CacheRedisStorage
-            except ImportError:
-                parser.error("Redis caching requires pip install 'pixi-bot[redis]'.")
-            cache_storage = CacheRedisStorage(
-                args.cache_storage_url,
-                key_prefix=(
-                    args.cache_redis_key_prefix
-                    if args.cache_redis_key_prefix is not None
-                    else "pixi:cache:"
-                ),
-            )
-            resources.callback(cache_storage.close)
-
-        knowledge_storage = open_storage(args, parser, resources)
-
-        return create_bot(
-            platform=Platform[args.platform.upper()],
-            auth=auth,
-            model=model,
-            helper_model=helper_model,
-            embedding_model=embedding_model,
-            features=features,
-            knowledge_bases=knowledge_bases,
-            wikis=wikis,
-            environment_filter=environment_filter,
-            directory=args.pixi_directory,
-            instance_idle_timeout=args.instance_idle_timeout,
-            messages_storage=messages_storage,
-            cache_storage=cache_storage,
-            knowledge_storage=knowledge_storage,
-        ).run()
+        storage = open_resources(args, parser, resources)
+        return create_bot(**config, **storage).run()

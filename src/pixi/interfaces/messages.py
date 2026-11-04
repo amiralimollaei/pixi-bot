@@ -1,7 +1,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Protocol
 
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 
 
 class MessagesStorage(Protocol):
@@ -15,7 +15,7 @@ class MessagesStorage(Protocol):
         """Return the message count, or zero for an absent history."""
         ...
 
-    def append(self, key: str, messages: Sequence[ChatMessageMeta]) -> None:
+    def append(self, key: str, messages: Sequence[ChatMessage]) -> None:
         """Atomically append a batch; an empty batch creates an empty history."""
         ...
 
@@ -26,7 +26,7 @@ class MessagesStorage(Protocol):
         start: int = 0,
         stop: int | None = None,
         reverse: bool = False,
-    ) -> Iterator[ChatMessageMeta]:
+    ) -> Iterator[ChatMessage]:
         """Read [start, stop) lazily in either order using bounded pages.
 
         Bounds are nonnegative. An omitted stop captures the current count;

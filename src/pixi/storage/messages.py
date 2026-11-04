@@ -5,7 +5,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 
 
 class MessagesDiskStorage:
@@ -53,7 +53,7 @@ class MessagesDiskStorage:
             ).fetchone()
         return row[0] if row is not None else 0
 
-    def append(self, key: str, messages: Sequence[ChatMessageMeta]) -> None:
+    def append(self, key: str, messages: Sequence[ChatMessage]) -> None:
         payloads = [
             json.dumps(message.to_dict(), ensure_ascii=False) for message in messages
         ]
@@ -88,7 +88,7 @@ class MessagesDiskStorage:
         start: int = 0,
         stop: int | None = None,
         reverse: bool = False,
-    ) -> Iterator[ChatMessageMeta]:
+    ) -> Iterator[ChatMessage]:
         if start < 0 or (stop is not None and stop < 0):
             raise ValueError("History bounds must be nonnegative.")
         end = self.count(key) if stop is None else stop
@@ -108,7 +108,7 @@ class MessagesDiskStorage:
             else:
                 start = rows[-1][0] + 1
             for _, payload in rows:
-                yield ChatMessageMeta.from_dict(json.loads(payload))
+                yield ChatMessage.from_dict(json.loads(payload))
 
     def truncate(self, key: str, length: int) -> None:
         if length < 0:

@@ -5,10 +5,10 @@ import json
 import logging
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable
 
-from pixi.ai.chatting.callbacks import AsyncTool, PartialToolCallMeta, ToolContext
+from pixi.ai.chatting.callbacks import AsyncTool, InvocationContext, PartialToolCall
 from pixi.async_utils import CoroutineQueueExecutor
 from pixi.interfaces.models import ChatEvent, ToolCallDelta, ToolDefinition
-from pixi.model.chat import ChatMessageMeta, ToolCallMeta
+from pixi.model.chat import ChatMessage, ToolCall
 from pixi.model.enums import ChatRole
 
 
@@ -18,9 +18,9 @@ class AsyncToolManager:
         self.log_tool_calls = log_tool_calls
         self.verbose = verbose
         self.tools: dict[str, AsyncTool] = {}
-        self.on_tool: Callable[[ToolCallMeta], None] | None = None
+        self.on_tool: Callable[[ToolCall], None] | None = None
         self.tool_results_consumer: (
-            Callable[[list[ChatMessageMeta]], Awaitable[None] | None] | None
+            Callable[[list[ChatMessage]], Awaitable[None] | None] | None
         ) = None
 
     def add_tool(self, tool: AsyncTool):
@@ -33,11 +33,11 @@ class AsyncToolManager:
         ]
 
     async def get_tool_results(
-        self, calls: list[ToolCallMeta], context: ToolContext
-    ) -> list[ChatMessageMeta]:
+        self, calls: list[ToolCall], context: InvocationContext
+    ) -> list[ChatMessage]:
         if not calls:
             return []
-        results = [ChatMessageMeta(ChatRole.ASSISTANT, content=None, tool_calls=calls)]
+        results = [ChatMessage(ChatRole.ASSISTANT, content=None, tool_calls=calls)]
         log = self.logger.info if self.log_tool_calls else self.logger.debug
         for call in calls:
             tool = self.tools.get(call.name.lower())
@@ -58,22 +58,22 @@ class AsyncToolManager:
                     result = f"Tool error: {error}"
                 log("Call %s(%s): %s", call.name, arguments, result)
             results.append(
-                ChatMessageMeta(ChatRole.TOOL, content=result, tool_call_id=call.id)
+                ChatMessage(ChatRole.TOOL, content=result, tool_call_id=call.id)
             )
         return results
 
     async def stream_tool_calls(
         self,
         stream: AsyncIterator[ChatEvent],
-        tool_context: ToolContext,
+        tool_context: InvocationContext,
     ) -> AsyncGenerator[ChatEvent, None]:
         """Execute complete calls during streaming; publish results after exhaustion."""
-        partial: dict[int, PartialToolCallMeta] = {}
+        partial: dict[int, PartialToolCall] = {}
         queued: set[int] = set()
-        completed_results: list[list[ChatMessageMeta]] = []
+        completed_results: list[list[ChatMessage]] = []
         async with CoroutineQueueExecutor() as queue:
 
-            async def execute(call: ToolCallMeta):
+            async def execute(call: ToolCall):
                 if self.on_tool is not None:
                     self.on_tool(call)
                 completed_results.append(
@@ -87,7 +87,7 @@ class AsyncToolManager:
                         assert event.id is not None and event.name is not None, (
                             "Incomplete initial tool call"
                         )
-                        partial[event.index] = PartialToolCallMeta(
+                        partial[event.index] = PartialToolCall(
                             name=event.name,
                             index=event.index,
                             id=event.id,

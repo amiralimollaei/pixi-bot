@@ -3,17 +3,13 @@ from __future__ import annotations
 import array
 from typing import Any, AsyncGenerator
 
-from pixi.apis.openai.client import AsyncOpenAI
 from pixi.apis.openai.messages import MediaReader, serialize_message
+from pixi.apis.openai.transport import create_embeddings, stream_chat_completions
 from pixi.interfaces.models import (
     ChatEvent,
-    ChatFinished,
-    ContentDelta,
-    ReasoningDelta,
-    ToolCallDelta,
     ToolDefinition,
 )
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.config.language import LanguageModelConfig
 from pixi.model.config.llama import LlamaEmbeddingModelConfig
 from pixi.model.config.openai import (
@@ -32,11 +28,12 @@ class OpenAIChatModel:
     ):
         self.model = model
         self.media_cache = media_cache
-        self.client = AsyncOpenAI(api_key=auth.api_key, base_url=auth.base_url)
+        self.base_url = auth.base_url.rstrip("/")
+        self.api_key = auth.api_key
 
     async def stream(
         self,
-        messages: list[ChatMessageMeta],
+        messages: list[ChatMessage],
         *,
         tools: list[ToolDefinition],
         timestamps: bool = True,
@@ -68,28 +65,10 @@ class OpenAIChatModel:
                 )
                 for tool in tools
             ]
-        stream = await self.client.chat.completions.create(**payload)
+        stream = stream_chat_completions(self.base_url, self.api_key, payload)
         try:
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                delta = choice.delta
-                if delta.content:
-                    yield ContentDelta(delta.content)
-                if delta.reasoning_content:
-                    yield ReasoningDelta(delta.reasoning_content)
-                for call in delta.tool_calls or []:
-                    assert call.index is not None, "Tool call index is missing"
-                    function = call.function
-                    yield ToolCallDelta(
-                        index=call.index,
-                        id=call.id,
-                        name=function.name if function else None,
-                        arguments=function.arguments if function else None,
-                    )
-                if choice.finish_reason:
-                    yield ChatFinished(choice.finish_reason)
+            async for event in stream:
+                yield event
         finally:
             await stream.aclose()
 
@@ -101,7 +80,8 @@ class OpenAIEmbeddingModel:
         model: OpenAIEmbeddingModelConfig | LlamaEmbeddingModelConfig,
     ):
         self.model = model
-        self.client = AsyncOpenAI(api_key=auth.api_key, base_url=auth.base_url)
+        self.base_url = auth.base_url.rstrip("/")
+        self.api_key = auth.api_key
         if isinstance(model, OpenAIEmbeddingModelConfig):
             model_identity = (model.id, str(model.dimension))
         else:
@@ -122,8 +102,8 @@ class OpenAIEmbeddingModel:
         )
         if isinstance(self.model, OpenAIEmbeddingModelConfig):
             payload["dimensions"] = self.model.dimension
-        response = await self.client.embeddings.create(**payload)
+        embeddings = await create_embeddings(self.base_url, self.api_key, payload)
         return [
-            Embedding(text, len(item.embedding), array.array("f", item.embedding))
-            for text, item in zip(texts, response.data)
+            Embedding(text, len(embedding), array.array("f", embedding))
+            for text, embedding in zip(texts, embeddings)
         ]

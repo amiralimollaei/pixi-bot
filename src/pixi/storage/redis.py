@@ -3,7 +3,7 @@ from collections.abc import Iterator, Sequence
 
 from redis.client import Redis
 
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.storage.document import DocumentMeta
 from pixi.storage.knowledge_disk import _deserialize_document, _serialize_documents
 
@@ -50,7 +50,7 @@ class MessagesRedisStorage:
         length = self._client.llen(self._key(key))
         return max(0, length - 1)
 
-    def append(self, key: str, messages: Sequence[ChatMessageMeta]) -> None:
+    def append(self, key: str, messages: Sequence[ChatMessage]) -> None:
         # Serialize the complete batch before the atomic Redis mutation.
         serialized = [
             json.dumps(message.to_dict(), ensure_ascii=False) for message in messages
@@ -70,7 +70,7 @@ class MessagesRedisStorage:
         start: int = 0,
         stop: int | None = None,
         reverse: bool = False,
-    ) -> Iterator[ChatMessageMeta]:
+    ) -> Iterator[ChatMessage]:
         if start < 0 or (stop is not None and stop < 0):
             raise ValueError("message bounds must be nonnegative")
         key_name = self._key(key)
@@ -97,10 +97,10 @@ class MessagesRedisStorage:
                 page_start = page_end
 
     @staticmethod
-    def _decode_message(data: bytes | str) -> ChatMessageMeta:
+    def _decode_message(data: bytes | str) -> ChatMessage:
         if isinstance(data, bytes):
             data = data.decode("utf-8")
-        return ChatMessageMeta.from_dict(json.loads(data))
+        return ChatMessage.from_dict(json.loads(data))
 
     def truncate(self, key: str, length: int) -> None:
         if length < 0:

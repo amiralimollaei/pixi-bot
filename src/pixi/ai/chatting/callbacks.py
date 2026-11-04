@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
-from pixi.model.chat import ChatMessageMeta, ToolCallMeta
+from pixi.model.chat import ChatMessage, ToolCall
 
 if TYPE_CHECKING:
     from pixi.bot.conversations import AsyncChatbotInstance
@@ -12,14 +12,14 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class PartialToolCallMeta:
+class PartialToolCall:
     name: str
     index: int
     id: str
     arguments: Optional[str] = None
 
-    def to_tool_call(self) -> ToolCallMeta:
-        return ToolCallMeta(
+    def to_tool_call(self) -> ToolCall:
+        return ToolCall(
             name=self.name,
             index=self.index,
             id=self.id,
@@ -27,16 +27,9 @@ class PartialToolCallMeta:
         )
 
 
-@dataclass
-class ToolContext:
-    reference_message: Optional[ChatMessageMeta] = None
-    parent_instance: Optional[AsyncChatbotInstance] = None
-    platform_message: PlatformMessage | None = None
-
-
-@dataclass
-class ActionContext:
-    reference_message: Optional[ChatMessageMeta] = None
+@dataclass(frozen=True)
+class InvocationContext:
+    reference_message: Optional[ChatMessage] = None
     parent_instance: Optional[AsyncChatbotInstance] = None
     platform_message: PlatformMessage | None = None
 
@@ -59,11 +52,9 @@ class AsyncAction(Protocol):
     @property
     def is_visible(self) -> bool: ...
 
-    @classmethod
-    async def call(cls, context: ActionContext, value: str | None) -> None: ...
+    async def call(self, context: InvocationContext, value: str | None) -> None: ...
 
-    @classmethod
-    def should_register(cls, instance: "AsyncChatbotInstance") -> bool:
+    def should_register(self, instance: "AsyncChatbotInstance") -> bool:
         """Whether this action is available in the given chat."""
         return True
 
@@ -80,10 +71,10 @@ class AsyncTool(Protocol):
     @property
     def description(self) -> str | None: ...
 
-    @classmethod
-    async def call(cls, context: ToolContext, *args: Any, **kwargs: Any) -> Any: ...
+    async def call(
+        self, context: InvocationContext, *args: Any, **kwargs: Any
+    ) -> Any: ...
 
-    @classmethod
-    def should_register(cls, instance: "AsyncChatbotInstance") -> bool:
+    def should_register(self, instance: "AsyncChatbotInstance") -> bool:
         """Whether this tool is available in the given chat."""
         return True

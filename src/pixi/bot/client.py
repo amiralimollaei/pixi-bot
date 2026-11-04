@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine
 from uuid import uuid4
 
 from pixi.ai.agents import AgentBase
+from pixi.ai.chatting.actions import ActionOutcome
 from pixi.ai.chatting.callbacks import AsyncAction, AsyncTool
 from pixi.ai.chatting.persona import AssistantPersona
 from pixi.ai.rag.client import AsyncRAGClient
@@ -14,7 +15,7 @@ from pixi.bot.conversations import AsyncChatbotInstance, ChatbotInstanceRegistry
 from pixi.interfaces.messages import MessagesStorage
 from pixi.interfaces.models import LanguageModelInferenceProvider
 from pixi.interfaces.platform import PlatformMessage, PlatformProvider
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.config import (
     IdFilter,
     LanguageModelConfig,
@@ -221,9 +222,12 @@ class PixiClient:
     async def pixi_resp(
         self,
         instance: AsyncChatbotInstance,
-        reference_message: ChatMessageMeta,
+        reference_message: ChatMessage,
         platform_message: PlatformMessage,
+        outcome: ActionOutcome | None = None,
     ):
+        if outcome is None:
+            outcome = ActionOutcome()
         if self._stopping:
             return False, True
         message = platform_message
@@ -246,6 +250,7 @@ class PixiClient:
                     channel_id=str(channel_id),
                     reference_message=reference_message,
                     platform_message=platform_message,
+                    outcome=outcome,
                 )
                 while not task.done():
                     try:
@@ -270,23 +275,25 @@ class PixiClient:
             )
             raise
 
-        return instance.action_manager.is_visible_actions_taken(), cancelled
+        return outcome.has_visible_actions, cancelled
 
     async def pixi_resp_retry(
         self,
         instance: AsyncChatbotInstance,
-        chat_message: ChatMessageMeta,
+        chat_message: ChatMessage,
         platform_message: PlatformMessage,
         num_retry: int = 10,
     ):
         """Retry requests while each failed stream discards its own uncommitted history delta."""
         instance.add_message(chat_message)
         for i in range(num_retry):
+            outcome = ActionOutcome()
             try:
                 responded, cancelled = await self.pixi_resp(
                     instance,
                     reference_message=chat_message,
                     platform_message=platform_message,
+                    outcome=outcome,
                 )
                 if responded or cancelled:
                     return True
@@ -303,7 +310,7 @@ class PixiClient:
                     f"There was an error in `pixi_resp`, Retrying ({i}/{num_retry})"
                 )
                 # stop repeating shit, please
-                if instance.action_manager.is_visible_actions_taken():
+                if outcome.has_visible_actions:
                     return
 
     def is_environment_allowed(self, identifier: str) -> bool:
@@ -414,7 +421,7 @@ class PixiClient:
             metadata = dict(from_user=asdict(message.author))
             await self.__add_reply_metadata(instance, metadata, message)
 
-            def rearrage_predicate(msg: ChatMessageMeta):
+            def rearrage_predicate(msg: ChatMessage):
                 msg_channel_id = msg.channel_id
                 current_channel_id = message.environment.chat_id
 
@@ -425,8 +432,8 @@ class PixiClient:
             instance.update_realtime(self.platform_provider.get_realtime_data(message))
             instance.set_rearrange_predicate(rearrage_predicate)
 
-            # convert everything into `ChatMessageMeta`
-            chat_message = ChatMessageMeta(
+            # convert everything into `ChatMessage`
+            chat_message = ChatMessage(
                 role=ChatRole.USER,
                 content=message_text,
                 metadata=metadata,

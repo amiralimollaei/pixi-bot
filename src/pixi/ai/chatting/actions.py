@@ -4,8 +4,15 @@ import logging
 from collections.abc import AsyncIterator, Iterator
 from typing import Callable, Generator
 
-from pixi.ai.chatting.callbacks import ActionContext, AsyncAction
+from pixi.ai.chatting.callbacks import AsyncAction, InvocationContext
 from pixi.async_utils import CoroutineQueueExecutor
+
+
+class ActionOutcome:
+    """Visible actions completed during one consumption."""
+
+    def __init__(self):
+        self.has_visible_actions = False
 
 
 class AsyncActionManager:
@@ -13,7 +20,6 @@ class AsyncActionManager:
         self.logger = logging.getLogger(type(self).__name__)
         self.actions: dict[str, AsyncAction] = {}
         self.on_action: Callable[[str, str | None], None] | None = None
-        self.visible_actions_taken = 0
 
     def add_action(self, action: AsyncAction):
         self.actions[action.name.lower()] = action
@@ -24,7 +30,9 @@ class AsyncActionManager:
             for action in self.actions.values()
         )
 
-    async def execute_action(self, action_str: str, action_context: ActionContext):
+    async def execute_action(
+        self, action_str: str, action_context: InvocationContext, outcome: ActionOutcome
+    ):
         text = action_str[1:-1]
         separator_idx = text.index(":") if ":" in text else None
         if separator_idx:
@@ -33,34 +41,42 @@ class AsyncActionManager:
         else:
             name = text
             value = None
-        if self.on_action:
-            self.on_action(name, value)
         action = self.actions.get(name.lower())
         if action is None:
+            if self.on_action:
+                self.on_action(name, value)
             self.logger.error(
                 'Model tried to use the action "%s", which is not implemented.', name
             )
             return
-        await self._invoke_action(action, action_context, value)
+        await self.invoke_action(action, action_context, value, outcome, name=name)
 
-    async def _invoke_action(
-        self, action: AsyncAction, action_context: ActionContext, value: str | None
+    async def invoke_action(
+        self,
+        action: AsyncAction,
+        action_context: InvocationContext,
+        value: str | None,
+        outcome: ActionOutcome | None = None,
+        *,
+        name: str | None = None,
     ):
+        if self.on_action:
+            self.on_action(name if name is not None else action.name, value)
         try:
             await action.call(action_context, value)
-            if action.is_visible:
-                self.visible_actions_taken += 1
+            if action.is_visible and outcome is not None:
+                outcome.has_visible_actions = True
         except Exception:
             self.logger.exception("an error occurred during action")
 
     async def consume(
         self,
         stream: Iterator | Generator | AsyncIterator,
-        action_context: ActionContext,
+        action_context: InvocationContext,
+        outcome: ActionOutcome,
     ):
         depth = 0
         action = ""
-        self.visible_actions_taken = 0
         async with CoroutineQueueExecutor() as queue:
 
             async def process(char):
@@ -75,7 +91,7 @@ class AsyncActionManager:
                     depth -= 1
                     if depth == 0:
                         await queue.add_to_queue(
-                            self.execute_action(action, action_context)
+                            self.execute_action(action, action_context, outcome)
                         )
                         action = ""
                 return None
@@ -90,6 +106,3 @@ class AsyncActionManager:
                     result = await process(c)
                     if result is not None:
                         yield result
-
-    def is_visible_actions_taken(self) -> bool:
-        return self.visible_actions_taken > 0

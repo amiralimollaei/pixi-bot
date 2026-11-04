@@ -21,7 +21,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
-from pixi.model.chat import ChatMessageMeta
+from pixi.model.chat import ChatMessage
 from pixi.model.storage.document import DocumentMeta
 from pixi.storage.knowledge_disk import _deserialize_document, _serialize_documents
 
@@ -125,7 +125,7 @@ class MessagesSQLStorage:
             ).scalar_one_or_none()
         return 0 if length is None else length
 
-    def append(self, key: str, messages: Sequence[ChatMessageMeta]) -> None:
+    def append(self, key: str, messages: Sequence[ChatMessage]) -> None:
         payloads = [
             json.dumps(message.to_dict(), ensure_ascii=False) for message in messages
         ]
@@ -162,7 +162,7 @@ class MessagesSQLStorage:
         start: int = 0,
         stop: int | None = None,
         reverse: bool = False,
-    ) -> Iterator[ChatMessageMeta]:
+    ) -> Iterator[ChatMessage]:
         if start < 0 or (stop is not None and stop < 0):
             raise ValueError("message bounds must be nonnegative")
 
@@ -190,7 +190,7 @@ class MessagesSQLStorage:
                     break
                 cursor = rows[-1].position
                 for row in rows:
-                    yield ChatMessageMeta.from_dict(json.loads(row.payload))
+                    yield ChatMessage.from_dict(json.loads(row.payload))
         else:
             cursor = start
             while cursor < stop:
@@ -209,7 +209,7 @@ class MessagesSQLStorage:
                     break
                 cursor = rows[-1].position + 1
                 for row in rows:
-                    yield ChatMessageMeta.from_dict(json.loads(row.payload))
+                    yield ChatMessage.from_dict(json.loads(row.payload))
 
     def truncate(self, key: str, length: int) -> None:
         if length < 0:

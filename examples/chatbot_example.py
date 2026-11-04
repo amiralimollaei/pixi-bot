@@ -18,13 +18,11 @@ class ConsoleSendAction:
     label = "LLM"
     is_visible = True
 
-    @classmethod
-    def should_register(cls, instance):
+    def should_register(self, instance):
         return True
 
-    @classmethod
-    async def call(cls, context, value):
-        print(f"{cls.label}: {value}")
+    async def call(self, context, value):
+        print(f"{self.label}: {value}")
 
 
 class ConsoleNoteAction(ConsoleSendAction):
