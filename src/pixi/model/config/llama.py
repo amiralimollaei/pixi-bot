@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from pixi.model.config.language import LanguageModelConfig
+
 
 @dataclass(frozen=True)
 class LlamaServerConfig:
@@ -18,7 +20,7 @@ class LlamaEmbeddingModelConfig(LlamaServerConfig):
 
 
 @dataclass(frozen=True)
-class LlamaLanguageModelConfig(LlamaServerConfig):
+class LlamaLanguageModelConfig(LlamaServerConfig, LanguageModelConfig):
     max_context: int = 16192
 
     def __post_init__(self) -> None:

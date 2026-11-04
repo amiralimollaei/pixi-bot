@@ -1,6 +1,7 @@
 from pixi.model.config.features import PixiFeatures
 from pixi.model.config.filter import IdFilter
 from pixi.model.config.knowledge import KnowledgeBaseConfig
+from pixi.model.config.language import LanguageModelConfig
 from pixi.model.config.llama import (
     LlamaEmbeddingModelConfig,
     LlamaLanguageModelConfig,

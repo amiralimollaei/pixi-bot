@@ -14,11 +14,11 @@ from pixi.interfaces.models import (
     ToolDefinition,
 )
 from pixi.model.chat import ChatMessageMeta
-from pixi.model.config.llama import LlamaEmbeddingModelConfig, LlamaLanguageModelConfig
+from pixi.model.config.language import LanguageModelConfig
+from pixi.model.config.llama import LlamaEmbeddingModelConfig
 from pixi.model.config.openai import (
     OpenAIAuthConfig,
     OpenAIEmbeddingModelConfig,
-    OpenAILanguageModelConfig,
 )
 from pixi.model.embedding import Embedding
 
@@ -27,7 +27,7 @@ class OpenAIChatModel:
     def __init__(
         self,
         auth: OpenAIAuthConfig,
-        model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
+        model: LanguageModelConfig,
         media_cache: MediaReader | None = None,
     ):
         self.model = model

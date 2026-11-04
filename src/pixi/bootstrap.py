@@ -17,6 +17,7 @@ from pixi.interfaces.platform import PlatformMessage, PlatformProvider
 from pixi.model.config import (
     IdFilter,
     KnowledgeBaseConfig,
+    LanguageModelConfig,
     LlamaEmbeddingModelConfig,
     LlamaLanguageModelConfig,
     MediaWikiConfig,
@@ -116,8 +117,8 @@ def create_bot(
     platform: Platform,
     *,
     auth: OpenAIAuthConfig,
-    model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
-    helper_model: OpenAILanguageModelConfig | LlamaLanguageModelConfig | None = None,
+    model: LanguageModelConfig,
+    helper_model: LanguageModelConfig | None = None,
     embedding_model: OpenAIEmbeddingModelConfig
     | LlamaEmbeddingModelConfig
     | None = None,
@@ -180,30 +181,34 @@ def create_bot(
     helper_model = helper_model or model
     native_models = []
     if isinstance(model, LlamaLanguageModelConfig):
-        chat_model = LlamaChatModel(model, media_cache=media_cache)
-        native_models.append(chat_model)
+        language_model_inference = LlamaChatModel(model, media_cache=media_cache)
+        native_models.append(language_model_inference)
     else:
-        chat_model = OpenAIChatModel(auth, model, media_cache=media_cache)
+        language_model_inference = OpenAIChatModel(auth, model, media_cache=media_cache)
     if helper_model is model:
-        helper_chat_model = chat_model
+        helper_language_model_inference = language_model_inference
     elif isinstance(helper_model, LlamaLanguageModelConfig):
-        helper_chat_model = LlamaChatModel(helper_model, media_cache=media_cache)
-        native_models.append(helper_chat_model)
+        helper_language_model_inference = LlamaChatModel(
+            helper_model, media_cache=media_cache
+        )
+        native_models.append(helper_language_model_inference)
     else:
-        helper_chat_model = OpenAIChatModel(auth, helper_model, media_cache=media_cache)
+        helper_language_model_inference = OpenAIChatModel(
+            auth, helper_model, media_cache=media_cache
+        )
     rag_factory = None
     close_embeddings = None
     if embedding_model is not None:
         if isinstance(embedding_model, LlamaEmbeddingModelConfig):
             from pixi.inference.embeddings import LlamaEmbeddingModel
 
-            embedding_provider = LlamaEmbeddingModel(embedding_model)
-            close_embeddings = embedding_provider.aclose
+            embedding_model_inference = LlamaEmbeddingModel(embedding_model)
+            close_embeddings = embedding_model_inference.aclose
         else:
-            embedding_provider = OpenAIEmbeddingModel(auth, embedding_model)
+            embedding_model_inference = OpenAIEmbeddingModel(auth, embedding_model)
         embedding_cache = get_embedding_cache(
             storage=cache_storage,
-            embedding_model=embedding_provider,
+            embedding_model_inference=embedding_model_inference,
         )
 
         def create_rag_client():
@@ -213,9 +218,9 @@ def create_bot(
 
     bot = PixiClient(
         platform_provider,
-        chat_model=chat_model,
+        language_model_inference=language_model_inference,
         model=model,
-        helper_chat_model=helper_chat_model,
+        helper_language_model_inference=helper_language_model_inference,
         helper_model=helper_model,
         embedding_model=embedding_model,
         rag_factory=rag_factory,

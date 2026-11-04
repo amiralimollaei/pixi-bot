@@ -43,7 +43,7 @@ class ChatFinished:
 ChatEvent = ContentDelta | ReasoningDelta | ToolCallDelta | ChatFinished
 
 
-class ChatModel(Protocol):
+class LanguageModelInferenceProvider(Protocol):
     def stream(
         self,
         messages: list[ChatMessageMeta],
@@ -66,7 +66,7 @@ class EmbeddingCache(Protocol):
     def read(self, hash: bytes) -> InMemoryCache | None: ...
 
 
-class EmbeddingModel(Protocol):
+class EmbeddingModelInferenceProvder(Protocol):
     @property
     def cache_identity(self) -> tuple[str, ...]:
         """Stable backend, model, and output settings that determine its vectors."""

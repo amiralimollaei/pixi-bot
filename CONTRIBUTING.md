@@ -200,7 +200,7 @@ from pixi.storage.messages import MessagesDiskStorage
 storage = MessagesDiskStorage("./histories")
 agent = RetrievalAgent(
     storage=storage, history_key="agent:research",
-    context=["Current reference material"], chat_model=chat_model, model=model,
+    context=["Current reference material"], language_model_inference=provider, model=model,
 )
 await agent.execute_query("What is relevant?", temporal=False)
 ```
@@ -217,7 +217,8 @@ For Python integrations, construct `CacheDiskStorage(directory)` from
 `CacheRedisStorage(url, key_prefix=...)` from `pixi.caching.redis`.
 Pass it to `create_bot(cache_storage=storage)` to use it throughout the bot.
 Individual consumers can use `get_media_cache(storage=storage)` and
-`get_embedding_cache(storage=storage, embedding_model=backend)`.
+`get_embedding_cache(storage=storage, embedding_model_inference=backend)`.
+Embedding backends implement the `EmbeddingModelInferenceProvder` protocol.
 Call `close()` on injected SQL/Redis storage when finished; the caller owns
 those connections. CLI-created connections are closed automatically.
 Disk remains the default under the configured root's `cache/` directory.
@@ -228,8 +229,12 @@ from `pixi.inference.embeddings` for native llama.cpp inference, and call its
 `aclose()` when finished. Production bootstrap registers that method as a bot
 shutdown hook, so stopping the bot reaps its local `llama-server` process.
 
+`OpenAILanguageModelConfig` and `LlamaLanguageModelConfig` inherit
+`LanguageModelConfig`, which exposes the shared `id` and `max_context` attributes
+used by chat clients.
+
 `LlamaChatModel(LlamaLanguageModelConfig(...))` in `pixi.inference.chat` implements
-the same `ChatModel` streaming protocol as the API adapter, including content,
+the same `LanguageModelInferenceProvider` streaming protocol as the API adapter, including content,
 reasoning, and tool-call events. It and `LlamaEmbeddingModel` inherit the shared
 `LlamaServer` lifecycle ABC in `pixi.inference.server`: process startup, readiness,
 request serialization, idle shutdown, cancellation-safe cleanup, and explicit

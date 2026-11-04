@@ -61,7 +61,7 @@ async def main():
     instance = AsyncChatbotInstance(
         "console",
         "example",
-        chat_model=OpenAIChatModel(auth, model),
+        language_model_inference=OpenAIChatModel(auth, model),
         model=model,
         store=MessagesDiskStorage(PixiPaths.messages()),
         persona=persona,

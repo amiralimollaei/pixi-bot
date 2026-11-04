@@ -12,15 +12,14 @@ from pixi.ai.chatting.persona import AssistantPersona
 from pixi.ai.rag.client import AsyncRAGClient
 from pixi.bot.conversations import AsyncChatbotInstance, ChatbotInstanceRegistry
 from pixi.interfaces.messages import MessagesStorage
-from pixi.interfaces.models import ChatModel
+from pixi.interfaces.models import LanguageModelInferenceProvider
 from pixi.interfaces.platform import PlatformMessage, PlatformProvider
 from pixi.model.chat import ChatMessageMeta
 from pixi.model.config import (
     IdFilter,
+    LanguageModelConfig,
     LlamaEmbeddingModelConfig,
-    LlamaLanguageModelConfig,
     OpenAIEmbeddingModelConfig,
-    OpenAILanguageModelConfig,
     PixiFeatures,
 )
 from pixi.model.enums import ChatRole
@@ -46,16 +45,14 @@ class PixiClient:
         self,
         platform_provider: PlatformProvider,
         *,
-        chat_model: ChatModel,
-        model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
+        language_model_inference: LanguageModelInferenceProvider,
+        model: LanguageModelConfig,
         messages_storage: MessagesStorage,
         persona: AssistantPersona,
         system_prompt_template: str,
         examples: str,
-        helper_chat_model: ChatModel | None = None,
-        helper_model: OpenAILanguageModelConfig
-        | LlamaLanguageModelConfig
-        | None = None,
+        helper_language_model_inference: LanguageModelInferenceProvider | None = None,
+        helper_model: LanguageModelConfig | None = None,
         embedding_model: OpenAIEmbeddingModelConfig
         | LlamaEmbeddingModelConfig
         | None = None,
@@ -71,9 +68,11 @@ class PixiClient:
             )
 
         self.platform_provider = platform_provider
-        self.chat_model = chat_model
+        self.language_model_inference = language_model_inference
         self.model = model
-        self.helper_chat_model = helper_chat_model or chat_model
+        self.helper_language_model_inference = (
+            helper_language_model_inference or language_model_inference
+        )
         self.helper_model = helper_model or model
         self.embedding_model = embedding_model
         self._rag_factory = rag_factory
@@ -88,7 +87,7 @@ class PixiClient:
         self.shutdown_hooks: list[Callable[..., Coroutine[Any, Any, Any]]] = []
         self.knowledge_bases = []
         self.messages_storage = messages_storage
-        self.conversations = ChatbotInstanceRegistry(
+        self.chatbot_instance_registry = ChatbotInstanceRegistry(
             platform_provider.platform,
             self,
             store=messages_storage,
@@ -103,7 +102,7 @@ class PixiClient:
     async def _evict_idle_instances(self):
         while True:
             await asyncio.sleep(min(60.0, self.instance_idle_timeout))
-            self.conversations.evict_idle(self.instance_idle_timeout)
+            self.chatbot_instance_registry.evict_idle(self.instance_idle_timeout)
 
     def register_tool(self, tool: AsyncTool):
         if PixiFeatures.ToolCalling not in self.features:
@@ -112,17 +111,17 @@ class PixiClient:
             )
             return
 
-        self.conversations.register_tool(tool)
+        self.chatbot_instance_registry.register_tool(tool)
 
     def register_action(self, action: AsyncAction):
-        self.conversations.register_action(action)
+        self.chatbot_instance_registry.register_action(action)
 
     def create_agent_instance[A: AgentBase](
         self, agent_cls: type[A], **agent_kwargs
     ) -> A:
         history_key = agent_kwargs.pop("history_key", str(uuid4()))
         return agent_cls(
-            chat_model=self.helper_chat_model,
+            language_model_inference=self.helper_language_model_inference,
             model=self.helper_model,
             storage=self.messages_storage,
             history_key=history_key,
@@ -186,10 +185,12 @@ class PixiClient:
 
             environment_id = message.environment_id
 
-            instance = self.conversations.get(environment_id, or_create=False)
+            instance = self.chatbot_instance_registry.get(
+                environment_id, or_create=False
+            )
             if instance:
                 instance.cancel_all_schedules()
-            self.conversations.remove(environment_id)
+            self.chatbot_instance_registry.remove(environment_id)
             self.logger.info(
                 f"the conversation in {environment_id} has been reset, all scheduled tasks cancelled."
             )
@@ -209,14 +210,13 @@ class PixiClient:
         )
 
     def get_chatbot_instance(self, identifier: str) -> AsyncChatbotInstance:
-        instance = self.conversations.get(
+        return self.chatbot_instance_registry.get(
             identifier,
-            chat_model=self.chat_model,
+            or_create=True,
+            language_model_inference=self.language_model_inference,
             model=self.model,
             log_tool_calls=PixiFeatures.ToolLogging in self.features,
         )
-        assert instance
-        return instance
 
     async def pixi_resp(
         self,
@@ -500,7 +500,7 @@ class PixiClient:
                 task.cancel()
             await asyncio.gather(*background_tasks, return_exceptions=True)
             try:
-                await self.conversations.aclose()
+                await self.chatbot_instance_registry.aclose()
             finally:
                 try:
                     await self.platform_provider.close_async()

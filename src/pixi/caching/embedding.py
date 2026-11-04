@@ -5,23 +5,28 @@ import json
 
 from pixi.caching import CacheSystem, InMemoryCache, StoredCacheSystem
 from pixi.interfaces.caching import CacheStorage
-from pixi.interfaces.models import EmbeddingModel
+from pixi.interfaces.models import EmbeddingModelInferenceProvder
 
 
 class EmbeddingCache(StoredCacheSystem, CacheSystem[str]):
     """Persist text embeddings in a namespace specific to the embedding model."""
 
-    def __init__(self, storage: CacheStorage, *, embedding_model: EmbeddingModel):
+    def __init__(
+        self,
+        storage: CacheStorage,
+        *,
+        embedding_model_inference: EmbeddingModelInferenceProvder,
+    ):
         identity = json.dumps(
-            embedding_model.cache_identity, ensure_ascii=False
+            embedding_model_inference.cache_identity, ensure_ascii=False
         ).encode("utf-8")
         namespace = hashlib.sha256(identity).hexdigest()
         super().__init__(storage, namespace=f"embeddings/{namespace}")
-        self.embedding_model = embedding_model
+        self.embedding_model_inference = embedding_model_inference
 
     async def compute_cache(self, text: str, **metadata) -> InMemoryCache:
         """Compute a text embedding without looking up or persisting a cache entry."""
-        embeddings = await self.embedding_model.embed([text])
+        embeddings = await self.embedding_model_inference.embed([text])
         return InMemoryCache(
             buffer=embeddings[0].vec.tobytes(),
             metadata=metadata or None,

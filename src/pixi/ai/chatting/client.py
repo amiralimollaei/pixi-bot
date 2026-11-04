@@ -14,12 +14,12 @@ from pixi.interfaces.messages import MessagesStorage
 from pixi.interfaces.models import (
     ChatEvent,
     ChatFinished,
-    ChatModel,
     ContentDelta,
+    LanguageModelInferenceProvider,
     ReasoningDelta,
 )
 from pixi.model.chat import ChatMessageMeta
-from pixi.model.config import LlamaLanguageModelConfig, OpenAILanguageModelConfig
+from pixi.model.config import LanguageModelConfig
 from pixi.model.enums import ChatRole
 
 
@@ -50,15 +50,15 @@ class AsyncChatClient:
         *,
         storage: MessagesStorage,
         history_key: str,
-        chat_model: ChatModel,
-        model: OpenAILanguageModelConfig | LlamaLanguageModelConfig,
+        language_model_inference: LanguageModelInferenceProvider,
+        model: LanguageModelConfig,
         log_tool_calls: bool = False,
         enforce_system_header: bool = False,
     ):
         self.logger = logging.getLogger(type(self).__name__)
         self.storage = storage
         self.history_key = history_key
-        self.chat_model = chat_model
+        self.language_model_inference = language_model_inference
         self.model = model
         self.log_tool_calls = log_tool_calls
         self.enforce_system_header = enforce_system_header
@@ -282,7 +282,7 @@ class AsyncChatClient:
         enable_timestamps: bool = True,
         system_prompt: str | ChatMessageMeta | None = None,
     ) -> AsyncGenerator[ChatEvent, None]:
-        return self.chat_model.stream(
+        return self.language_model_inference.stream(
             self.get_portable_messages(system_prompt),
             tools=self.tool_manager.get_tools_schema(),
             timestamps=enable_timestamps,

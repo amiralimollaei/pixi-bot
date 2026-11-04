@@ -1,5 +1,7 @@
 import dataclasses
 
+from pixi.model.config.language import LanguageModelConfig
+
 
 @dataclasses.dataclass(frozen=True)
 class OpenAIAuthConfig:
@@ -8,7 +10,7 @@ class OpenAIAuthConfig:
 
 
 @dataclasses.dataclass(frozen=True)
-class OpenAILanguageModelConfig:
+class OpenAILanguageModelConfig(LanguageModelConfig):
     id: str
     max_context: int
 

@@ -12,7 +12,7 @@ from pixi.interfaces.caching import CacheStorage
 
 if TYPE_CHECKING:
     from pixi.caching.embedding import EmbeddingCache
-    from pixi.interfaces.models import EmbeddingModel
+    from pixi.interfaces.models import EmbeddingModelInferenceProvder
 
 
 class UnsupportedMediaException(Exception):
@@ -213,7 +213,7 @@ def get_media_cache(*, storage: CacheStorage | None = None) -> MediaCacheProvide
 
 def get_embedding_cache(
     *,
-    embedding_model: EmbeddingModel,
+    embedding_model_inference: EmbeddingModelInferenceProvder,
     storage: CacheStorage | None = None,
 ) -> EmbeddingCache:
     """Cache embeddings from an explicitly owned model."""
@@ -225,4 +225,4 @@ def get_embedding_cache(
 
         storage = CacheDiskStorage(PixiPaths.cache())
 
-    return EmbeddingCache(storage, embedding_model=embedding_model)
+    return EmbeddingCache(storage, embedding_model_inference=embedding_model_inference)

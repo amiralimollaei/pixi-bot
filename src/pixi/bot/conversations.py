@@ -6,7 +6,7 @@ import logging
 import time
 from collections import defaultdict
 from contextlib import aclosing, contextmanager
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable, Literal, overload
 
 from pixi.ai.chatting.actions import AsyncActionManager
 from pixi.ai.chatting.callbacks import (
@@ -309,6 +309,16 @@ class ChatbotInstanceRegistry:
         )
         self.instances[instance.id] = instance
         return instance
+
+    @overload
+    def get(
+        self, identifier: str, or_create: Literal[True] = True, **kwargs
+    ) -> AsyncChatbotInstance: ...
+
+    @overload
+    def get(
+        self, identifier: str, or_create: Literal[False] = False, **kwargs
+    ) -> AsyncChatbotInstance | None: ...
 
     def get(
         self, identifier: str, or_create: bool = True, **kwargs
