@@ -1,37 +1,4 @@
-import logging
 from typing import Sequence
-
-
-# helpers
-
-
-def exists(value, allow_empty_string=False):
-    if value is None:
-        return False
-
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, (int, float)):
-        return value != 0
-
-    if isinstance(value, str):
-        return value != "" or (value == "" and allow_empty_string)
-
-    if isinstance(value, (list, tuple, dict)):
-        return len(value) != 0
-
-    return True
-
-
-def load_dotenv():
-    # load environment variables
-    try:
-        import dotenv  # pyright: ignore[reportMissingImports]
-    except ImportError:
-        logging.warning("dotenv is not installed, install it using `pip install dotenv`")
-    else:
-        dotenv.load_dotenv()
 
 
 # modified from https://stackoverflow.com/a/76636817
@@ -91,7 +58,9 @@ def clean_dict(d: dict):
         elif isinstance(v, Sequence):
             if len(v) == 0:
                 continue
-            if not isinstance(v, str):  # other than strings, we every other sequence is a nested dynamic type
+            if not isinstance(
+                v, str
+            ):  # other than strings, we every other sequence is a nested dynamic type
                 v = [(clean_dict(e) if isinstance(e, dict) else e) for e in v]
         final_dict[k] = v
     return final_dict

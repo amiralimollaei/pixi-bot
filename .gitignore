@@ -192,8 +192,8 @@ addons/
 # vscode
 .vscode/
 
-# cline
-.clinerules/
+# AI
+AGENTS.md
 
 # mprofile
 mprofile_*.dat

@@ -1,7 +1,15 @@
-from .dataset import DatasetConfig
-from .features import PixiFeatures
-from .filter import IdFilter
-from .mediawiki import MediaWikiConfig
-from .news import NewsConfig
-from .openai import (OpenAIAuthConfig, OpenAIEmbeddingModelConfig,
-                     OpenAILanguageModelConfig)
+from pixi.model.config.features import PixiFeatures
+from pixi.model.config.filter import IdFilter
+from pixi.model.config.knowledge import KnowledgeBaseConfig
+from pixi.model.config.language import LanguageModelConfig
+from pixi.model.config.llama import (
+    LlamaEmbeddingModelConfig,
+    LlamaLanguageModelConfig,
+    LlamaServerConfig,
+)
+from pixi.model.config.mediawiki import MediaWikiConfig
+from pixi.model.config.openai import (
+    OpenAIAuthConfig,
+    OpenAIEmbeddingModelConfig,
+    OpenAILanguageModelConfig,
+)

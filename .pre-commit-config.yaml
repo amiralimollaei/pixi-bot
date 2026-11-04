@@ -1,0 +1,19 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Ruff lint and imports
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: Ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: pyright
+        name: Pyright
+        entry: uv run --all-extras pyright
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false

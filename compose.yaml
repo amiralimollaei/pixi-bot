@@ -1,6 +1,31 @@
 services:
   pixi:
-    build: .
+    build:
+      context: .
+      args:
+        PIXI_EXTRAS: ${PIXI_EXTRAS-telegram discord media kiwix sql redis}
     env_file:
       - .env
     container_name: pixi-bot
+
+  telegram:
+    profiles: ["telegram"]
+    build:
+      context: .
+      args:
+        PIXI_EXTRAS: telegram kiwix sql redis
+    env_file:
+      - .env
+    environment:
+      PIXI_PLATFORM: telegram
+
+  discord:
+    profiles: ["discord"]
+    build:
+      context: .
+      args:
+        PIXI_EXTRAS: discord kiwix sql redis
+    env_file:
+      - .env
+    environment:
+      PIXI_PLATFORM: discord
